@@ -19,7 +19,7 @@
  */
 import prisma from '../config/database.js';
 import { randomBytes } from 'crypto';
-import { hashPin } from '../config/auth.js';
+import { hashPin, comparePin } from '../config/auth.js';
 
 /**
  * Generate a 6-character alphanumeric salon code (no ambiguous chars)
@@ -46,7 +46,7 @@ async function bootstrapSalon(salonName, licenseKey) {
   var existing = await prisma.salon.findFirst();
 
   if (existing) {
-    // Ensure owner_pin_hash exists (migration from old model)
+    // Ensure owner_pin_hash exists AND is valid (migration from old model)
     if (!existing.owner_pin_hash) {
       console.log('[Bootstrap] Salon exists but no owner PIN — setting default (0000)...');
       await prisma.salon.update({
@@ -54,6 +54,20 @@ async function bootstrapSalon(salonName, licenseKey) {
         data: { owner_pin_hash: hashPin('0000') }
       });
       console.log('[Bootstrap] Default owner PIN set on salon record');
+    } else {
+      // Verify the stored hash actually works — rehash if corrupt
+      var ownerPinValid = comparePin('0000', existing.owner_pin_hash);
+      console.log('[Bootstrap] Owner PIN hash check (0000):', ownerPinValid ? 'VALID' : 'FAILED');
+      if (!ownerPinValid) {
+        console.log('[Bootstrap] Owner PIN hash appears corrupt — rehashing default (0000)...');
+        var freshHash = hashPin('0000');
+        console.log('[Bootstrap] New hash generated, length:', freshHash.length);
+        await prisma.salon.update({
+          where: { id: existing.id },
+          data: { owner_pin_hash: freshHash }
+        });
+        console.log('[Bootstrap] ✅ Owner PIN rehashed successfully');
+      }
     }
 
     // Check if default data needs seeding

@@ -22,8 +22,8 @@ import { debugLog } from '../../lib/debugLog';
 import DebugLabel from '../../components/debug/DebugLabel';
 
 var MAX_PIN = 8;
-var MIN_CHECK = 2;
-var DEBOUNCE_MS = 300; // wait 300ms after last keystroke before checking
+var MIN_CHECK = 4;
+var DEBOUNCE_MS = 250; // wait 250ms after last keystroke before checking
 
 export default function LoginScreen({ onLogin, onStaleStation }) {
   var [digits, setDigits] = useState('');
@@ -68,6 +68,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
 
       login(pinToCheck).then(function(data) {
         setChecking(false);
+        console.log('[LoginScreen] PIN check response:', JSON.stringify(data));
         if (data.token && data.staff) {
           loggedIn.current = true;
           debugLog('AUTH', 'Login success: ' + data.staff.display_name);
@@ -75,6 +76,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
         }
       }).catch(function(err) {
         setChecking(false);
+        console.log('[LoginScreen] PIN check error:', err.status, err.message, 'for PIN length:', pinToCheck.length);
 
         // Stale salon_id detection
         if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
@@ -96,11 +98,14 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
           return;
         }
 
-        // Invalid PIN at max length — show error and reset
-        if (pinToCheck.length >= MAX_PIN) {
+        // Invalid PIN — show error and reset
+        if (pinToCheck.length >= MIN_CHECK) {
           setError('Invalid PIN');
-          setDigits('');
-          lastChecked.current = '';
+          setTimeout(function() {
+            setDigits('');
+            lastChecked.current = '';
+            setError('');
+          }, 1200);
         }
         // Otherwise silently wait for more digits
       });

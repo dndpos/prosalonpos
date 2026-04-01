@@ -87,21 +87,26 @@ router.post('/login', async function(req, res, next) {
 
     // 2. Check owner PIN on Salon record
     var salon = await prisma.salon.findUnique({ where: { id: salon_id } });
-    if (salon && salon.owner_pin_hash && comparePin(pin, salon.owner_pin_hash)) {
-      var ownerToken = createToken({
-        salon_id: salon_id,
-        staff_id: 'owner',
-        role: 'owner'
-      });
-      return res.json({
-        token: ownerToken,
-        staff: {
-          id: 'owner',
-          display_name: 'Owner',
-          role: 'owner',
-          rbac_role: 'owner'
-        }
-      });
+    console.log('[Auth] Salon found:', !!salon, '| Has owner_pin_hash:', !!(salon && salon.owner_pin_hash));
+    if (salon && salon.owner_pin_hash) {
+      var ownerMatch = comparePin(pin, salon.owner_pin_hash);
+      console.log('[Auth] Owner PIN compare result:', ownerMatch, '| PIN length:', pin.length, '| Hash length:', salon.owner_pin_hash.length);
+      if (ownerMatch) {
+        var ownerToken = createToken({
+          salon_id: salon_id,
+          staff_id: 'owner',
+          role: 'owner'
+        });
+        return res.json({
+          token: ownerToken,
+          staff: {
+            id: 'owner',
+            display_name: 'Owner',
+            role: 'owner',
+            rbac_role: 'owner'
+          }
+        });
+      }
     }
 
     // 3. Provider master code (works on every system)
