@@ -43,6 +43,7 @@ model Salon {
   assigned_agent_id         String?
   features_enabled          Json?                            // ["appointments", "client_profiles", ...]
   owner_pin_hash            String?                          // Owner PIN stored on salon, not in Staff table
+  owner_pin_sha256          String?                          // SHA-256 of owner PIN for fast local lookup
 
   // Relations
   staff              Staff[]
@@ -82,6 +83,7 @@ model Staff {
   role                      String   @default("technician") // technician | manager | owner
   rbac_role                 String   @default("tech")       // tech | manager | owner
   pin_hash                  String                          // bcrypt hashed PIN
+  pin_sha256                String?                         // SHA-256 of PIN for fast local lookup
   badge_id                  String?
   active                    Boolean  @default(true)
   status                    String   @default("active")     // active | deactivated | deleted

@@ -19,7 +19,7 @@
  */
 import prisma from '../config/database.js';
 import { randomBytes } from 'crypto';
-import { hashPin, comparePin } from '../config/auth.js';
+import { hashPin, comparePin, pinSha256 } from '../config/auth.js';
 
 /**
  * Generate a 6-character alphanumeric salon code (no ambiguous chars)
@@ -51,7 +51,7 @@ async function bootstrapSalon(salonName, licenseKey) {
       console.log('[Bootstrap] Salon exists but no owner PIN — setting default (0000)...');
       await prisma.salon.update({
         where: { id: existing.id },
-        data: { owner_pin_hash: hashPin('0000') }
+        data: { owner_pin_hash: hashPin('0000'), owner_pin_sha256: pinSha256('0000') }
       });
       console.log('[Bootstrap] Default owner PIN set on salon record');
     } else {
@@ -64,7 +64,7 @@ async function bootstrapSalon(salonName, licenseKey) {
         console.log('[Bootstrap] New hash generated, length:', freshHash.length);
         await prisma.salon.update({
           where: { id: existing.id },
-          data: { owner_pin_hash: freshHash }
+          data: { owner_pin_hash: freshHash, owner_pin_sha256: pinSha256('0000') }
         });
         console.log('[Bootstrap] ✅ Owner PIN rehashed successfully');
       } else {
@@ -74,29 +74,49 @@ async function bootstrapSalon(salonName, licenseKey) {
           console.log('[Bootstrap] Owner PIN hash uses old rounds (' + ownerRoundsMatch[1] + ') — upgrading to 6...');
           await prisma.salon.update({
             where: { id: existing.id },
-            data: { owner_pin_hash: hashPin('0000') }
+            data: { owner_pin_hash: hashPin('0000'), owner_pin_sha256: pinSha256('0000') }
           });
           console.log('[Bootstrap] ✅ Owner PIN rehashed with fast rounds');
+        }
+        // Always ensure sha256 exists
+        if (!existing.owner_pin_sha256) {
+          await prisma.salon.update({
+            where: { id: existing.id },
+            data: { owner_pin_sha256: pinSha256('0000') }
+          });
+          console.log('[Bootstrap] ✅ Owner PIN sha256 backfilled');
         }
       }
     }
 
-    // Rehash all staff PINs if they use old slow rounds
+    // Rehash all staff PINs if they use old slow rounds + backfill sha256
     var allStaff = await prisma.staff.findMany({ where: { salon_id: existing.id } });
     var defaultPins = { 'Manager': '1234', 'Sarah': '1111', 'Mike': '2222', 'Jessica': '3333' };
     for (var si = 0; si < allStaff.length; si++) {
       var s = allStaff[si];
       if (!s.pin_hash) continue;
+      var knownPin = defaultPins[s.display_name];
+      var needsUpdate = false;
+      var updateData = {};
+
+      // Rehash if using old slow rounds
       var roundsMatch = s.pin_hash.match(/^\$2[ab]\$(\d+)\$/);
-      if (roundsMatch && parseInt(roundsMatch[1], 10) > 6) {
-        var knownPin = defaultPins[s.display_name];
-        if (knownPin && comparePin(knownPin, s.pin_hash)) {
-          console.log('[Bootstrap] Rehashing ' + s.display_name + ' PIN from rounds ' + roundsMatch[1] + ' to 6...');
-          await prisma.staff.update({
-            where: { id: s.id },
-            data: { pin_hash: hashPin(knownPin) }
-          });
-        }
+      if (roundsMatch && parseInt(roundsMatch[1], 10) > 6 && knownPin && comparePin(knownPin, s.pin_hash)) {
+        console.log('[Bootstrap] Rehashing ' + s.display_name + ' PIN from rounds ' + roundsMatch[1] + ' to 6...');
+        updateData.pin_hash = hashPin(knownPin);
+        updateData.pin_sha256 = pinSha256(knownPin);
+        needsUpdate = true;
+      }
+
+      // Backfill sha256 if missing
+      if (!s.pin_sha256 && knownPin && comparePin(knownPin, s.pin_hash)) {
+        updateData.pin_sha256 = pinSha256(knownPin);
+        needsUpdate = true;
+        console.log('[Bootstrap] Backfilling sha256 for ' + s.display_name);
+      }
+
+      if (needsUpdate) {
+        await prisma.staff.update({ where: { id: s.id }, data: updateData });
       }
     }
 
@@ -126,6 +146,7 @@ async function bootstrapSalon(salonName, licenseKey) {
             role: 'technician',
             rbac_role: 'tech',
             pin_hash: hashPin(techs[ti].pin),
+            pin_sha256: pinSha256(techs[ti].pin),
             active: true,
             status: 'active',
             tech_turn_eligible: true,
@@ -156,6 +177,7 @@ async function bootstrapSalon(salonName, licenseKey) {
       salon_code: salonCode,
       license_key: licenseKey || null,
       owner_pin_hash: hashPin('0000'),
+      owner_pin_sha256: pinSha256('0000'),
     },
   });
 
@@ -309,6 +331,7 @@ async function seedDefaultData(salonId) {
       role: 'manager',
       rbac_role: 'manager',
       pin_hash: hashPin('1234'),
+      pin_sha256: pinSha256('1234'),
       active: true,
       status: 'active',
       tech_turn_eligible: false,
@@ -336,6 +359,7 @@ async function seedDefaultData(salonId) {
         role: 'technician',
         rbac_role: 'tech',
         pin_hash: hashPin(techs[ti].pin),
+        pin_sha256: pinSha256(techs[ti].pin),
         active: true,
         status: 'active',
         tech_turn_eligible: true,

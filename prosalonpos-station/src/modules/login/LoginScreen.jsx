@@ -1,108 +1,131 @@
 /**
  * LoginScreen.jsx — Staff Login (PIN Entry)
- * Session 93 | Toast/Simphony style: silent background check, instant recognition
+ * Session 94 | Instant local PIN verification
  *
- * Flow:
- *   1. Station is paired (salon_id in localStorage)
- *   2. No JWT token exists → LoginScreen appears
- *   3. Staff taps digits — they appear INSTANTLY
- *   4. After 4+ digits, a silent background check fires IMMEDIATELY (no debounce)
- *   5. If PIN matches — instant login, no spinner, no delay
- *   6. If PIN doesn't match — nothing happens (silent), keep typing
- *   7. Only at MAX_PIN (8 digits) with no match → show "Invalid PIN", auto-clear
+ * How it works:
+ *   1. Station boots → fetches PIN lookup table from server (one-time)
+ *   2. Table maps SHA-256(pin) → staff info
+ *   3. On every keystroke, we SHA-256 the current input and look it up locally
+ *   4. Match found → instant green flash + login (JWT fetched in background)
+ *   5. No match → after 1.5s of no typing, show "Invalid PIN" and clear
+ *   6. Exact match only — "00000" will NOT match "0000"
  *
  * Rules:
- *   - div onClick only (no <button>/<input> — kiosk virtual keyboard safety)
+ *   - div onClick only (no button/input — kiosk virtual keyboard safety)
  *   - Calculator layout: 7-8-9 top
  *   - Max PIN length: 8 digits
- *   - No submit button — auto-recognizes correct PIN silently
- *   - No spinner, no "checking" indicator — feels like nothing is happening
+ *   - No submit button — auto-recognizes correct PIN
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { login, getPairedSalonName, isBackendAvailable, checkBackend, unpairStation } from '../../lib/apiClient';
+import { login, getPairedSalonId, getPairedSalonName, isBackendAvailable, checkBackend, unpairStation } from '../../lib/apiClient';
 import { debugLog } from '../../lib/debugLog';
 import DebugLabel from '../../components/debug/DebugLabel';
 
 var MAX_PIN = 8;
 var MIN_CHECK = 4;
+var INVALID_DELAY = 1500; // ms of no typing before showing "Invalid PIN"
+
+// SHA-256 hash using Web Crypto API (instant, built into every browser)
+async function sha256(str) {
+  var buf = new TextEncoder().encode(str);
+  var hash = await crypto.subtle.digest('SHA-256', buf);
+  var arr = Array.from(new Uint8Array(hash));
+  return arr.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
 
 export default function LoginScreen({ onLogin, onStaleStation }) {
   var [digits, setDigits] = useState('');
   var [error, setError] = useState('');
+  var [matched, setMatched] = useState(false);
   var [backendUp, setBackendUp] = useState(null);
+  var [pinTable, setPinTable] = useState(null);
   var salonName = getPairedSalonName() || 'Your Salon';
   var loggedIn = useRef(false);
-  var checkingPins = useRef({}); // track which PINs are currently in-flight
+  var invalidTimer = useRef(null);
 
-  // Check backend on mount
+  // Load PIN table on mount (one-time)
   useEffect(function() {
-    checkBackend().then(function(up) { setBackendUp(up); });
+    checkBackend().then(function(up) {
+      setBackendUp(up);
+      if (!up) return;
+      var salonId = getPairedSalonId();
+      if (!salonId) return;
+      var base = window.location.port === '5173' ? 'http://localhost:3001' : window.location.origin;
+      fetch(base + '/api/v1/auth/pin-table/' + salonId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.pinTable) {
+            setPinTable(data.pinTable);
+            console.log('[PIN] Loaded pin table with', Object.keys(data.pinTable).length, 'entries');
+          }
+        })
+        .catch(function(err) {
+          console.log('[PIN] Failed to load pin table:', err.message);
+        });
+    });
   }, []);
 
-  // Silent fire-and-forget check — runs on every digit change at 4+
+  // ── Check PIN locally on every keystroke ──
   useEffect(function() {
+    if (invalidTimer.current) {
+      clearTimeout(invalidTimer.current);
+      invalidTimer.current = null;
+    }
+
     if (digits.length < MIN_CHECK) return;
     if (loggedIn.current) return;
-    if (backendUp === false) return;
+    if (!pinTable) return;
 
-    // Already checking this exact PIN? Skip
-    if (checkingPins.current[digits]) return;
-    checkingPins.current[digits] = true;
-
-    var pinToCheck = digits;
-
-    login(pinToCheck).then(function(data) {
-      delete checkingPins.current[pinToCheck];
-      console.log('[PIN] Response for "' + pinToCheck + '":', JSON.stringify(data));
-      console.log('[PIN] loggedIn.current:', loggedIn.current);
-      console.log('[PIN] data.token exists:', !!data.token);
-      console.log('[PIN] data.staff exists:', !!data.staff);
-      console.log('[PIN] onLogin exists:', !!onLogin);
+    sha256(digits).then(function(hash) {
       if (loggedIn.current) return;
 
-      if (data.token && data.staff) {
+      var entry = pinTable[hash];
+      if (entry) {
+        // MATCH — instant visual feedback
         loggedIn.current = true;
-        debugLog('AUTH', 'Login success: ' + data.staff.display_name);
-        console.log('[PIN] ✅ Calling onLogin NOW');
-        if (onLogin) onLogin(data);
-      } else {
-        console.log('[PIN] ❌ Missing token or staff in response');
-      }
-    }).catch(function(err) {
-      delete checkingPins.current[pinToCheck];
-      if (loggedIn.current) return;
+        setMatched(true);
+        setError('');
+        debugLog('AUTH', 'Local PIN match: ' + entry.display_name);
 
-      // Stale salon_id detection
-      if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
-        debugLog('AUTH', 'Stale salon_id — clearing pairing');
-        unpairStation();
-        if (onStaleStation) {
-          onStaleStation();
-        } else {
-          setError('Station data is outdated. Redirecting...');
-          setTimeout(function() { window.location.reload(); }, 1500);
-        }
+        // Fetch JWT in background
+        login(digits).then(function(data) {
+          if (data.token && data.staff) {
+            onLogin(data);
+          } else {
+            loggedIn.current = false;
+            setMatched(false);
+            setError('Server error — try again');
+            setTimeout(function() { setError(''); setDigits(''); }, 1200);
+          }
+        }).catch(function(err) {
+          if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
+            unpairStation();
+            if (onStaleStation) { onStaleStation(); }
+            else { window.location.reload(); }
+            return;
+          }
+          loggedIn.current = false;
+          setMatched(false);
+          setError('Server error — try again');
+          setTimeout(function() { setError(''); setDigits(''); }, 1200);
+        });
         return;
       }
 
-      // Network error
-      if ((err.message || '').indexOf('fetch') >= 0 || (err.message || '').indexOf('Failed') >= 0 || (err.message || '').indexOf('NetworkError') >= 0) {
-        setError('Cannot connect to server');
-        setBackendUp(false);
-        return;
-      }
-
-      // At max length and still no match — show error, auto-clear
-      if (pinToCheck.length >= MAX_PIN) {
+      // No match at this length
+      if (digits.length >= MAX_PIN) {
         setError('Invalid PIN');
-        setTimeout(function() {
-          setDigits('');
-          setError('');
-        }, 1200);
+        setTimeout(function() { setDigits(''); setError(''); }, 1000);
+      } else {
+        invalidTimer.current = setTimeout(function() {
+          if (!loggedIn.current) {
+            setError('Invalid PIN');
+            setTimeout(function() { setDigits(''); setError(''); }, 1000);
+          }
+        }, INVALID_DELAY);
       }
-      // Otherwise: total silence. No error, no feedback. Just wait for more digits.
     });
-  }, [digits]);
+  }, [digits, pinTable]);
 
   var handleDigit = useCallback(function(d) {
     if (loggedIn.current) return;
@@ -125,7 +148,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
     setDigits('');
   }, []);
 
-  // Keyboard listener — type PIN with physical keyboard
+  // Keyboard listener
   useEffect(function() {
     function onKey(e) {
       if (e.key >= '0' && e.key <= '9') {
@@ -140,13 +163,20 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
     return function() { window.removeEventListener('keydown', onKey); };
   }, [handleDigit, handleBackspace]);
 
-  // Numpad digits (calculator layout: 7-8-9 top)
+  useEffect(function() {
+    return function() {
+      if (invalidTimer.current) clearTimeout(invalidTimer.current);
+    };
+  }, []);
+
   var rows = [
     ['7', '8', '9'],
     ['4', '5', '6'],
     ['1', '2', '3'],
     ['C', '0', '⌫'],
   ];
+
+  var dotBorderColor = matched ? '#22C55E' : (digits.length > 0 ? '#3B82F6' : '#2A3A50');
 
   return (
     <div style={{
@@ -156,13 +186,11 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
       color: '#E2E8F0', alignItems: 'center', justifyContent: 'center',
       flexDirection: 'column',
     }}>
-      {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: 32 }}>
         <div style={{ fontSize: 28, fontWeight: 700, color: '#fff', letterSpacing: -0.5 }}>Pro Salon POS</div>
         <div style={{ fontSize: 14, color: '#94A3B8', marginTop: 4 }}>{salonName}</div>
       </div>
 
-      {/* Card */}
       <div style={{
         background: '#1A2736', borderRadius: 16, padding: '28px 32px 24px',
         border: '1px solid #2A3A50', boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
@@ -173,31 +201,27 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
           Enter your PIN to sign in
         </div>
 
-        {/* PIN dots display */}
         <div style={{
           height: 48, borderRadius: 8, margin: '0 auto 16px',
           maxWidth: 260,
-          background: '#0F1923', border: '1px solid ' + (digits.length > 0 ? '#3B82F6' : '#2A3A50'),
+          background: matched ? '#0A2E1A' : '#0F1923',
+          border: '2px solid ' + dotBorderColor,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'border-color 150ms',
+          transition: 'border-color 150ms, background 150ms',
         }}>
           {digits.length === 0
             ? <span style={{ color: '#64748B', fontSize: 14 }}>Enter PIN</span>
-            : <span style={{ fontSize: 22, letterSpacing: 6, color: '#E2E8F0', fontWeight: 600 }}>
+            : <span style={{ fontSize: 22, letterSpacing: 6, color: matched ? '#22C55E' : '#E2E8F0', fontWeight: 600 }}>
                 {digits.split('').map(function() { return '●'; }).join('')}
               </span>
           }
         </div>
 
-        {/* Error message — only shows at max PIN length */}
-        {error && (
-          <div style={{
-            color: '#EF4444', fontSize: 13, marginBottom: 12,
-            minHeight: 18,
-          }}>{error}</div>
-        )}
+        <div style={{ height: 22, marginBottom: 8, fontSize: 13, fontWeight: 500 }}>
+          {error && <span style={{ color: '#EF4444' }}>{error}</span>}
+          {matched && <span style={{ color: '#22C55E' }}>✓ Welcome</span>}
+        </div>
 
-        {/* Server down warning */}
         {backendUp === false && (
           <div style={{
             background: '#7F1D1D', border: '1px solid #991B1B', borderRadius: 8,
@@ -227,7 +251,10 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
           </div>
         )}
 
-        {/* Numpad */}
+        {backendUp === true && !pinTable && (
+          <div style={{ fontSize: 12, color: '#64748B', marginBottom: 8 }}>Loading...</div>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {rows.map(function(row, ri) {
             return (
@@ -267,7 +294,6 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
         </div>
       </div>
 
-      {/* Version */}
       <div style={{ fontSize: 11, color: '#475569', marginTop: 24 }}>
         ProSalonPOS v1.0 · Phase 2
       </div>

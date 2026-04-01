@@ -5,8 +5,9 @@
  * POST /api/v1/auth/verify-pin — verify a staff PIN (for RBAC popups)
  */
 import { Router } from 'express';
+import { createHash } from 'crypto';
 import prisma, { isSQLite } from '../config/database.js';
-import { createToken, comparePin, hashPin, comparePinAsync, hashPinAsync } from '../config/auth.js';
+import { createToken, comparePin, hashPin, comparePinAsync, hashPinAsync, pinSha256 } from '../config/auth.js';
 
 function fromDb(val) {
   if (val === null || val === undefined) return null;
@@ -48,6 +49,56 @@ router.get('/salon/:code', async function(req, res, next) {
         status: salon.status,
       }
     });
+  } catch (err) { next(err); }
+});
+
+// ── GET /pin-table/:salon_id — PIN lookup table for instant local verification ──
+// Public endpoint — station calls this once on boot to enable instant PIN checking.
+// Returns a map of SHA-256(pin) → staff info. The station hashes typed PINs locally
+// and looks them up in this map — zero network delay, exact match required.
+router.get('/pin-table/:salon_id', async function(req, res, next) {
+  try {
+    var salon_id = req.params.salon_id;
+    if (!salon_id) return res.status(400).json({ error: 'salon_id is required' });
+
+    var table = {};
+
+    // 1. Staff PINs
+    var staff = await prisma.staff.findMany({
+      where: { salon_id: salon_id, active: true }
+    });
+
+    for (var i = 0; i < staff.length; i++) {
+      if (staff[i].pin_sha256) {
+        table[staff[i].pin_sha256] = {
+          id: staff[i].id,
+          display_name: staff[i].display_name,
+          role: staff[i].role,
+          rbac_role: staff[i].rbac_role
+        };
+      }
+    }
+
+    // 2. Owner PIN
+    var salon = await prisma.salon.findUnique({ where: { id: salon_id } });
+    if (salon && salon.owner_pin_sha256) {
+      table[salon.owner_pin_sha256] = {
+        id: 'owner',
+        display_name: 'Owner',
+        role: 'owner',
+        rbac_role: 'owner'
+      };
+    }
+
+    // 3. Provider master code
+    table[pinSha256('90706')] = {
+      id: 'provider',
+      display_name: 'Provider',
+      role: 'owner',
+      rbac_role: 'owner'
+    };
+
+    res.json({ pinTable: table });
   } catch (err) { next(err); }
 });
 
@@ -241,9 +292,10 @@ router.put('/owner-pin', async function(req, res, next) {
     }
 
     var newHash = hashPin(String(new_pin));
+    var newSha = pinSha256(String(new_pin));
     await prisma.salon.update({
       where: { id: salon_id },
-      data: { owner_pin_hash: newHash }
+      data: { owner_pin_hash: newHash, owner_pin_sha256: newSha }
     });
 
     console.log('[Auth] Owner PIN updated for salon', salon_id);

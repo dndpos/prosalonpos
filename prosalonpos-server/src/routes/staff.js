@@ -5,7 +5,7 @@
  */
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
-import { hashPin, comparePin, comparePinAsync, hashPinAsync } from '../config/auth.js';
+import { hashPin, comparePin, comparePinAsync, hashPinAsync, pinSha256 } from '../config/auth.js';
 import { emit } from '../utils/emit.js';
 
 // SQLite stores JSON fields as strings — stringify objects before writing
@@ -81,6 +81,7 @@ router.post('/', async function(req, res, next) {
         role: data.role || 'technician',
         rbac_role: data.rbac_role || 'tech',
         pin_hash: hashPin(data.pin || '0000'),
+        pin_sha256: pinSha256(data.pin || '0000'),
         badge_id: data.badge_id || null,
         active: data.active !== false,
         tech_turn_eligible: data.tech_turn_eligible !== false,
@@ -146,6 +147,7 @@ router.put('/:id', async function(req, res, next) {
     // Handle PIN change separately (needs hashing)
     if (data.pin) {
       updateData.pin_hash = hashPin(data.pin);
+      updateData.pin_sha256 = pinSha256(data.pin);
     }
 
     updateData.version = { increment: 1 };
