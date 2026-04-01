@@ -64,6 +64,41 @@ async function bootstrapSalon(salonName, licenseKey) {
       return { salon: existing, created: false, seeded: true };
     }
 
+    // Check if technicians exist — seed some if not (S92 fix)
+    var techCount = await prisma.staff.count({ where: { salon_id: existing.id, role: 'technician' } });
+    if (techCount === 0) {
+      console.log('[Bootstrap] No technicians found — seeding default techs...');
+      var techs = [
+        { name: 'Sarah',   pin: '1111', pos: 2 },
+        { name: 'Mike',    pin: '2222', pos: 3 },
+        { name: 'Jessica', pin: '3333', pos: 4 },
+      ];
+      for (var ti = 0; ti < techs.length; ti++) {
+        await prisma.staff.create({
+          data: {
+            salon_id: existing.id,
+            display_name: techs[ti].name,
+            legal_name: techs[ti].name,
+            role: 'technician',
+            rbac_role: 'tech',
+            pin_hash: hashPin(techs[ti].pin),
+            active: true,
+            status: 'active',
+            tech_turn_eligible: true,
+            pay_type: 'commission',
+            commission_pct: 60,
+            daily_guarantee_cents: 0,
+            payout_check_pct: 100,
+            payout_bonus_pct: 0,
+            permissions: {},
+            position: techs[ti].pos,
+          }
+        });
+      }
+      console.log('[Bootstrap]   ✅ 3 default technicians seeded');
+      return { salon: existing, created: false, seeded: true };
+    }
+
     return { salon: existing, created: false, seeded: false };
   }
 
@@ -221,7 +256,7 @@ async function seedDefaultData(salonId) {
   });
   console.log('[Bootstrap]   ✅ Salon settings');
 
-  // ── Default Staff Member (so someone can log in) ──
+  // ── Default Staff: 1 manager + 3 technicians ──
   await prisma.staff.create({
     data: {
       salon_id: salonId,
@@ -242,7 +277,35 @@ async function seedDefaultData(salonId) {
       position: 1,
     }
   });
-  console.log('[Bootstrap]   ✅ Default manager (PIN: 1234)');
+
+  var techs = [
+    { name: 'Sarah',   pin: '1111', pos: 2 },
+    { name: 'Mike',    pin: '2222', pos: 3 },
+    { name: 'Jessica', pin: '3333', pos: 4 },
+  ];
+  for (var ti = 0; ti < techs.length; ti++) {
+    await prisma.staff.create({
+      data: {
+        salon_id: salonId,
+        display_name: techs[ti].name,
+        legal_name: techs[ti].name,
+        role: 'technician',
+        rbac_role: 'tech',
+        pin_hash: hashPin(techs[ti].pin),
+        active: true,
+        status: 'active',
+        tech_turn_eligible: true,
+        pay_type: 'commission',
+        commission_pct: 60,
+        daily_guarantee_cents: 0,
+        payout_check_pct: 100,
+        payout_bonus_pct: 0,
+        permissions: {},
+        position: techs[ti].pos,
+      }
+    });
+  }
+  console.log('[Bootstrap]   ✅ Default manager (PIN: 1234) + 3 technicians');
 
   console.log('[Bootstrap] ✅ Default data seeded successfully');
 }

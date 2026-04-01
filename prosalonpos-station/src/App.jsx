@@ -421,6 +421,10 @@ export default function App() {
     });
   }, [storeServices, storeCategories]);
 
+  // ── TD-102: Grid layout persistence refs (must be before effects that use them) ──
+  var gridInitialized = useRef(false);
+  var _restoringGrid = useRef(false);
+
   useEffect(function() {
     setSalonSettings(function(prev) { return Object.assign({}, prev, storeSettings); });
     // If backend provided a start page and we're still on the initial page, switch to it
@@ -437,6 +441,7 @@ export default function App() {
     // ── TD-102: Restore grid layout from saved settings ──
     if (storeSettings && storeSettings.grid_layout) {
       var gl = storeSettings.grid_layout;
+      _restoringGrid.current = true; // guard: prevent save-loop
       if (gl.catSlots) setSvcCatSlots(gl.catSlots);
       if (gl.svcSlots) setSvcSlots(gl.svcSlots);
       if (gl.empSlots) setEmpSlots(gl.empSlots);
@@ -446,17 +451,20 @@ export default function App() {
       if (gl.empColumns !== undefined) setEmpColumns(gl.empColumns);
       if (gl.empRows !== undefined) setEmpRows(gl.empRows);
       console.log('[App] Grid layout restored from settings');
+      // Release guard after React processes the state updates
+      setTimeout(function() { _restoringGrid.current = false; }, 500);
     }
   }, [storeSettings]);
 
   // ── TD-102: Auto-save grid layout when it changes ──
-  var gridInitialized = useRef(false);
   useEffect(function() {
     // Skip first render — don't overwrite saved layout with defaults
     if (!gridInitialized.current) {
       gridInitialized.current = true;
       return;
     }
+    // Skip if we're in the middle of a restore (prevents infinite loop)
+    if (_restoringGrid.current) return;
     gridPersist.save({
       catSlots: svcCatSlots,
       svcSlots: svcSlots,
