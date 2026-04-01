@@ -64,17 +64,24 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
     onCancel();
   }
 
-  // ── Auto-check PIN after each digit from 2+ ──
+  // ── Auto-check PIN after each digit from 2+ (debounced, non-blocking) ──
+  var pinDebounce = useRef(null);
+  var lastPinChecked = useRef('');
   useEffect(function() {
     if (digits.length < 2) return;
     if (checking) return;
-    submitPin(digits);
+    if (lastPinChecked.current === digits) return;
+    clearTimeout(pinDebounce.current);
+    pinDebounce.current = setTimeout(function() {
+      lastPinChecked.current = digits;
+      submitPin(digits);
+    }, 250);
+    return function() { clearTimeout(pinDebounce.current); };
   }, [digits]);
 
   if (!show) return null;
 
   function handleDigit(d) {
-    if (checking) return;
     handleDigitDirect(d);
   }
 

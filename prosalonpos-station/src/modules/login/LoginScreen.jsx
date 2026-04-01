@@ -1,20 +1,20 @@
 /**
  * LoginScreen.jsx — Staff Login (PIN Entry)
- * Session 87 | Variable PIN length, auto-check
+ * Session 92 | Non-blocking auto-check: digits appear instantly, API checks in background
  *
  * Flow:
  *   1. Station is paired (salon_id in localStorage)
  *   2. No JWT token exists → LoginScreen appears
- *   3. Staff enters PIN via div-based numpad (no <input> for kiosk safety)
- *   4. After each digit from 2+, app calls POST /auth/login
+ *   3. Staff enters PIN via div-based numpad — digits appear INSTANTLY (no waiting)
+ *   4. After a short debounce (300ms), background API check fires
  *   5. As soon as a match is found, login proceeds automatically
- *   6. apiClient stores the JWT → all stores can now fetch real data
+ *   6. Typing is NEVER blocked — API calls happen in parallel
  *
  * Rules:
  *   - div onClick only (no <button>/<input> — kiosk virtual keyboard safety)
  *   - Calculator layout: 7-8-9 top
  *   - Max PIN length: 8 digits
- *   - No submit button needed — auto-checks each digit
+ *   - No submit button needed — auto-checks silently
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { login, getPairedSalonName, isBackendAvailable, checkBackend, unpairStation } from '../../lib/apiClient';
@@ -23,6 +23,7 @@ import DebugLabel from '../../components/debug/DebugLabel';
 
 var MAX_PIN = 8;
 var MIN_CHECK = 2;
+var DEBOUNCE_MS = 300; // wait 300ms after last keystroke before checking
 
 export default function LoginScreen({ onLogin, onStaleStation }) {
   var [digits, setDigits] = useState('');
@@ -30,7 +31,9 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
   var [checking, setChecking] = useState(false);
   var [backendUp, setBackendUp] = useState(null);
   var salonName = getPairedSalonName() || 'Your Salon';
-  var checkRef = useRef(null); // tracks which PIN string we're currently checking
+  var debounceRef = useRef(null);
+  var lastChecked = useRef(''); // last PIN string we sent to API
+  var loggedIn = useRef(false); // prevent double-login
 
   // Check backend on mount
   useEffect(function() {
@@ -38,6 +41,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
   }, []);
 
   var handleDigit = useCallback(function(d) {
+    if (loggedIn.current) return;
     setError('');
     setDigits(function(prev) {
       if (prev.length >= MAX_PIN) return prev;
@@ -45,75 +49,81 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
     });
   }, []);
 
-  // Auto-check after each digit from MIN_CHECK onwards
+  // Debounced background check — never blocks typing
   useEffect(function() {
     if (digits.length < MIN_CHECK) return;
-    if (checking) return;
-
-    // Backend down — don't allow login
-    if (backendUp === false) {
-      return;
-    }
+    if (loggedIn.current) return;
+    if (backendUp === false) return;
 
     // Don't re-check same PIN
-    if (checkRef.current === digits) return;
-    checkRef.current = digits;
+    if (lastChecked.current === digits) return;
 
-    setChecking(true);
-    var pinToCheck = digits;
+    // Clear any pending check and schedule a new one
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(function() {
+      if (loggedIn.current) return;
+      var pinToCheck = digits;
+      lastChecked.current = pinToCheck;
+      setChecking(true);
 
-    login(pinToCheck).then(function(data) {
-      debugLog('AUTH', 'Login success: ' + (data.staff ? data.staff.display_name : 'unknown'));
-      setChecking(false);
-      if (data.token && data.staff) {
-        if (onLogin) onLogin(data);
-      }
-    }).catch(function(err) {
-      setChecking(false);
-
-      // Stale salon_id detection
-      if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
-        debugLog('AUTH', 'Stale salon_id — clearing pairing');
-        unpairStation();
-        if (onStaleStation) {
-          onStaleStation();
-        } else {
-          setError('Station data is outdated. Redirecting...');
-          setTimeout(function() { window.location.reload(); }, 1500);
+      login(pinToCheck).then(function(data) {
+        setChecking(false);
+        if (data.token && data.staff) {
+          loggedIn.current = true;
+          debugLog('AUTH', 'Login success: ' + data.staff.display_name);
+          if (onLogin) onLogin(data);
         }
-        return;
-      }
+      }).catch(function(err) {
+        setChecking(false);
 
-      // Network error
-      if ((err.message || '').indexOf('fetch') >= 0 || (err.message || '').indexOf('Failed') >= 0 || (err.message || '').indexOf('NetworkError') >= 0) {
-        setError('Cannot connect to server');
-        setBackendUp(false);
-        return;
-      }
+        // Stale salon_id detection
+        if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
+          debugLog('AUTH', 'Stale salon_id — clearing pairing');
+          unpairStation();
+          if (onStaleStation) {
+            onStaleStation();
+          } else {
+            setError('Station data is outdated. Redirecting...');
+            setTimeout(function() { window.location.reload(); }, 1500);
+          }
+          return;
+        }
 
-      // Invalid PIN at max length — show error
-      if (pinToCheck.length >= MAX_PIN) {
-        setError('Invalid PIN');
-        setDigits('');
-        checkRef.current = null;
-      }
-      // Otherwise silently wait for more digits
-    });
+        // Network error
+        if ((err.message || '').indexOf('fetch') >= 0 || (err.message || '').indexOf('Failed') >= 0 || (err.message || '').indexOf('NetworkError') >= 0) {
+          setError('Cannot connect to server');
+          setBackendUp(false);
+          return;
+        }
+
+        // Invalid PIN at max length — show error and reset
+        if (pinToCheck.length >= MAX_PIN) {
+          setError('Invalid PIN');
+          setDigits('');
+          lastChecked.current = '';
+        }
+        // Otherwise silently wait for more digits
+      });
+    }, DEBOUNCE_MS);
+
+    return function() { clearTimeout(debounceRef.current); };
   }, [digits]);
 
   var handleBackspace = useCallback(function() {
+    if (loggedIn.current) return;
     setError('');
-    checkRef.current = null;
+    lastChecked.current = '';
     setDigits(function(prev) { return prev.slice(0, -1); });
   }, []);
 
   var handleClear = useCallback(function() {
+    if (loggedIn.current) return;
     setError('');
-    checkRef.current = null;
+    lastChecked.current = '';
     setDigits('');
   }, []);
 
-  // ── Keyboard listener — type PIN with physical keyboard ──
+  // Keyboard listener — type PIN with physical keyboard
   useEffect(function() {
     function onKey(e) {
       if (e.key >= '0' && e.key <= '9') {
@@ -128,7 +138,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
     return function() { window.removeEventListener('keydown', onKey); };
   }, [handleDigit, handleBackspace]);
 
-  // ── Numpad digits (calculator layout: 7-8-9 top) ──
+  // Numpad digits (calculator layout: 7-8-9 top)
   var rows = [
     ['7', '8', '9'],
     ['4', '5', '6'],
@@ -175,7 +185,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
                 {digits.split('').map(function() { return '●'; }).join('')}
               </span>
           }
-          {checking && <span style={{ fontSize: 12, color: '#94A3B8', marginLeft: 8 }}>...</span>}
+          {checking && <span style={{ fontSize: 12, color: '#3B82F6', marginLeft: 8 }}>•</span>}
         </div>
 
         {/* Error message */}
@@ -227,7 +237,6 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
                     <div
                       key={key}
                       onClick={function() {
-                        if (checking) return;
                         if (key === 'C') handleClear();
                         else if (key === '⌫') handleBackspace();
                         else handleDigit(key);
@@ -236,14 +245,14 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
                         width: 76, height: 56, display: 'flex',
                         alignItems: 'center', justifyContent: 'center',
                         borderRadius: 10, fontSize: isAction ? 16 : 22,
-                        fontWeight: isAction ? 500 : 600, cursor: checking ? 'default' : 'pointer',
+                        fontWeight: isAction ? 500 : 600, cursor: 'pointer',
                         userSelect: 'none',
                         background: isAction ? '#1E293B' : '#0F1923',
                         color: isAction ? '#94A3B8' : '#E2E8F0',
                         border: '1px solid #2A3A50',
                         transition: 'background 100ms, transform 80ms',
                       }}
-                      onMouseDown={function(e) { if (!checking) e.currentTarget.style.transform = 'scale(0.96)'; }}
+                      onMouseDown={function(e) { e.currentTarget.style.transform = 'scale(0.96)'; }}
                       onMouseUp={function(e) { e.currentTarget.style.transform = 'scale(1)'; }}
                       onMouseLeave={function(e) { e.currentTarget.style.transform = 'scale(1)'; }}
                     >
