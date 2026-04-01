@@ -5,34 +5,40 @@ import { useStaffStore } from '../../lib/stores/staffStore';
 
 /**
  * PinPopup — PIN entry modal for RBAC
- * Session 87 rewrite
+ * Session 93 rewrite — Toast/Simphony style
  *
- * - Input bar (not dots) showing masked bullets
- * - Works with touch numpad, mouse clicks, AND physical keyboard
- * - Supports 2–8 digit PINs, auto-checks after each digit from 2+
+ * - Silent fire-and-forget: checks immediately at 4+ digits, no debounce
+ * - No "Verifying..." spinner — total silence until match or max-length fail
+ * - Input is NEVER blocked by API calls
+ * - Keyboard + touch numpad both work
  * - No <input> element (kiosk virtual keyboard safety)
- * - Keyboard captured via window keydown listener
  */
 export default function PinPopup({ show, title, titleColor, staffList, onSuccess, onCancel }) {
   var T = useTheme();
   var [digits, setDigits] = useState('');
   var [error, setError] = useState('');
   var [shake, setShake] = useState(false);
-  var [checking, setChecking] = useState(false);
   var verifyAnyPin = useStaffStore(function(s) { return s.verifyAnyPin; });
   var storeSource = useStaffStore(function(s) { return s.source; });
-  var checkingRef = useRef(false);
-  var digitsRef = useRef('');
+  var loggedIn = useRef(false);
+  var checkingPins = useRef({});
 
-  // Keep refs in sync for keyboard handler
-  digitsRef.current = digits;
-  checkingRef.current = checking;
+  // Reset state when popup opens/closes
+  useEffect(function() {
+    if (show) {
+      setDigits('');
+      setError('');
+      setShake(false);
+      loggedIn.current = false;
+      checkingPins.current = {};
+    }
+  }, [show]);
 
-  // ── Keyboard listener — captures physical keyboard input ──
+  // ── Keyboard listener ──
   useEffect(function() {
     if (!show) return;
     function onKey(e) {
-      if (checkingRef.current) return;
+      if (loggedIn.current) return;
       if (e.key >= '0' && e.key <= '9') {
         e.preventDefault();
         handleDigitDirect(e.key);
@@ -49,8 +55,8 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
     return function() { window.removeEventListener('keydown', onKey); };
   }, [show]);
 
-  // We need stable references for the keyboard handler
   function handleDigitDirect(d) {
+    if (loggedIn.current) return;
     setError('');
     setDigits(function(prev) {
       if (prev.length >= 8) return prev;
@@ -61,78 +67,72 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
   function handleCancelDirect() {
     setDigits('');
     setError('');
+    loggedIn.current = false;
     onCancel();
   }
 
-  // ── Auto-check PIN after each digit from 2+ (debounced, non-blocking) ──
-  var pinDebounce = useRef(null);
-  var lastPinChecked = useRef('');
+  // ── Silent fire-and-forget check at 4+ digits ──
   useEffect(function() {
-    if (digits.length < 2) return;
-    if (checking) return;
-    if (lastPinChecked.current === digits) return;
-    clearTimeout(pinDebounce.current);
-    pinDebounce.current = setTimeout(function() {
-      lastPinChecked.current = digits;
-      submitPin(digits);
-    }, 250);
-    return function() { clearTimeout(pinDebounce.current); };
-  }, [digits]);
+    if (digits.length < 4) return;
+    if (loggedIn.current) return;
+    if (checkingPins.current[digits]) return;
+    checkingPins.current[digits] = true;
 
-  if (!show) return null;
+    var pinToCheck = digits;
 
-  function handleDigit(d) {
-    handleDigitDirect(d);
-  }
-
-  function submitPin(pin) {
     // Mock mode
     if (storeSource !== 'api') {
-      var staff = validatePin(pin, staffList);
+      var staff = validatePin(pinToCheck, staffList);
+      delete checkingPins.current[pinToCheck];
       if (staff) {
+        loggedIn.current = true;
         setDigits('');
         setError('');
         onSuccess(staff);
-      } else if (pin.length >= 8) {
+      } else if (pinToCheck.length >= 8) {
         showError();
       }
       return;
     }
 
-    // API mode
-    setChecking(true);
-    verifyAnyPin(pin).then(function(result) {
-      setChecking(false);
+    // API mode — fire and forget
+    verifyAnyPin(pinToCheck).then(function(result) {
+      delete checkingPins.current[pinToCheck];
+      if (loggedIn.current) return;
+
       if (result.valid && result.staff) {
+        loggedIn.current = true;
         setDigits('');
         setError('');
         onSuccess(result.staff);
-      } else if (pin.length >= 8) {
+      } else if (pinToCheck.length >= 8) {
         showError();
       }
+      // Otherwise: silence. Wait for more digits.
     }).catch(function(err) {
-      console.error('[PinPopup] API error:', err);
-      setChecking(false);
-      if (pin.length >= 8) {
+      delete checkingPins.current[pinToCheck];
+      if (pinToCheck.length >= 8) {
         showError();
       }
     });
-  }
+  }, [digits]);
+
+  if (!show) return null;
 
   function showError() {
     setError('Invalid PIN');
     setShake(true);
-    setTimeout(function() { setDigits(''); setShake(false); }, 500);
+    setTimeout(function() { setDigits(''); setShake(false); setError(''); }, 800);
   }
 
   function handleBackspace() {
-    if (checking) return;
+    if (loggedIn.current) return;
     setError('');
     setDigits(function(prev) { return prev.slice(0, -1); });
   }
 
   function handleClear() {
-    if (checking) return;
+    if (loggedIn.current) return;
     setError('');
     setDigits('');
   }
@@ -162,7 +162,7 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
           )}
         </div>
 
-        {/* PIN input bar */}
+        {/* PIN dots display */}
         <div style={{
           height: 48, borderRadius: 8, margin: '0 auto 8px',
           maxWidth: 260,
@@ -176,12 +176,11 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
                 {digits.split('').map(function() { return '●'; }).join('')}
               </span>
           }
-          {checking && <span style={{ fontSize: 12, color: T.textMuted, marginLeft: 8 }}>...</span>}
         </div>
 
-        {/* Error / checking message */}
-        <div style={{ height: 22, textAlign: 'center', fontSize: 13, fontWeight: 500, color: checking ? T.textMuted : T.danger }}>
-          {checking ? 'Verifying...' : (error || '')}
+        {/* Error message — only at max length */}
+        <div style={{ height: 22, textAlign: 'center', fontSize: 13, fontWeight: 500, color: T.danger }}>
+          {error || ''}
         </div>
 
         {/* Numpad grid */}
@@ -197,17 +196,16 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
                   onClick={function() {
                     if (isClear) handleClear();
                     else if (isBackspace) handleBackspace();
-                    else handleDigit(key);
+                    else handleDigitDirect(key);
                   }}
                   style={{
                     height: 50, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
                     background: T.grid, border: '1px solid ' + T.borderLight,
                     color: isBackspace ? T.danger : (isClear ? T.warning : T.text),
-                    fontSize: isAction ? 16 : 20, fontWeight: 500, cursor: checking ? 'default' : 'pointer', userSelect: 'none',
+                    fontSize: isAction ? 16 : 20, fontWeight: 500, cursor: 'pointer', userSelect: 'none',
                     transition: 'background 120ms',
-                    opacity: checking ? 0.5 : 1,
                   }}
-                  onMouseEnter={function(e) { if (!checking) e.currentTarget.style.background = T.gridHover; }}
+                  onMouseEnter={function(e) { e.currentTarget.style.background = T.gridHover; }}
                   onMouseLeave={function(e) { e.currentTarget.style.background = T.grid; }}
                 >{key}</div>
               );
