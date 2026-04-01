@@ -1,20 +1,22 @@
 /**
  * LoginScreen.jsx — Staff Login (PIN Entry)
- * Session 92 | Non-blocking auto-check: digits appear instantly, API checks in background
+ * Session 93 | Toast/Simphony style: silent background check, instant recognition
  *
  * Flow:
  *   1. Station is paired (salon_id in localStorage)
  *   2. No JWT token exists → LoginScreen appears
- *   3. Staff enters PIN via div-based numpad — digits appear INSTANTLY (no waiting)
- *   4. After a short debounce (300ms), background API check fires
- *   5. As soon as a match is found, login proceeds automatically
- *   6. Typing is NEVER blocked — API calls happen in parallel
+ *   3. Staff taps digits — they appear INSTANTLY
+ *   4. After 4+ digits, a silent background check fires IMMEDIATELY (no debounce)
+ *   5. If PIN matches — instant login, no spinner, no delay
+ *   6. If PIN doesn't match — nothing happens (silent), keep typing
+ *   7. Only at MAX_PIN (8 digits) with no match → show "Invalid PIN", auto-clear
  *
  * Rules:
  *   - div onClick only (no <button>/<input> — kiosk virtual keyboard safety)
  *   - Calculator layout: 7-8-9 top
  *   - Max PIN length: 8 digits
- *   - No submit button needed — auto-checks silently
+ *   - No submit button — auto-recognizes correct PIN silently
+ *   - No spinner, no "checking" indicator — feels like nothing is happening
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { login, getPairedSalonName, isBackendAvailable, checkBackend, unpairStation } from '../../lib/apiClient';
@@ -23,22 +25,76 @@ import DebugLabel from '../../components/debug/DebugLabel';
 
 var MAX_PIN = 8;
 var MIN_CHECK = 4;
-var DEBOUNCE_MS = 250; // wait 250ms after last keystroke before checking
 
 export default function LoginScreen({ onLogin, onStaleStation }) {
   var [digits, setDigits] = useState('');
   var [error, setError] = useState('');
-  var [checking, setChecking] = useState(false);
   var [backendUp, setBackendUp] = useState(null);
   var salonName = getPairedSalonName() || 'Your Salon';
-  var debounceRef = useRef(null);
-  var lastChecked = useRef(''); // last PIN string we sent to API
-  var loggedIn = useRef(false); // prevent double-login
+  var loggedIn = useRef(false);
+  var checkingPins = useRef({}); // track which PINs are currently in-flight
 
   // Check backend on mount
   useEffect(function() {
     checkBackend().then(function(up) { setBackendUp(up); });
   }, []);
+
+  // Silent fire-and-forget check — runs on every digit change at 4+
+  useEffect(function() {
+    if (digits.length < MIN_CHECK) return;
+    if (loggedIn.current) return;
+    if (backendUp === false) return;
+
+    // Already checking this exact PIN? Skip
+    if (checkingPins.current[digits]) return;
+    checkingPins.current[digits] = true;
+
+    var pinToCheck = digits;
+
+    login(pinToCheck).then(function(data) {
+      delete checkingPins.current[pinToCheck];
+      if (loggedIn.current) return;
+
+      if (data.token && data.staff) {
+        loggedIn.current = true;
+        debugLog('AUTH', 'Login success: ' + data.staff.display_name);
+        if (onLogin) onLogin(data);
+      }
+    }).catch(function(err) {
+      delete checkingPins.current[pinToCheck];
+      if (loggedIn.current) return;
+
+      // Stale salon_id detection
+      if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
+        debugLog('AUTH', 'Stale salon_id — clearing pairing');
+        unpairStation();
+        if (onStaleStation) {
+          onStaleStation();
+        } else {
+          setError('Station data is outdated. Redirecting...');
+          setTimeout(function() { window.location.reload(); }, 1500);
+        }
+        return;
+      }
+
+      // Network error
+      if ((err.message || '').indexOf('fetch') >= 0 || (err.message || '').indexOf('Failed') >= 0 || (err.message || '').indexOf('NetworkError') >= 0) {
+        setError('Cannot connect to server');
+        setBackendUp(false);
+        return;
+      }
+
+      // At max length and still no match — show error, auto-clear
+      if (pinToCheck.length >= MAX_PIN) {
+        setError('Invalid PIN');
+        setTimeout(function() {
+          setDigits('');
+          setError('');
+        }, 1200);
+      }
+      // Otherwise: total silence. No error, no feedback. Just wait for more digits.
+    });
+  }, [digits]);
 
   var handleDigit = useCallback(function(d) {
     if (loggedIn.current) return;
@@ -49,82 +105,15 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
     });
   }, []);
 
-  // Debounced background check — never blocks typing
-  useEffect(function() {
-    if (digits.length < MIN_CHECK) return;
-    if (loggedIn.current) return;
-    if (backendUp === false) return;
-
-    // Don't re-check same PIN
-    if (lastChecked.current === digits) return;
-
-    // Clear any pending check and schedule a new one
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(function() {
-      if (loggedIn.current) return;
-      var pinToCheck = digits;
-      lastChecked.current = pinToCheck;
-      setChecking(true);
-
-      login(pinToCheck).then(function(data) {
-        setChecking(false);
-        console.log('[LoginScreen] PIN check response:', JSON.stringify(data));
-        if (data.token && data.staff) {
-          loggedIn.current = true;
-          debugLog('AUTH', 'Login success: ' + data.staff.display_name);
-          if (onLogin) onLogin(data);
-        }
-      }).catch(function(err) {
-        setChecking(false);
-        console.log('[LoginScreen] PIN check error:', err.status, err.message, 'for PIN length:', pinToCheck.length);
-
-        // Stale salon_id detection
-        if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
-          debugLog('AUTH', 'Stale salon_id — clearing pairing');
-          unpairStation();
-          if (onStaleStation) {
-            onStaleStation();
-          } else {
-            setError('Station data is outdated. Redirecting...');
-            setTimeout(function() { window.location.reload(); }, 1500);
-          }
-          return;
-        }
-
-        // Network error
-        if ((err.message || '').indexOf('fetch') >= 0 || (err.message || '').indexOf('Failed') >= 0 || (err.message || '').indexOf('NetworkError') >= 0) {
-          setError('Cannot connect to server');
-          setBackendUp(false);
-          return;
-        }
-
-        // Invalid PIN — show error and reset
-        if (pinToCheck.length >= MIN_CHECK) {
-          setError('Invalid PIN');
-          setTimeout(function() {
-            setDigits('');
-            lastChecked.current = '';
-            setError('');
-          }, 1200);
-        }
-        // Otherwise silently wait for more digits
-      });
-    }, DEBOUNCE_MS);
-
-    return function() { clearTimeout(debounceRef.current); };
-  }, [digits]);
-
   var handleBackspace = useCallback(function() {
     if (loggedIn.current) return;
     setError('');
-    lastChecked.current = '';
     setDigits(function(prev) { return prev.slice(0, -1); });
   }, []);
 
   var handleClear = useCallback(function() {
     if (loggedIn.current) return;
     setError('');
-    lastChecked.current = '';
     setDigits('');
   }, []);
 
@@ -176,7 +165,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
           Enter your PIN to sign in
         </div>
 
-        {/* PIN input bar */}
+        {/* PIN dots display */}
         <div style={{
           height: 48, borderRadius: 8, margin: '0 auto 16px',
           maxWidth: 260,
@@ -190,10 +179,9 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
                 {digits.split('').map(function() { return '●'; }).join('')}
               </span>
           }
-          {checking && <span style={{ fontSize: 12, color: '#3B82F6', marginLeft: 8 }}>•</span>}
         </div>
 
-        {/* Error message */}
+        {/* Error message — only shows at max PIN length */}
         {error && (
           <div style={{
             color: '#EF4444', fontSize: 13, marginBottom: 12,
