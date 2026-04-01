@@ -1,0 +1,897 @@
+// ProSalonPOS Database Schema
+// Phase 2 — matches TD-007 consolidated data model (38 entities)
+// Every table has: id (UUID), salon_id, created_at, updated_at, version (for Phase 4 sync)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ════════════════════════════════════════════
+// SALON & AUTHENTICATION
+// ════════════════════════════════════════════
+
+model Salon {
+  id         String   @id @default(uuid())
+  salon_code String   @unique @default(uuid())
+  name       String
+  phone      String?
+  email      String?
+  address1   String?
+  address2   String?
+  logo_url   String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  version    Int      @default(1)
+
+  // Provider-managed fields (set by Provider Admin Panel, read by salon POS)
+  owner_name                String?
+  owner_phone               String?
+  owner_email               String?
+  status                    String   @default("active")      // active | trial | suspended | cancelled
+  plan_tier                 String   @default("basic")       // basic | professional | premium
+  station_count             Int      @default(1)
+  license_key               String?  @unique
+  processing_rate           Float    @default(2.49)          // credit card processing rate %
+  monthly_software_fee_cents Int     @default(7900)          // $79/mo default
+  signup_date               DateTime @default(now())
+  trial_end_date            DateTime?
+  assigned_agent_id         String?
+  features_enabled          String?                            // ["appointments", "client_profiles", ...]
+  owner_pin_hash            String?                          // Owner PIN stored on salon, not in Staff table
+
+  // Relations
+  staff              Staff[]
+  service_categories ServiceCategory[]
+  services           ServiceCatalog[]
+  clients            Client[]
+  appointments       Appointment[]
+  salon_settings     SalonSettings?
+  tickets            Ticket[]
+  gift_cards         GiftCard[]
+  loyalty_accounts   LoyaltyAccount[]
+  loyalty_program    LoyaltyProgram?
+  membership_plans   MembershipPlan[]
+  product_categories ProductCategory[]
+  products           Product[]
+  suppliers          Supplier[]
+  commission_rules   CommissionRule[]
+  commission_tiers   CommissionTier[]
+  message_templates  MessageTemplate[]
+  message_log        MessageLogEntry[]
+  blocked_times      BlockedTime[]
+  provider_notes     ProviderSalonNote[]
+  provider_billing   ProviderBillingRecord[]
+  assigned_agent     ProviderAgent?          @relation(fields: [assigned_agent_id], references: [id])
+}
+
+// ════════════════════════════════════════════
+// STAFF
+// ════════════════════════════════════════════
+
+model Staff {
+  id                        String   @id @default(uuid())
+  salon_id                  String
+  display_name              String
+  legal_name                String?
+  photo_url                 String?
+  role                      String   @default("technician") // technician | manager | owner
+  rbac_role                 String   @default("tech")       // tech | manager | owner
+  pin_hash                  String                          // bcrypt hashed PIN
+  badge_id                  String?
+  active                    Boolean  @default(true)
+  status                    String   @default("active")     // active | deactivated | deleted
+  tech_turn_eligible        Boolean  @default(true)
+  pay_type                  String   @default("commission") // commission | hourly | salary
+  commission_pct            Int      @default(0)
+  daily_guarantee_cents     Int      @default(0)
+  hourly_rate_cents         Int?
+  commission_bonus_enabled  Boolean  @default(false)
+  salary_amount_cents       Int?
+  salary_period             String?                         // weekly | biweekly | monthly
+  payout_check_pct          Int      @default(100)
+  payout_bonus_pct          Int      @default(0)
+  category_commission_rates String?                           // { "cat-01": 45, "cat-03": 35 }
+  permission_overrides      String?                           // per-action overrides
+  permissions               String?                           // { void: true, refund: true, ... }
+  schedule                  String?                           // { mon: { enabled, start, end }, tue: ... }
+  position                  Int      @default(0)
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+  version                   Int      @default(1)
+
+  salon                   Salon                    @relation(fields: [salon_id], references: [id])
+  service_lines           ServiceLine[]
+  service_staff           ServiceStaffAssignment[]
+  category_staff          CategoryStaffAssignment[]
+  clock_punches           ClockPunch[]
+
+  @@index([salon_id])
+  @@index([salon_id, active])
+}
+
+// ════════════════════════════════════════════
+// SERVICE CATEGORIES & CATALOG
+// ════════════════════════════════════════════
+
+model ServiceCategory {
+  id             String  @id @default(uuid())
+  salon_id       String
+  name           String
+  calendar_color String  @default("#3B82F6")
+  position       Int     @default(0)
+  active         Boolean @default(true)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  version        Int      @default(1)
+
+  salon          Salon                      @relation(fields: [salon_id], references: [id])
+  service_links  ServiceCatalogCategory[]
+  category_staff CategoryStaffAssignment[]
+
+  @@index([salon_id])
+}
+
+model ServiceCatalog {
+  id                       String  @id @default(uuid())
+  salon_id                 String
+  name                     String
+  calendar_color           String  @default("#3B82F6")
+  default_duration_minutes Int     @default(30)
+  price_cents              Int     @default(0)
+  product_cost_cents       Int     @default(0)
+  open_price               Boolean @default(false)
+  requires_room            Boolean @default(false)
+  active                   Boolean @default(true)
+  online_booking_enabled   Boolean @default(true)
+  description              String  @default("")
+  position                 Int     @default(0)
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  version                  Int      @default(1)
+
+  salon          Salon                      @relation(fields: [salon_id], references: [id])
+  category_links ServiceCatalogCategory[]
+  service_staff  ServiceStaffAssignment[]
+  service_lines  ServiceLine[]
+
+  @@index([salon_id])
+}
+
+// Junction table: service belongs to multiple categories (TD-001 fix)
+model ServiceCatalogCategory {
+  id                 String @id @default(uuid())
+  service_catalog_id String
+  category_id        String
+  position           Int    @default(0)
+
+  service  ServiceCatalog  @relation(fields: [service_catalog_id], references: [id], onDelete: Cascade)
+  category ServiceCategory @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@unique([service_catalog_id, category_id])
+}
+
+// Junction: which techs can perform which services
+model ServiceStaffAssignment {
+  id                 String @id @default(uuid())
+  service_catalog_id String
+  staff_id           String
+
+  service ServiceCatalog @relation(fields: [service_catalog_id], references: [id], onDelete: Cascade)
+  staff   Staff          @relation(fields: [staff_id], references: [id], onDelete: Cascade)
+
+  @@unique([service_catalog_id, staff_id])
+}
+
+// Junction: which techs are assigned to which categories (bulk)
+model CategoryStaffAssignment {
+  id          String @id @default(uuid())
+  category_id String
+  staff_id    String
+
+  category ServiceCategory @relation(fields: [category_id], references: [id], onDelete: Cascade)
+  staff    Staff           @relation(fields: [staff_id], references: [id], onDelete: Cascade)
+
+  @@unique([category_id, staff_id])
+}
+
+// ════════════════════════════════════════════
+// CLIENTS
+// ════════════════════════════════════════════
+
+model Client {
+  id                       String   @id @default(uuid())
+  salon_id                 String
+  first_name               String
+  last_name                String
+  phone                    String?
+  phone_digits             String?  // stripped digits for search
+  email                    String?
+  outstanding_balance_cents Int     @default(0)
+  promo_opt_out            Boolean  @default(false)
+  notes                    String?
+  active                   Boolean  @default(true)
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  version                  Int      @default(1)
+
+  salon              Salon              @relation(fields: [salon_id], references: [id])
+  appointments       Appointment[]
+  loyalty_account    LoyaltyAccount?
+  membership_account MembershipAccount?
+
+  @@index([salon_id])
+  @@index([salon_id, phone_digits])
+  @@index([salon_id, last_name])
+}
+
+// ════════════════════════════════════════════
+// APPOINTMENTS & SERVICE LINES
+// ════════════════════════════════════════════
+
+model Appointment {
+  id                   String   @id @default(uuid())
+  salon_id             String
+  client_id            String?
+  client_name          String?  // denormalized for fast display
+  status               String   @default("pending") // pending | confirmed | checked_in | in_progress | completed | cancelled | no_show
+  source               String   @default("staff")   // staff | online | walk_in | kiosk
+  booking_group_id     String?
+  requested            Boolean  @default(false)
+  deposit_cents        Int      @default(0)
+  deposit_status       String   @default("none")    // none | pending | collected | refunded
+  walk_in              Boolean  @default(false)
+  checked_in_at        DateTime?
+  notes                String?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+  version              Int      @default(1)
+
+  salon         Salon         @relation(fields: [salon_id], references: [id])
+  client        Client?       @relation(fields: [client_id], references: [id])
+  service_lines ServiceLine[]
+
+  @@index([salon_id])
+  @@index([salon_id, status])
+}
+
+model ServiceLine {
+  id                 String   @id @default(uuid())
+  appointment_id     String
+  service_catalog_id String?
+  staff_id           String
+  starts_at          DateTime
+  duration_minutes   Int
+  calendar_color     String
+  status             String   @default("pending")
+  client_name        String?  // denormalized
+  service_name       String
+  price_cents        Int      @default(0)
+  position           Int      @default(0)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+  version            Int      @default(1)
+
+  appointment Appointment    @relation(fields: [appointment_id], references: [id], onDelete: Cascade)
+  service     ServiceCatalog? @relation(fields: [service_catalog_id], references: [id])
+  staff       Staff          @relation(fields: [staff_id], references: [id])
+
+  @@index([appointment_id])
+  @@index([staff_id, starts_at])
+}
+
+// ════════════════════════════════════════════
+// BLOCKED / RESERVED TIME
+// ════════════════════════════════════════════
+
+model BlockedTime {
+  id        String   @id @default(uuid())
+  salon_id  String
+  staff_id  String
+  starts_at DateTime
+  dur       Int      // duration in minutes
+  start_min Int      // minutes from midnight (for grid rendering)
+  end_min   Int
+  block_type String  @default("blocked") // blocked | reserved
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  version    Int      @default(1)
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+
+  @@index([salon_id, staff_id])
+}
+
+// ════════════════════════════════════════════
+// TICKETS (CHECKOUT)
+// ════════════════════════════════════════════
+
+model Ticket {
+  id                String   @id @default(uuid())
+  salon_id          String
+  ticket_number     Int      @default(0)       // daily sequential: 1, 2, 3...
+  appointment_id    String?
+  client_id         String?
+  client_name       String?
+  status            String   @default("open")  // open | paid | voided | refunded
+  subtotal_cents    Int      @default(0)
+  tax_cents         Int      @default(0)
+  discount_cents    Int      @default(0)
+  tip_cents         Int      @default(0)
+  surcharge_cents   Int      @default(0)
+  deposit_cents     Int      @default(0)       // deposit applied from booking
+  total_cents       Int      @default(0)
+  payment_method    String?                    // cash | credit | giftcard | zelle | split
+  cashier_id        String?
+  cashier_name      String?
+  tip_distributions String?                      // [{staff_id, staff_name, amount_cents}]
+  void_reason       String?
+  void_by           String?                    // staff_id who voided
+  void_at           DateTime?
+  refund_cents      Int      @default(0)
+  refund_reason     String?
+  refund_by         String?                    // staff_id who refunded
+  refund_at         DateTime?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  version           Int      @default(1)
+
+  salon    Salon          @relation(fields: [salon_id], references: [id])
+  items    TicketItem[]
+  payments TicketPayment[]
+
+  @@index([salon_id])
+  @@index([salon_id, created_at])
+  @@index([salon_id, ticket_number])
+}
+
+model TicketItem {
+  id                   String @id @default(uuid())
+  ticket_id            String
+  type                 String @default("service") // service | product | giftcard | package
+  name                 String
+  price_cents          Int    @default(0)
+  original_price_cents Int    @default(0)         // price before adjustment
+  tech_id              String?
+  tech_name            String?
+  service_id           String?
+  product_id           String?
+  color                String?                    // calendar color for service block
+
+  ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+
+  @@index([ticket_id])
+}
+
+model TicketPayment {
+  id           String   @id @default(uuid())
+  ticket_id    String
+  method       String                            // cash | credit | giftcard | zelle
+  amount_cents Int
+  gc_id        String?
+  gc_code      String?
+  created_at   DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+
+  @@index([ticket_id])
+}
+
+// ════════════════════════════════════════════
+// SALON SETTINGS (single row per salon)
+// ════════════════════════════════════════════
+
+model SalonSettings {
+  id       String @id @default(uuid())
+  salon_id String @unique
+  settings String   // entire settings object stored as JSON
+  version  Int    @default(1)
+  updated_at DateTime @updatedAt
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+}
+
+// ════════════════════════════════════════════
+// GIFT CARDS
+// ════════════════════════════════════════════
+
+model GiftCard {
+  id                     String   @id @default(uuid())
+  salon_id               String
+  code                   String
+  type                   String   @default("physical") // physical | digital
+  initial_amount_cents   Int      @default(0)
+  balance_cents          Int      @default(0)
+  status                 String   @default("active") // active | depleted | deactivated
+  client_id              String?              // linked client (recipient)
+  client_name            String?
+  purchased_by_client_id String?              // who bought it
+  purchased_by_name      String?
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+  version                Int      @default(1)
+
+  salon        Salon                 @relation(fields: [salon_id], references: [id])
+  transactions GiftCardTransaction[]
+
+  @@unique([salon_id, code])
+  @@index([salon_id])
+}
+
+model GiftCardTransaction {
+  id                 String   @id @default(uuid())
+  gift_card_id       String
+  type               String                     // purchase | reload | redemption
+  amount_cents       Int                        // positive for purchase/reload, negative for redemption
+  balance_after_cents Int
+  staff_id           String?
+  staff_name         String?
+  ticket_id          String?                    // linked ticket for redemptions
+  created_at         DateTime @default(now())
+
+  giftCard GiftCard @relation(fields: [gift_card_id], references: [id], onDelete: Cascade)
+
+  @@index([gift_card_id])
+}
+
+// ════════════════════════════════════════════
+// LOYALTY
+// ════════════════════════════════════════════
+
+model LoyaltyProgram {
+  id                  String   @id @default(uuid())
+  salon_id            String   @unique
+  enabled             Boolean  @default(false)
+  points_per_dollar   Int      @default(1)     // points earned per dollar spent
+  points_name         String   @default("points")
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+  version             Int      @default(1)
+
+  salon   Salon           @relation(fields: [salon_id], references: [id])
+  tiers   LoyaltyTier[]
+  rewards LoyaltyReward[]
+}
+
+model LoyaltyTier {
+  id                String @id @default(uuid())
+  program_id        String
+  name              String
+  min_points        Int    @default(0)        // threshold to reach this tier
+  multiplier        Float  @default(1.0)      // point earning multiplier
+  position          Int    @default(0)
+  created_at        DateTime @default(now())
+  version           Int      @default(1)
+
+  program LoyaltyProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+
+  @@index([program_id])
+}
+
+model LoyaltyReward {
+  id              String  @id @default(uuid())
+  program_id      String
+  name            String
+  points_required Int     @default(0)       // cost in points
+  type            String  @default("discount") // discount | freeService | product
+  value_cents     Int     @default(0)       // dollar value of reward
+  active          Boolean @default(true)
+  position        Int     @default(0)
+  created_at      DateTime @default(now())
+  version         Int      @default(1)
+
+  program LoyaltyProgram @relation(fields: [program_id], references: [id], onDelete: Cascade)
+
+  @@index([program_id])
+}
+
+model LoyaltyAccount {
+  id             String @id @default(uuid())
+  salon_id       String
+  client_id      String @unique
+  points_balance Int    @default(0)
+  lifetime_points Int   @default(0)
+  tier           String @default("bronze") // bronze | silver | gold
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  version        Int      @default(1)
+
+  salon  Salon  @relation(fields: [salon_id], references: [id])
+  client Client @relation(fields: [client_id], references: [id])
+
+  @@index([salon_id])
+}
+
+model LoyaltyTransaction {
+  id          String   @id @default(uuid())
+  salon_id    String
+  client_id   String
+  type        String                        // earn | redeem
+  points      Int
+  description String?
+  ticket_id   String?
+  reward_id   String?
+  created_at  DateTime @default(now())
+
+  @@index([salon_id])
+  @@index([client_id])
+}
+
+// ════════════════════════════════════════════
+// MEMBERSHIPS
+// ════════════════════════════════════════════
+
+model MembershipPlan {
+  id               String  @id @default(uuid())
+  salon_id         String
+  name             String
+  description      String?
+  price_cents      Int
+  billing_interval String  @default("monthly") // monthly | yearly
+  included_services String?  // array of { service_id, qty }
+  discount_pct     Int     @default(0)
+  active           Boolean @default(true)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+  version          Int      @default(1)
+
+  salon   Salon               @relation(fields: [salon_id], references: [id])
+  members MembershipAccount[]
+  perks   MembershipPerk[]
+
+  @@index([salon_id])
+}
+
+model MembershipPerk {
+  id       String @id @default(uuid())
+  plan_id  String
+  name     String
+  type     String @default("discount") // discount | freeService | credit
+  value    Int    @default(0)          // percentage or cents depending on type
+  position Int    @default(0)
+
+  plan MembershipPlan @relation(fields: [plan_id], references: [id], onDelete: Cascade)
+
+  @@index([plan_id])
+}
+
+model MembershipAccount {
+  id          String   @id @default(uuid())
+  plan_id     String
+  client_id   String   @unique
+  status      String   @default("active") // active | frozen | cancelled
+  start_date  DateTime
+  next_billing DateTime?
+  frozen_at   DateTime?
+  cancelled_at DateTime?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  version     Int      @default(1)
+
+  plan   MembershipPlan @relation(fields: [plan_id], references: [id])
+  client Client         @relation(fields: [client_id], references: [id])
+}
+
+// ════════════════════════════════════════════
+// INVENTORY
+// ════════════════════════════════════════════
+
+model ProductCategory {
+  id       String  @id @default(uuid())
+  salon_id String
+  name     String
+  position Int     @default(0)
+  active   Boolean @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  version    Int      @default(1)
+
+  salon    Salon     @relation(fields: [salon_id], references: [id])
+  products Product[]
+
+  @@index([salon_id])
+}
+
+model Product {
+  id             String  @id @default(uuid())
+  salon_id       String
+  category_id    String
+  name           String
+  sku            String?
+  barcode        String?
+  price_cents    Int     @default(0)
+  cost_cents     Int     @default(0)
+  stock_qty      Int     @default(0)
+  low_stock_qty  Int     @default(5)
+  supplier_id    String?
+  active         Boolean @default(true)
+  position       Int     @default(0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  version        Int      @default(1)
+
+  salon    Salon           @relation(fields: [salon_id], references: [id])
+  category ProductCategory @relation(fields: [category_id], references: [id])
+  supplier Supplier?       @relation(fields: [supplier_id], references: [id])
+
+  @@index([salon_id])
+}
+
+model Supplier {
+  id       String  @id @default(uuid())
+  salon_id String
+  name     String
+  contact  String?
+  phone    String?
+  email    String?
+  active   Boolean @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  version    Int      @default(1)
+
+  salon    Salon     @relation(fields: [salon_id], references: [id])
+  products Product[]
+
+  @@index([salon_id])
+}
+
+// ════════════════════════════════════════════
+// COMMISSION RULES & TIERS
+// ════════════════════════════════════════════
+
+model CommissionRule {
+  id                 String  @id @default(uuid())
+  salon_id           String
+  staff_id           String? // null = location default
+  applies_to         String  @default("service") // service | retail
+  scope              String  @default("flat")    // flat | category | item
+  category_id        String?
+  service_catalog_id String?
+  product_id         String?
+  percentage         Int     @default(0)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+  version            Int      @default(1)
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+
+  @@index([salon_id])
+}
+
+model CommissionTier {
+  id                String  @id @default(uuid())
+  salon_id          String
+  staff_id          String? // null = location default
+  min_revenue_cents Int     @default(0)
+  percentage        Int     @default(0)
+  position          Int     @default(0)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  version           Int      @default(1)
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+
+  @@index([salon_id])
+}
+
+// ════════════════════════════════════════════
+// TIME CLOCK
+// ════════════════════════════════════════════
+
+model ClockPunch {
+  id        String   @id @default(uuid())
+  staff_id  String
+  type      String   // in | out
+  timestamp DateTime @default(now())
+  manual    Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  staff Staff @relation(fields: [staff_id], references: [id])
+
+  @@index([staff_id, timestamp])
+}
+
+// ════════════════════════════════════════════
+// MESSAGING
+// ════════════════════════════════════════════
+
+model MessageTemplate {
+  id       String @id @default(uuid())
+  salon_id String
+  type     String // booking_confirm | reminder | cancel | noshow | receipt | waitlist | promo
+  channel  String @default("sms") // sms | email | both
+  subject  String?
+  body     String
+  active   Boolean @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+
+  @@index([salon_id, type])
+}
+
+model MessageLogEntry {
+  id         String   @id @default(uuid())
+  salon_id   String
+  client_id  String?
+  type       String
+  channel    String
+  to         String   // phone or email
+  body       String
+  status     String   @default("sent") // sent | delivered | failed
+  sent_at    DateTime @default(now())
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+
+  @@index([salon_id, sent_at])
+}
+
+// ════════════════════════════════════════════
+// PROVIDER (ISO) — manages multiple salons
+// ════════════════════════════════════════════
+
+model ProviderOwner {
+  id         String   @id @default(uuid())
+  name       String
+  email      String?
+  pin_hash   String                        // bcrypt hashed PIN
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model ProviderAgent {
+  id                  String   @id @default(uuid())
+  name                String
+  email               String?
+  pin_hash            String                        // bcrypt hashed PIN
+  role                String   @default("support")  // support | sales
+  visibility          String   @default("assigned") // all | assigned
+  active              Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  assigned_salons     Salon[]
+}
+
+model ProviderSalonNote {
+  id         String   @id @default(uuid())
+  salon_id   String
+  agent_id   String                         // provider owner or agent ID
+  agent_name String
+  content    String
+  created_at DateTime @default(now())
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+
+  @@index([salon_id])
+}
+
+model ProviderBillingRecord {
+  id           String @id @default(uuid())
+  salon_id     String
+  amount_cents Int
+  date         String                        // YYYY-MM-DD
+  status       String @default("pending")    // pending | paid | overdue | trial
+  method       String @default("N/A")        // ACH | Credit Card | N/A
+  created_at   DateTime @default(now())
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+
+  @@index([salon_id])
+}
+
+model ProviderAuditLog {
+  id         String   @id @default(uuid())
+  actor_id   String                          // provider owner or agent ID
+  actor_name String
+  action     String                          // feature_toggled | note_added | salon_created | salon_updated | salon_suspended | agent_created | agent_updated
+  detail     String
+  salon_id   String?
+  created_at DateTime @default(now())
+
+  @@index([salon_id])
+  @@index([actor_id])
+}
+
+// ════════════════════════════════════════════
+// SERVICE PACKAGES
+// ════════════════════════════════════════════
+
+model ServicePackage {
+  id                 String   @id @default(uuid())
+  salon_id           String
+  location_id        String
+  name               String
+  description        String?
+  price_cents        Int
+  expiration_enabled Boolean  @default(false)
+  expiration_days    Int?
+  transferable       Boolean  @default(false)
+  refundable         Boolean  @default(true)
+  active             Boolean  @default(true)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  items           ServicePackageItem[]
+  clientPackages  ClientPackage[]
+
+  @@index([salon_id])
+  @@index([location_id])
+}
+
+model ServicePackageItem {
+  id                 String @id @default(uuid())
+  package_id         String
+  service_id         String
+  service_name       String // denormalized for quick display
+  quantity           Int
+
+  package            ServicePackage @relation(fields: [package_id], references: [id], onDelete: Cascade)
+
+  @@index([package_id])
+}
+
+model ClientPackage {
+  id                   String   @id @default(uuid())
+  salon_id             String
+  client_id            String
+  client_name          String   // denormalized
+  package_id           String
+  package_name         String   // denormalized
+  price_paid_cents     Int
+  purchased_at         DateTime @default(now())
+  expires_at           DateTime?
+  transferable         Boolean  @default(false)
+  refundable           Boolean  @default(true)
+  status               String   @default("active") // active | expired | refunded | depleted
+  sold_by_staff_id     String?
+  sold_by_staff_name   String?
+
+  package              ServicePackage @relation(fields: [package_id], references: [id])
+  items                ClientPackageItem[]
+  redemptions          PackageRedemption[]
+
+  @@index([salon_id])
+  @@index([client_id])
+  @@index([package_id])
+}
+
+model ClientPackageItem {
+  id                   String @id @default(uuid())
+  client_package_id    String
+  service_id           String
+  service_name         String  // denormalized
+  total_quantity       Int
+  remaining            Int
+
+  clientPackage        ClientPackage @relation(fields: [client_package_id], references: [id], onDelete: Cascade)
+  redemptions          PackageRedemption[]
+
+  @@index([client_package_id])
+}
+
+model PackageRedemption {
+  id                        String   @id @default(uuid())
+  client_package_id         String
+  client_package_item_id    String
+  ticket_id                 String?
+  service_redeemed_id       String
+  service_redeemed_name     String
+  package_service_id        String
+  package_service_name      String
+  upgrade_difference_cents  Int      @default(0)
+  redeemed_at               DateTime @default(now())
+  staff_id                  String?
+  staff_name                String?
+
+  clientPackage             ClientPackage     @relation(fields: [client_package_id], references: [id])
+  clientPackageItem         ClientPackageItem @relation(fields: [client_package_item_id], references: [id])
+
+  @@index([client_package_id])
+  @@index([client_package_item_id])
+}
