@@ -53,12 +53,20 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
 
     login(pinToCheck).then(function(data) {
       delete checkingPins.current[pinToCheck];
+      console.log('[PIN] Response for "' + pinToCheck + '":', JSON.stringify(data));
+      console.log('[PIN] loggedIn.current:', loggedIn.current);
+      console.log('[PIN] data.token exists:', !!data.token);
+      console.log('[PIN] data.staff exists:', !!data.staff);
+      console.log('[PIN] onLogin exists:', !!onLogin);
       if (loggedIn.current) return;
 
       if (data.token && data.staff) {
         loggedIn.current = true;
         debugLog('AUTH', 'Login success: ' + data.staff.display_name);
+        console.log('[PIN] ✅ Calling onLogin NOW');
         if (onLogin) onLogin(data);
+      } else {
+        console.log('[PIN] ❌ Missing token or staff in response');
       }
     }).catch(function(err) {
       delete checkingPins.current[pinToCheck];
