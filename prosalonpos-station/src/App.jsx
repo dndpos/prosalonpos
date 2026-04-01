@@ -98,6 +98,11 @@ export default function App() {
   const [loggedInStaff, setLoggedInStaff] = useState(null); // { display_name, role, rbac_role }
   var _hasNavigated = activePage !== 'calendar';
 
+  // Connection status — show banner if any core store failed to connect
+  // MUST be before any conditional returns to satisfy React hooks ordering rules
+  var _staffSource = useStaffStore(function(s) { return s.source; });
+  var _staffError = useStaffStore(function(s) { return s.error; });
+
   // ── Debug: log page navigation ──
   useEffect(function() { debugLog('NAV', 'Page → ' + activePage); }, [activePage]);
 
@@ -724,10 +729,6 @@ export default function App() {
       setStationPaired(false);
     }} />;
   }
-
-  // Connection status — show banner if any core store failed to connect
-  var _staffSource = useStaffStore(function(s) { return s.source; });
-  var _staffError = useStaffStore(function(s) { return s.error; });
 
   return (
     <ThemeContext.Provider value={C}>
