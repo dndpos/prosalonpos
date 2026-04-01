@@ -7,7 +7,7 @@ import bcrypt from 'bcryptjs';
 
 var JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 var JWT_EXPIRY = '24h';
-var PIN_SALT_ROUNDS = 12;
+var PIN_SALT_ROUNDS = 6;
 
 // ── JWT ──
 
@@ -27,4 +27,13 @@ export function hashPin(pin) {
 
 export function comparePin(pin, hash) {
   return bcrypt.compareSync(String(pin), hash);
+}
+
+// Async versions — non-blocking, use in request handlers
+export async function hashPinAsync(pin) {
+  return bcrypt.hash(String(pin), PIN_SALT_ROUNDS);
+}
+
+export async function comparePinAsync(pin, hash) {
+  return bcrypt.compare(String(pin), hash);
 }

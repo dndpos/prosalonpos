@@ -5,7 +5,7 @@
  */
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
-import { hashPin, comparePin } from '../config/auth.js';
+import { hashPin, comparePin, comparePinAsync, hashPinAsync } from '../config/auth.js';
 import { emit } from '../utils/emit.js';
 
 // SQLite stores JSON fields as strings — stringify objects before writing
@@ -212,16 +212,19 @@ router.post('/verify-any-pin', async function(req, res, next) {
   try {
     var pin = req.body.pin;
 
-    // 1. Check staff PINs
+    // 1. Check staff PINs (async — non-blocking)
     var allStaff = await prisma.staff.findMany({
       where: { salon_id: req.salon_id, active: true }
     });
 
     var match = null;
     for (var i = 0; i < allStaff.length; i++) {
-      if (comparePin(pin, allStaff[i].pin_hash)) {
-        match = allStaff[i];
-        break;
+      if (allStaff[i].pin_hash) {
+        var isMatch = await comparePinAsync(pin, allStaff[i].pin_hash);
+        if (isMatch) {
+          match = allStaff[i];
+          break;
+        }
       }
     }
 
@@ -241,18 +244,21 @@ router.post('/verify-any-pin', async function(req, res, next) {
 
     // 2. Check owner PIN on Salon record
     var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
-    if (salon && salon.owner_pin_hash && comparePin(pin, salon.owner_pin_hash)) {
-      return res.json({
-        valid: true,
-        staff: {
-          id: 'owner',
-          display_name: 'Owner',
-          role: 'owner',
-          rbac_role: 'owner',
-          permissions: null,
-          permission_overrides: null,
-        }
-      });
+    if (salon && salon.owner_pin_hash) {
+      var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
+      if (ownerMatch) {
+        return res.json({
+          valid: true,
+          staff: {
+            id: 'owner',
+            display_name: 'Owner',
+            role: 'owner',
+            rbac_role: 'owner',
+            permissions: null,
+            permission_overrides: null,
+          }
+        });
+      }
     }
 
     // 3. Provider master code
@@ -282,7 +288,7 @@ router.post('/:id/verify-pin', async function(req, res, next) {
     });
     if (!s) return res.status(404).json({ error: 'Staff not found' });
 
-    if (!comparePin(req.body.pin, s.pin_hash)) {
+    if (!(await comparePinAsync(req.body.pin, s.pin_hash))) {
       return res.status(401).json({ error: 'Invalid PIN' });
     }
 

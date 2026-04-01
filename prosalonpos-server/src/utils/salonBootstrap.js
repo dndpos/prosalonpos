@@ -67,6 +67,36 @@ async function bootstrapSalon(salonName, licenseKey) {
           data: { owner_pin_hash: freshHash }
         });
         console.log('[Bootstrap] ✅ Owner PIN rehashed successfully');
+      } else {
+        // Check if hash uses old slow rounds — upgrade to fast rounds
+        var ownerRoundsMatch = existing.owner_pin_hash.match(/^\$2[ab]\$(\d+)\$/);
+        if (ownerRoundsMatch && parseInt(ownerRoundsMatch[1], 10) > 6) {
+          console.log('[Bootstrap] Owner PIN hash uses old rounds (' + ownerRoundsMatch[1] + ') — upgrading to 6...');
+          await prisma.salon.update({
+            where: { id: existing.id },
+            data: { owner_pin_hash: hashPin('0000') }
+          });
+          console.log('[Bootstrap] ✅ Owner PIN rehashed with fast rounds');
+        }
+      }
+    }
+
+    // Rehash all staff PINs if they use old slow rounds
+    var allStaff = await prisma.staff.findMany({ where: { salon_id: existing.id } });
+    var defaultPins = { 'Manager': '1234', 'Sarah': '1111', 'Mike': '2222', 'Jessica': '3333' };
+    for (var si = 0; si < allStaff.length; si++) {
+      var s = allStaff[si];
+      if (!s.pin_hash) continue;
+      var roundsMatch = s.pin_hash.match(/^\$2[ab]\$(\d+)\$/);
+      if (roundsMatch && parseInt(roundsMatch[1], 10) > 6) {
+        var knownPin = defaultPins[s.display_name];
+        if (knownPin && comparePin(knownPin, s.pin_hash)) {
+          console.log('[Bootstrap] Rehashing ' + s.display_name + ' PIN from rounds ' + roundsMatch[1] + ' to 6...');
+          await prisma.staff.update({
+            where: { id: s.id },
+            data: { pin_hash: hashPin(knownPin) }
+          });
+        }
       }
     }
 

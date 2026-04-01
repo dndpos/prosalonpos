@@ -6,12 +6,21 @@
  */
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
-import { createToken, comparePin, hashPin } from '../config/auth.js';
+import { createToken, comparePin, hashPin, comparePinAsync, hashPinAsync } from '../config/auth.js';
 
 function fromDb(val) {
   if (val === null || val === undefined) return null;
   if (isSQLite && typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return val; } }
   return val;
+}
+
+// Check if a bcrypt hash uses old (slow) salt rounds and needs rehash
+function needsRehash(hash) {
+  // bcrypt hash format: $2a$XX$ or $2b$XX$ where XX = rounds
+  var match = hash && hash.match(/^\$2[ab]\$(\d+)\$/);
+  if (!match) return false;
+  var rounds = parseInt(match[1], 10);
+  return rounds > 6; // rehash anything above our target of 6
 }
 
 var router = Router();
@@ -53,7 +62,7 @@ router.post('/login', async function(req, res, next) {
       return res.status(400).json({ error: 'salon_id and pin are required' });
     }
 
-    // 1. Check staff PINs
+    // 1. Check staff PINs (async — non-blocking)
     var staff = await prisma.staff.findMany({
       where: { salon_id: salon_id, active: true }
     });
@@ -62,9 +71,18 @@ router.post('/login', async function(req, res, next) {
 
     var matched = null;
     for (var i = 0; i < staff.length; i++) {
-      if (staff[i].pin_hash && comparePin(pin, staff[i].pin_hash)) {
-        matched = staff[i];
-        break;
+      if (staff[i].pin_hash) {
+        var isMatch = await comparePinAsync(pin, staff[i].pin_hash);
+        if (isMatch) {
+          matched = staff[i];
+          // Rehash if using old slow rounds (fire and forget)
+          if (needsRehash(staff[i].pin_hash)) {
+            hashPinAsync(pin).then(function(newHash) {
+              prisma.staff.update({ where: { id: matched.id }, data: { pin_hash: newHash } }).catch(function() {});
+            });
+          }
+          break;
+        }
       }
     }
 
@@ -89,9 +107,15 @@ router.post('/login', async function(req, res, next) {
     var salon = await prisma.salon.findUnique({ where: { id: salon_id } });
     console.log('[Auth] Salon found:', !!salon, '| Has owner_pin_hash:', !!(salon && salon.owner_pin_hash));
     if (salon && salon.owner_pin_hash) {
-      var ownerMatch = comparePin(pin, salon.owner_pin_hash);
-      console.log('[Auth] Owner PIN compare result:', ownerMatch, '| PIN length:', pin.length, '| Hash length:', salon.owner_pin_hash.length);
+      var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
+      console.log('[Auth] Owner PIN compare result:', ownerMatch);
       if (ownerMatch) {
+        // Rehash if using old slow rounds (fire and forget)
+        if (needsRehash(salon.owner_pin_hash)) {
+          hashPinAsync(pin).then(function(newHash) {
+            prisma.salon.update({ where: { id: salon.id }, data: { owner_pin_hash: newHash } }).catch(function() {});
+          });
+        }
         var ownerToken = createToken({
           salon_id: salon_id,
           staff_id: 'owner',
@@ -140,16 +164,24 @@ router.post('/verify-pin', async function(req, res, next) {
       return res.status(400).json({ error: 'salon_id and pin are required' });
     }
 
-    // 1. Staff PINs
+    // 1. Staff PINs (async)
     var staff = await prisma.staff.findMany({
       where: { salon_id: salon_id, active: true }
     });
 
     var matched = null;
     for (var i = 0; i < staff.length; i++) {
-      if (staff[i].pin_hash && comparePin(pin, staff[i].pin_hash)) {
-        matched = staff[i];
-        break;
+      if (staff[i].pin_hash) {
+        var isMatch = await comparePinAsync(pin, staff[i].pin_hash);
+        if (isMatch) {
+          matched = staff[i];
+          if (needsRehash(staff[i].pin_hash)) {
+            hashPinAsync(pin).then(function(newHash) {
+              prisma.staff.update({ where: { id: matched.id }, data: { pin_hash: newHash } }).catch(function() {});
+            });
+          }
+          break;
+        }
       }
     }
 
@@ -168,10 +200,18 @@ router.post('/verify-pin', async function(req, res, next) {
 
     // 2. Owner PIN
     var salon = await prisma.salon.findUnique({ where: { id: salon_id } });
-    if (salon && salon.owner_pin_hash && comparePin(pin, salon.owner_pin_hash)) {
-      return res.json({
-        staff: { id: 'owner', display_name: 'Owner', role: 'owner', rbac_role: 'owner', permissions: null, permission_overrides: null }
-      });
+    if (salon && salon.owner_pin_hash) {
+      var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
+      if (ownerMatch) {
+        if (needsRehash(salon.owner_pin_hash)) {
+          hashPinAsync(pin).then(function(newHash) {
+            prisma.salon.update({ where: { id: salon.id }, data: { owner_pin_hash: newHash } }).catch(function() {});
+          });
+        }
+        return res.json({
+          staff: { id: 'owner', display_name: 'Owner', role: 'owner', rbac_role: 'owner', permissions: null, permission_overrides: null }
+        });
+      }
     }
 
     // 3. Master code
