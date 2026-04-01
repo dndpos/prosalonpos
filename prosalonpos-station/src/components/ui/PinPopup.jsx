@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTheme } from '../../lib/ThemeContext';
 import { validatePin } from '../../lib/rbac';
 import { useStaffStore } from '../../lib/stores/staffStore';
@@ -6,17 +6,18 @@ import { getPairedSalonId } from '../../lib/apiClient';
 
 /**
  * PinPopup — PIN entry modal for RBAC
- * Session 94 | Local SHA-256 lookup — instant verification
+ * Session 94 | Simple: type PIN → hit OK → instant result
  *
- * - Loads pin table once when popup opens
- * - SHA-256 hash comparison done locally — zero network delay
- * - Exact match only — "00000" won't match "0000"
- * - Wrong PIN: shows "Invalid PIN" after 1.5s of no typing, or immediately at max length
+ * Keyboard support:
+ *   0-9 = type digits
+ *   Backspace = delete last digit
+ *   Enter = OK (submit)
+ *   Escape = Cancel
+ *
+ * Touch: numpad buttons + OK button
  */
 
 var MAX_PIN = 8;
-var MIN_CHECK = 4;
-var INVALID_DELAY = 1500;
 
 async function sha256(str) {
   var buf = new TextEncoder().encode(str);
@@ -30,11 +31,15 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
   var [digits, setDigits] = useState('');
   var [error, setError] = useState('');
   var [shake, setShake] = useState(false);
+  var [checking, setChecking] = useState(false);
   var [pinTable, setPinTable] = useState(null);
   var verifyAnyPin = useStaffStore(function(s) { return s.verifyAnyPin; });
   var storeSource = useStaffStore(function(s) { return s.source; });
   var loggedIn = useRef(false);
-  var invalidTimer = useRef(null);
+  var digitsRef = useRef('');
+
+  // Keep ref in sync for keyboard handler
+  useEffect(function() { digitsRef.current = digits; }, [digits]);
 
   // Reset state + load pin table when popup opens
   useEffect(function() {
@@ -42,10 +47,9 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
       setDigits('');
       setError('');
       setShake(false);
+      setChecking(false);
       loggedIn.current = false;
-      if (invalidTimer.current) clearTimeout(invalidTimer.current);
 
-      // Load pin table for RBAC popup
       if (storeSource === 'api') {
         var salonId = getPairedSalonId();
         if (salonId) {
@@ -61,7 +65,103 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
     }
   }, [show, storeSource]);
 
-  // Keyboard listener
+  function handleDigitDirect(d) {
+    if (loggedIn.current || checking) return;
+    setError('');
+    setDigits(function(prev) {
+      if (prev.length >= MAX_PIN) return prev;
+      return prev + d;
+    });
+  }
+
+  function handleBackspace() {
+    if (loggedIn.current || checking) return;
+    setError('');
+    setDigits(function(prev) { return prev.slice(0, -1); });
+  }
+
+  function handleClear() {
+    if (loggedIn.current || checking) return;
+    setError('');
+    setDigits('');
+  }
+
+  function handleCancelDirect() {
+    setDigits('');
+    setError('');
+    loggedIn.current = false;
+    onCancel();
+  }
+
+  function showDenied() {
+    setChecking(false);
+    setError('Access Denied');
+    setShake(true);
+    setTimeout(function() {
+      setDigits('');
+      setShake(false);
+      setError('');
+    }, 1000);
+  }
+
+  // ── OK button — check PIN ──
+  var handleOk = useCallback(function() {
+    if (loggedIn.current || checking) return;
+    var currentDigits = digitsRef.current;
+    if (currentDigits.length === 0) return;
+
+    setError('');
+    setChecking(true);
+
+    // Mock mode
+    if (storeSource !== 'api') {
+      var staff = validatePin(currentDigits, staffList);
+      setChecking(false);
+      if (staff) {
+        loggedIn.current = true;
+        setDigits('');
+        setError('');
+        onSuccess(staff);
+      } else {
+        showDenied();
+      }
+      return;
+    }
+
+    // API mode — local lookup first
+    if (pinTable) {
+      sha256(currentDigits).then(function(hash) {
+        var entry = pinTable[hash];
+        if (entry) {
+          loggedIn.current = true;
+          setChecking(false);
+          setDigits('');
+          setError('');
+          onSuccess(entry);
+        } else {
+          showDenied();
+        }
+      });
+      return;
+    }
+
+    // No pin table — fall back to server
+    verifyAnyPin(currentDigits).then(function(result) {
+      if (result.valid && result.staff) {
+        loggedIn.current = true;
+        setChecking(false);
+        setDigits('');
+        setError('');
+        onSuccess(result.staff);
+      } else {
+        showDenied();
+      }
+    }).catch(function() {
+      showDenied();
+    });
+  }, [storeSource, pinTable, staffList, checking]);
+
+  // ── Keyboard listener ──
   useEffect(function() {
     if (!show) return;
     function onKey(e) {
@@ -71,129 +171,20 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
         handleDigitDirect(e.key);
       } else if (e.key === 'Backspace') {
         e.preventDefault();
-        setError('');
-        setDigits(function(prev) { return prev.slice(0, -1); });
+        handleBackspace();
       } else if (e.key === 'Escape') {
         e.preventDefault();
         handleCancelDirect();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handleOk();
       }
     }
     window.addEventListener('keydown', onKey);
     return function() { window.removeEventListener('keydown', onKey); };
-  }, [show]);
-
-  function handleDigitDirect(d) {
-    if (loggedIn.current) return;
-    setError('');
-    setDigits(function(prev) {
-      if (prev.length >= MAX_PIN) return prev;
-      return prev + d;
-    });
-  }
-
-  function handleCancelDirect() {
-    setDigits('');
-    setError('');
-    loggedIn.current = false;
-    if (invalidTimer.current) clearTimeout(invalidTimer.current);
-    onCancel();
-  }
-
-  // ── Check PIN locally on every keystroke ──
-  useEffect(function() {
-    if (invalidTimer.current) {
-      clearTimeout(invalidTimer.current);
-      invalidTimer.current = null;
-    }
-
-    if (digits.length < MIN_CHECK) return;
-    if (loggedIn.current) return;
-
-    // Mock mode — use old validatePin
-    if (storeSource !== 'api') {
-      var staff = validatePin(digits, staffList);
-      if (staff) {
-        loggedIn.current = true;
-        setDigits('');
-        setError('');
-        onSuccess(staff);
-      } else if (digits.length >= MAX_PIN) {
-        showError();
-      } else {
-        invalidTimer.current = setTimeout(function() {
-          if (!loggedIn.current) showError();
-        }, INVALID_DELAY);
-      }
-      return;
-    }
-
-    // API mode — local SHA-256 lookup
-    if (!pinTable) {
-      // Table not loaded yet — fall back to server call
-      verifyAnyPin(digits).then(function(result) {
-        if (loggedIn.current) return;
-        if (result.valid && result.staff) {
-          loggedIn.current = true;
-          setDigits('');
-          setError('');
-          onSuccess(result.staff);
-        } else if (digits.length >= MAX_PIN) {
-          showError();
-        }
-      }).catch(function() {
-        if (digits.length >= MAX_PIN) showError();
-      });
-      return;
-    }
-
-    sha256(digits).then(function(hash) {
-      if (loggedIn.current) return;
-
-      var entry = pinTable[hash];
-      if (entry) {
-        loggedIn.current = true;
-        setDigits('');
-        setError('');
-        onSuccess(entry);
-        return;
-      }
-
-      if (digits.length >= MAX_PIN) {
-        showError();
-      } else {
-        invalidTimer.current = setTimeout(function() {
-          if (!loggedIn.current) showError();
-        }, INVALID_DELAY);
-      }
-    });
-  }, [digits, pinTable]);
-
-  // Cleanup
-  useEffect(function() {
-    return function() {
-      if (invalidTimer.current) clearTimeout(invalidTimer.current);
-    };
-  }, []);
+  }, [show, handleOk]);
 
   if (!show) return null;
-
-  function showError() {
-    setError('Invalid PIN');
-    setShake(true);
-    setTimeout(function() { setDigits(''); setShake(false); setError(''); }, 800);
-  }
-
-  function handleBackspace() {
-    if (loggedIn.current) return;
-    setError('');
-    setDigits(function(prev) { return prev.slice(0, -1); });
-  }
-
-  function handleClear() {
-    if (loggedIn.current) return;
-    setError('');
-    setDigits('');
-  }
 
   var KEYS = ['7','8','9','4','5','6','1','2','3','C','0','⌫'];
 
@@ -211,6 +202,7 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
 
         <style>{'@keyframes rbac-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-12px); } 40% { transform: translateX(12px); } 60% { transform: translateX(-8px); } 80% { transform: translateX(8px); } }'}</style>
 
+        {/* Lock icon + title */}
         <div style={{ textAlign: 'center', marginBottom: 16 }}>
           <div style={{ fontSize: 28, marginBottom: 8 }}>{titleColor === 'denied' ? '🚫' : '🔒'}</div>
           <div style={{ fontSize: 16, fontWeight: 600, color: T.text }}>PIN Required</div>
@@ -219,27 +211,31 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
           )}
         </div>
 
+        {/* PIN dots display */}
         <div style={{
           height: 48, borderRadius: 8, margin: '0 auto 8px',
           maxWidth: 260,
-          background: T.bg, border: '1px solid ' + (digits.length > 0 ? T.primary : T.borderLight),
+          background: error ? '#2A1215' : T.bg,
+          border: '2px solid ' + (error ? T.danger : (digits.length > 0 ? T.primary : T.borderLight)),
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'border-color 150ms',
+          transition: 'border-color 150ms, background 150ms',
         }}>
           {digits.length === 0
             ? <span style={{ color: T.textMuted, fontSize: 14 }}>Enter PIN</span>
-            : <span style={{ fontSize: 22, letterSpacing: 6, color: T.text, fontWeight: 600 }}>
+            : <span style={{ fontSize: 22, letterSpacing: 6, color: error ? T.danger : T.text, fontWeight: 600 }}>
                 {digits.split('').map(function() { return '●'; }).join('')}
               </span>
           }
         </div>
 
-        <div style={{ height: 22, textAlign: 'center', fontSize: 13, fontWeight: 500, color: T.danger }}>
+        {/* Status message */}
+        <div style={{ height: 24, textAlign: 'center', fontSize: 14, fontWeight: 600, color: T.danger }}>
           {error || ''}
         </div>
 
+        {/* Numpad grid */}
         <div style={{ maxWidth: 260, margin: '0 auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, marginTop: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, marginTop: 4 }}>
             {KEYS.map(function(key) {
               var isBackspaceKey = key === '⌫';
               var isClear = key === 'C';
@@ -265,9 +261,27 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
               );
             })}
           </div>
+
+          {/* OK Button */}
+          <div
+            onClick={handleOk}
+            style={{
+              height: 46, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              marginTop: 6,
+              background: digits.length === 0 || checking ? T.grid : '#2563EB',
+              border: '1px solid ' + (digits.length === 0 || checking ? T.borderLight : '#3B82F6'),
+              color: digits.length === 0 || checking ? T.textMuted : '#FFFFFF',
+              fontSize: 16, fontWeight: 700, cursor: digits.length === 0 || checking ? 'not-allowed' : 'pointer',
+              userSelect: 'none', letterSpacing: 1,
+              transition: 'background 150ms, color 150ms',
+            }}
+          >
+            {checking ? 'Checking...' : 'OK'}
+          </div>
         </div>
 
-        <div style={{ textAlign: 'center', marginTop: 20 }}>
+        {/* Cancel button */}
+        <div style={{ textAlign: 'center', marginTop: 16 }}>
           <div onClick={handleCancelDirect}
             style={{
               height: 38, padding: '0 24px', borderRadius: 8, display: 'inline-flex',

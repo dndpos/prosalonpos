@@ -1,20 +1,18 @@
 /**
  * LoginScreen.jsx — Staff Login (PIN Entry)
- * Session 94 | Instant local PIN verification
+ * Session 94 | Simple: type PIN → hit OK → instant result
  *
- * How it works:
- *   1. Station boots → fetches PIN lookup table from server (one-time)
- *   2. Table maps SHA-256(pin) → staff info
- *   3. On every keystroke, we SHA-256 the current input and look it up locally
- *   4. Match found → instant green flash + login (JWT fetched in background)
- *   5. No match → after 1.5s of no typing, show "Invalid PIN" and clear
- *   6. Exact match only — "00000" will NOT match "0000"
+ * Flow:
+ *   1. Type digits on numpad (or scan badge ID)
+ *   2. Press OK button
+ *   3. Instant result: access granted or denied
+ *   4. No auto-checking, no timers, no background calls
  *
  * Rules:
  *   - div onClick only (no button/input — kiosk virtual keyboard safety)
  *   - Calculator layout: 7-8-9 top
  *   - Max PIN length: 8 digits
- *   - No submit button — auto-recognizes correct PIN
+ *   - OK button triggers the check — nothing else does
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { login, getPairedSalonId, getPairedSalonName, isBackendAvailable, checkBackend, unpairStation } from '../../lib/apiClient';
@@ -22,10 +20,8 @@ import { debugLog } from '../../lib/debugLog';
 import DebugLabel from '../../components/debug/DebugLabel';
 
 var MAX_PIN = 8;
-var MIN_CHECK = 4;
-var INVALID_DELAY = 1500; // ms of no typing before showing "Invalid PIN"
 
-// SHA-256 hash using Web Crypto API (instant, built into every browser)
+// SHA-256 using Web Crypto API (instant, built into every browser)
 async function sha256(str) {
   var buf = new TextEncoder().encode(str);
   var hash = await crypto.subtle.digest('SHA-256', buf);
@@ -37,13 +33,13 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
   var [digits, setDigits] = useState('');
   var [error, setError] = useState('');
   var [matched, setMatched] = useState(false);
+  var [checking, setChecking] = useState(false);
   var [backendUp, setBackendUp] = useState(null);
   var [pinTable, setPinTable] = useState(null);
   var salonName = getPairedSalonName() || 'Your Salon';
   var loggedIn = useRef(false);
-  var invalidTimer = useRef(null);
 
-  // Load PIN table on mount (one-time)
+  // Load PIN table + check backend on mount
   useEffect(function() {
     checkBackend().then(function(up) {
       setBackendUp(up);
@@ -65,88 +61,111 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
     });
   }, []);
 
-  // ── Check PIN locally on every keystroke ──
-  useEffect(function() {
-    if (invalidTimer.current) {
-      clearTimeout(invalidTimer.current);
-      invalidTimer.current = null;
-    }
-
-    if (digits.length < MIN_CHECK) return;
+  // ── OK button pressed — check PIN ──
+  var handleOk = useCallback(function() {
     if (loggedIn.current) return;
-    if (!pinTable) return;
+    if (checking) return;
+    if (digits.length === 0) return;
 
-    sha256(digits).then(function(hash) {
-      if (loggedIn.current) return;
+    setError('');
+    setChecking(true);
 
-      var entry = pinTable[hash];
-      if (entry) {
-        // MATCH — instant visual feedback
-        loggedIn.current = true;
-        setMatched(true);
-        setError('');
-        debugLog('AUTH', 'Local PIN match: ' + entry.display_name);
+    // Try local lookup first (instant)
+    if (pinTable) {
+      sha256(digits).then(function(hash) {
+        var entry = pinTable[hash];
+        if (entry) {
+          // LOCAL MATCH — instant green flash
+          loggedIn.current = true;
+          setMatched(true);
+          setChecking(false);
+          debugLog('AUTH', 'Local PIN match: ' + entry.display_name);
 
-        // Fetch JWT in background
-        login(digits).then(function(data) {
-          if (data.token && data.staff) {
-            onLogin(data);
-          } else {
+          // Fetch JWT in background
+          login(digits).then(function(data) {
+            if (data.token && data.staff) {
+              onLogin(data);
+            } else {
+              loggedIn.current = false;
+              setMatched(false);
+              showDenied();
+            }
+          }).catch(function(err) {
+            if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
+              unpairStation();
+              if (onStaleStation) { onStaleStation(); }
+              else { window.location.reload(); }
+              return;
+            }
             loggedIn.current = false;
             setMatched(false);
-            setError('Server error — try again');
-            setTimeout(function() { setError(''); setDigits(''); }, 1200);
-          }
-        }).catch(function(err) {
-          if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
-            unpairStation();
-            if (onStaleStation) { onStaleStation(); }
-            else { window.location.reload(); }
-            return;
-          }
-          loggedIn.current = false;
-          setMatched(false);
-          setError('Server error — try again');
-          setTimeout(function() { setError(''); setDigits(''); }, 1200);
-        });
+            showDenied();
+          });
+        } else {
+          // NO LOCAL MATCH — denied
+          showDenied();
+        }
+      });
+      return;
+    }
+
+    // No pin table — fall back to server call
+    login(digits).then(function(data) {
+      if (data.token && data.staff) {
+        loggedIn.current = true;
+        setMatched(true);
+        setChecking(false);
+        debugLog('AUTH', 'Login success: ' + data.staff.display_name);
+        onLogin(data);
+      } else {
+        showDenied();
+      }
+    }).catch(function(err) {
+      if (err.status === 404 && err.data && err.data.code === 'NO_STAFF') {
+        unpairStation();
+        if (onStaleStation) { onStaleStation(); }
+        else { window.location.reload(); }
         return;
       }
-
-      // No match at this length
-      if (digits.length >= MAX_PIN) {
-        setError('Invalid PIN');
-        setTimeout(function() { setDigits(''); setError(''); }, 1000);
-      } else {
-        invalidTimer.current = setTimeout(function() {
-          if (!loggedIn.current) {
-            setError('Invalid PIN');
-            setTimeout(function() { setDigits(''); setError(''); }, 1000);
-          }
-        }, INVALID_DELAY);
+      if ((err.message || '').indexOf('fetch') >= 0 || (err.message || '').indexOf('Failed') >= 0) {
+        setChecking(false);
+        setError('Cannot connect to server');
+        setBackendUp(false);
+        return;
       }
+      showDenied();
     });
-  }, [digits, pinTable]);
+  }, [digits, pinTable, checking]);
+
+  function showDenied() {
+    setChecking(false);
+    setError('Access Denied');
+    setTimeout(function() {
+      setDigits('');
+      setError('');
+    }, 1200);
+  }
 
   var handleDigit = useCallback(function(d) {
-    if (loggedIn.current) return;
+    if (loggedIn.current || checking) return;
     setError('');
     setDigits(function(prev) {
       if (prev.length >= MAX_PIN) return prev;
       return prev + d;
     });
-  }, []);
+  }, [checking]);
 
   var handleBackspace = useCallback(function() {
-    if (loggedIn.current) return;
+    if (loggedIn.current || checking) return;
     setError('');
     setDigits(function(prev) { return prev.slice(0, -1); });
-  }, []);
+  }, [checking]);
 
   var handleClear = useCallback(function() {
-    if (loggedIn.current) return;
+    if (loggedIn.current || checking) return;
     setError('');
     setDigits('');
-  }, []);
+  }, [checking]);
 
   // Keyboard listener
   useEffect(function() {
@@ -157,17 +176,14 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
       } else if (e.key === 'Backspace') {
         e.preventDefault();
         handleBackspace();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handleOk();
       }
     }
     window.addEventListener('keydown', onKey);
     return function() { window.removeEventListener('keydown', onKey); };
-  }, [handleDigit, handleBackspace]);
-
-  useEffect(function() {
-    return function() {
-      if (invalidTimer.current) clearTimeout(invalidTimer.current);
-    };
-  }, []);
+  }, [handleDigit, handleBackspace, handleOk]);
 
   var rows = [
     ['7', '8', '9'],
@@ -176,7 +192,8 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
     ['C', '0', '⌫'],
   ];
 
-  var dotBorderColor = matched ? '#22C55E' : (digits.length > 0 ? '#3B82F6' : '#2A3A50');
+  var dotBorderColor = matched ? '#22C55E' : error ? '#EF4444' : (digits.length > 0 ? '#3B82F6' : '#2A3A50');
+  var dotBg = matched ? '#0A2E1A' : error ? '#2A1215' : '#0F1923';
 
   return (
     <div style={{
@@ -201,27 +218,30 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
           Enter your PIN to sign in
         </div>
 
+        {/* PIN dots display */}
         <div style={{
-          height: 48, borderRadius: 8, margin: '0 auto 16px',
+          height: 48, borderRadius: 8, margin: '0 auto 12px',
           maxWidth: 260,
-          background: matched ? '#0A2E1A' : '#0F1923',
+          background: dotBg,
           border: '2px solid ' + dotBorderColor,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'border-color 150ms, background 150ms',
         }}>
           {digits.length === 0
             ? <span style={{ color: '#64748B', fontSize: 14 }}>Enter PIN</span>
-            : <span style={{ fontSize: 22, letterSpacing: 6, color: matched ? '#22C55E' : '#E2E8F0', fontWeight: 600 }}>
+            : <span style={{ fontSize: 22, letterSpacing: 6, color: matched ? '#22C55E' : error ? '#EF4444' : '#E2E8F0', fontWeight: 600 }}>
                 {digits.split('').map(function() { return '●'; }).join('')}
               </span>
           }
         </div>
 
-        <div style={{ height: 22, marginBottom: 8, fontSize: 13, fontWeight: 500 }}>
+        {/* Status message */}
+        <div style={{ height: 24, marginBottom: 8, fontSize: 14, fontWeight: 600 }}>
           {error && <span style={{ color: '#EF4444' }}>{error}</span>}
           {matched && <span style={{ color: '#22C55E' }}>✓ Welcome</span>}
         </div>
 
+        {/* Server down warning */}
         {backendUp === false && (
           <div style={{
             background: '#7F1D1D', border: '1px solid #991B1B', borderRadius: 8,
@@ -251,10 +271,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
           </div>
         )}
 
-        {backendUp === true && !pinTable && (
-          <div style={{ fontSize: 12, color: '#64748B', marginBottom: 8 }}>Loading...</div>
-        )}
-
+        {/* Numpad */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {rows.map(function(row, ri) {
             return (
@@ -291,6 +308,30 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
               </div>
             );
           })}
+
+          {/* OK Button */}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 4 }}>
+            <div
+              onClick={handleOk}
+              style={{
+                width: '100%', maxWidth: 244, height: 52, display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                borderRadius: 10, fontSize: 18, fontWeight: 700,
+                cursor: digits.length === 0 || checking ? 'not-allowed' : 'pointer',
+                userSelect: 'none',
+                background: digits.length === 0 || checking ? '#1E293B' : '#2563EB',
+                color: digits.length === 0 || checking ? '#475569' : '#FFFFFF',
+                border: '1px solid ' + (digits.length === 0 || checking ? '#2A3A50' : '#3B82F6'),
+                transition: 'background 150ms, color 150ms',
+                letterSpacing: 1,
+              }}
+              onMouseDown={function(e) { if (digits.length > 0 && !checking) e.currentTarget.style.transform = 'scale(0.97)'; }}
+              onMouseUp={function(e) { e.currentTarget.style.transform = 'scale(1)'; }}
+              onMouseLeave={function(e) { e.currentTarget.style.transform = 'scale(1)'; }}
+            >
+              {checking ? 'Checking...' : 'OK'}
+            </div>
+          </div>
         </div>
       </div>
 
