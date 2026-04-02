@@ -18,12 +18,32 @@ import { emit } from '../utils/emit.js';
 
 var router = Router();
 
-// ── Helper: get start/end of day for date filtering ──
+// ── Helper: get start/end of day for date filtering (Eastern time) ──
+function getEasternOffset(date) {
+  var str = date.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+  if (str.indexOf('EDT') >= 0) return 240;
+  return 300;
+}
+
 function dayBounds(dateStr) {
-  var d = new Date(dateStr + 'T00:00:00');
-  var start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
-  var end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+  var parts = dateStr.split('-');
+  var y = parseInt(parts[0]);
+  var m = parseInt(parts[1]) - 1;
+  var day = parseInt(parts[2]);
+  var probe = new Date(Date.UTC(y, m, day, 12, 0, 0));
+  var etOffset = getEasternOffset(probe);
+  var start = new Date(Date.UTC(y, m, day, 0, 0, 0, 0));
+  start.setUTCMinutes(start.getUTCMinutes() + etOffset);
+  var end = new Date(Date.UTC(y, m, day, 23, 59, 59, 999));
+  end.setUTCMinutes(end.getUTCMinutes() + etOffset);
   return { start: start, end: end };
+}
+
+function todayStr() {
+  var now = new Date();
+  var etOffset = getEasternOffset(now);
+  var etNow = new Date(now.getTime() - etOffset * 60000);
+  return etNow.getUTCFullYear() + '-' + String(etNow.getUTCMonth() + 1).padStart(2, '0') + '-' + String(etNow.getUTCDate()).padStart(2, '0');
 }
 
 // ── GET /service-lines?start=YYYY-MM-DD — Flat list for calendar rendering ──
@@ -32,9 +52,7 @@ router.get('/service-lines', async function(req, res, next) {
   try {
     var dateStr = req.query.start;
     if (!dateStr) {
-      // Default to today
-      var now = new Date();
-      dateStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+      dateStr = todayStr();
     }
 
     var bounds = dayBounds(dateStr);

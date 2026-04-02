@@ -184,11 +184,10 @@ router.get('/tickets', async function(req, res, next) {
 
     if (req.query.start && req.query.end) {
       // Date range query — for reports, payroll, etc.
-      var startParts = req.query.start.split('-');
-      var endParts = req.query.end.split('-');
-      var rangeStart = new Date(parseInt(startParts[0]), parseInt(startParts[1]) - 1, parseInt(startParts[2]), 0, 0, 0, 0);
-      var rangeEnd = new Date(parseInt(endParts[0]), parseInt(endParts[1]) - 1, parseInt(endParts[2]), 23, 59, 59, 999);
-      where.created_at = { gte: rangeStart, lte: rangeEnd };
+      // Use dayBounds for each date to get correct Eastern time boundaries
+      var rangeBoundsStart = dayBounds(req.query.start);
+      var rangeBoundsEnd = dayBounds(req.query.end);
+      where.created_at = { gte: rangeBoundsStart.start, lte: rangeBoundsEnd.end };
     } else {
       // Single day (default: today)
       var bounds = dayBounds(req.query.date);
