@@ -380,6 +380,7 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
       closedAt: Date.now(), closedBy: activeTechId,
       appointmentId: appointmentData?.appointmentId || null,
       serviceLineIds: appointmentData?.serviceLineIds || null,
+      openTicketIds: appointmentData?.openTicketIds || null,
     };
     if(onCloseTicket) onCloseTicket(ticket);
     onDone();
@@ -680,16 +681,36 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
               })}
             </div>
             )}
-            {/* Cancel + Print Ticket (or Print & Hold when no payment processing) */}
-            <div style={{padding:'4px 8px 8px',display:'grid',gridTemplateColumns:canPay?'1fr 1fr':'1fr 1fr',gap:4}}>
+            {/* Cancel + Hold + Print */}
+            <div style={{padding:'4px 8px 8px',display:'grid',gridTemplateColumns:items.length>0?'1fr 1fr 1fr':'1fr 1fr',gap:4}}>
               <button onClick={onDone}
-                style={{height:38,background:'transparent',border:`1px solid ${C.danger}`,borderRadius:6,color:C.danger,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}
-                onMouseEnter={e=>{e.currentTarget.style.background=C.dangerBg;}}
-                onMouseLeave={e=>{e.currentTarget.style.background='transparent';}}>
+                style={{height:38,background:'transparent',border:'1px solid '+C.danger,borderRadius:6,color:C.danger,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}
+                onMouseEnter={function(e){e.currentTarget.style.background=C.dangerBg;}}
+                onMouseLeave={function(e){e.currentTarget.style.background='transparent';}}>
                 Cancel
               </button>
+              {items.length>0 && (
               <button onClick={function(){
-                // Build receipt data from current checkout state
+                if(!onPrintHold) return;
+                var tNum = nextTicketNumber ? nextTicketNumber() : 1;
+                onPrintHold({
+                  id: appointmentData && appointmentData.openTicketId ? appointmentData.openTicketId : ('hold-'+Date.now()),
+                  ticketNumber: tNum,
+                  client: client,
+                  clientName: client ? ((client.first_name||'')+' '+(client.last_name||'')).trim() : null,
+                  items: items.map(function(it){ return Object.assign({}, it, { price_cents: getPrice(it) }); }),
+                  depositCents: depositCents || 0,
+                  activeTechId: activeTechId,
+                });
+                onDone();
+              }}
+                style={{height:38,background:'#1E3A5F',border:'1px solid #2D5A8E',borderRadius:6,color:'#60A5FA',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}
+                onMouseEnter={function(e){e.currentTarget.style.background='#264B75';}}
+                onMouseLeave={function(e){e.currentTarget.style.background='#1E3A5F';}}>
+                📋 Hold
+              </button>
+              )}
+              <button onClick={function(){
                 var receiptData = {
                   salonName: (salonSettings && salonSettings.salon_name) || 'Salon',
                   salonAddress: salonSettings && salonSettings.address,
@@ -706,12 +727,11 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
                   payments: [],
                 };
                 relayPrint('receipt', receiptData);
-                if(!canPay && onPrintHold) onPrintHold(items, activeTechId);
               }}
-                style={{height:38,background:canPay?'transparent':C.blue,border:canPay?`1px solid ${C.borderMedium}`:'none',borderRadius:6,color:canPay?C.textPrimary:'#fff',fontSize:12,fontWeight:canPay?500:600,cursor:'pointer',fontFamily:'inherit'}}
-                onMouseEnter={e=>{if(canPay){e.currentTarget.style.borderColor=C.blue;e.currentTarget.style.color=C.blueLight;}else{e.currentTarget.style.background='#2563EB';}}}
-                onMouseLeave={e=>{if(canPay){e.currentTarget.style.borderColor=C.borderMedium;e.currentTarget.style.color=C.textPrimary;}else{e.currentTarget.style.background=C.blue;}}}>
-                {canPay ? '🖨 Print Ticket' : '🖨 Print & Hold'}
+                style={{height:38,background:'transparent',border:'1px solid '+C.borderMedium,borderRadius:6,color:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}
+                onMouseEnter={function(e){e.currentTarget.style.borderColor=C.blue;e.currentTarget.style.color=C.blueLight;}}
+                onMouseLeave={function(e){e.currentTarget.style.borderColor=C.borderMedium;e.currentTarget.style.color=C.textPrimary;}}>
+                🖨 Print
               </button>
             </div>
           </div>

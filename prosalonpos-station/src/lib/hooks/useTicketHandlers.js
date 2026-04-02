@@ -20,6 +20,8 @@ export default function useTicketHandlers() {
   var storeSource = useTicketStore(function(s) { return s.source; });
   var storeReopenTicket = useTicketStore(function(s) { return s.reopenTicket; });
   var storeUpdateClosedTicket = useTicketStore(function(s) { return s.updateClosedTicket; });
+  var storeRemoveOpenTicket = useTicketStore(function(s) { return s.removeOpenTicket; });
+  var storeAddOpenTicket = useTicketStore(function(s) { return s.addOpenTicket; });
   var storeUpdateServiceLine = useAppointmentStore(function(s) { return s.updateServiceLine; });
 
   function handleCloseTicket(ticket) {
@@ -31,6 +33,12 @@ export default function useTicketHandlers() {
       }
     });
     if (staffIds.length > 0) turnMarkAvailable(staffIds);
+    // Remove held/open tickets that were loaded into this checkout
+    if (ticket.openTicketIds && ticket.openTicketIds.length > 0) {
+      ticket.openTicketIds.forEach(function(tid) {
+        storeRemoveOpenTicket(tid);
+      });
+    }
     // Connection 3: mark originating calendar service lines as completed
     if (ticket.serviceLineIds && ticket.serviceLineIds.length > 0) {
       ticket.serviceLineIds.forEach(function(slId) {
@@ -131,11 +139,24 @@ export default function useTicketHandlers() {
     }
   }
 
-  function handlePrintHold(items, activeTechId) {
+  function handlePrintHold(holdData) {
+    // Save ticket to open tickets store so it appears in the hold list
+    var ticket = {
+      id: holdData.id || ('hold-' + Date.now()),
+      ticketNumber: holdData.ticketNumber || 0,
+      client: holdData.client || null,
+      clientName: holdData.clientName || null,
+      items: holdData.items || [],
+      depositCents: holdData.depositCents || 0,
+      status: 'open',
+      createdAt: Date.now(),
+    };
+    storeAddOpenTicket(ticket);
+
     // Connection 2: Print & Hold — tech is done with client, return to available queue
     var staffIds = [];
-    (items || []).forEach(function(item) {
-      var id = item.techId || activeTechId;
+    (holdData.items || []).forEach(function(item) {
+      var id = item.techId || holdData.activeTechId;
       if (id && !staffIds.includes(id)) staffIds.push(id);
     });
     if (staffIds.length > 0) turnMarkAvailable(staffIds);

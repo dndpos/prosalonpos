@@ -172,6 +172,17 @@ var useTicketStore = create(function(set, get) {
       });
     },
 
+    addOpenTicket: function(ticket) {
+      set(function(s) {
+        // Don't add if already exists
+        var exists = s.openTickets.some(function(t) { return t.id === ticket.id; });
+        if (exists) return s;
+        return {
+          openTickets: s.openTickets.concat([ticket]),
+        };
+      });
+    },
+
     addClosedTicket: function(ticket) {
       set(function(s) {
         return {

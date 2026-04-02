@@ -623,7 +623,7 @@ export default function App() {
   }
 
   function handleOpenTicketCheckout(ticketIds) {
-    // Load selected open ticket(s) into checkout, remove from open queue
+    // Load selected open ticket(s) into checkout
     var selected = openTickets.filter(function(t){ return ticketIds.includes(t.id); });
     if (selected.length === 0) return;
     var primary = selected[0];
@@ -640,11 +640,9 @@ export default function App() {
       services: allItems,
       depositCents: totalDeposit,
       openTicketIds: ticketIds,
+      openTicketId: primary.id,
     });
-    // Remove from open tickets via store
-    ticketIds.forEach(function(tid) {
-      useTicketStore.getState().removeOpenTicket(tid);
-    });
+    // DON'T remove from open tickets yet — only remove when ticket is closed/paid
     setActivePage('checkout');
   }
 
