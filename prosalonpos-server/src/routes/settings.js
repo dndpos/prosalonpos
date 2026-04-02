@@ -28,11 +28,18 @@ router.get('/', async function(req, res, next) {
     });
 
     if (!row) {
-      // Return empty settings — frontend will use defaults
-      return res.json({ settings: {} });
+      // Return empty settings — but still include owner_pin_sha256 for local PIN check
+      var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
+      var base = {};
+      if (salon && salon.owner_pin_sha256) base.owner_pin_sha256 = salon.owner_pin_sha256;
+      return res.json({ settings: base });
     }
 
-    res.json({ settings: fromDb(row.settings) || {} });
+    var settings = fromDb(row.settings) || {};
+    // Include owner_pin_sha256 for local PIN check at checkout
+    var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
+    if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
+    res.json({ settings: settings });
   } catch (err) { next(err); }
 });
 

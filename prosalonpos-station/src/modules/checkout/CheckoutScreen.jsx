@@ -34,8 +34,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
   var rbac = useRBAC();
   var MOCK_CLIENTS = useClientStore(function(s) { return s.clients; });
   var MOCK_SERVICES = useServiceStore(function(s) { return s.services; });
-  var verifyAnyPin = useStaffStore(function(s) { return s.verifyAnyPin; });
-  var staffSource = useStaffStore(function(s) { return s.source; });
   var canPay = canProcessPayments !== false; // default true
   const [depositCents, setDepositCents] = useState(appointmentData?.depositCents || 0);
   const hasCashier = !!appointmentData?.cashierStaff;
@@ -398,6 +396,12 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     setItems, setClient, setDepositCents, setPayments, setGcLookup, setGcCodeInput, setGcError,
     onCombineTicket: handleCombine,
   });
+  // ── Local SHA-256 PIN helper (instant, no network) ──
+  async function sha256(str) {
+    var buf = new TextEncoder().encode(str);
+    var hash = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(hash)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
   // PIN SCREEN — type PIN, hit OK to check
   // Keyboard support for PIN entry
   useNumpadKeyboard(screen==='pin', function(d){ if(pinDigits.length<8){ var next=pinDigits+d; setPinDigits(next); setPinError(false); } }, function(){ setPinDigits(function(p){ return p.slice(0,-1); }); }, null, onDone, [screen, pinDigits]);
@@ -405,21 +409,29 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     function pinTap(d){ if(pinDigits.length>=8)return; setPinDigits(function(p){ return p+d; }); setPinError(false); }
     function pinOk(){
       if(pinDigits.length===0) return;
-      if(staffSource==='api'){
-        verifyAnyPin(pinDigits).then(function(result){
-          if(result.valid&&result.staff){
-            setPinMatch(result.staff); setTimeout(function(){setActiveTechId(result.staff.id);setScreen('main');setPinDigits('');setPinMatch(null);},600);
-          } else {
-            setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000);
-          }
-        }).catch(function(){
-          setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000);
-        });
-      } else {
-        var match=CHECKOUT_STAFF.find(function(s){return s.pin===pinDigits;});
-        if(match){ setPinMatch(match); setTimeout(function(){setActiveTechId(match.id);setScreen('main');setPinDigits('');setPinMatch(null);},600); }
-        else{ setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000); }
-      }
+      // Local SHA-256 lookup — instant, no network call
+      sha256(pinDigits).then(function(hash) {
+        // Check staff
+        var match = CHECKOUT_STAFF.find(function(s) { return s.pin_sha256 === hash; });
+        if (match) {
+          setPinMatch(match); setTimeout(function(){setActiveTechId(match.id);setScreen('main');setPinDigits('');setPinMatch(null);},600);
+          return;
+        }
+        // Check owner PIN from settings
+        if (salonSettings && salonSettings.owner_pin_sha256 && salonSettings.owner_pin_sha256 === hash) {
+          var ownerStaff = { id: 'owner', display_name: 'Owner', role: 'owner', rbac_role: 'owner' };
+          setPinMatch(ownerStaff); setTimeout(function(){setActiveTechId('owner');setScreen('main');setPinDigits('');setPinMatch(null);},600);
+          return;
+        }
+        // Provider master code
+        if (pinDigits === '90706') {
+          var provStaff = { id: 'provider', display_name: 'Provider', role: 'owner', rbac_role: 'owner' };
+          setPinMatch(provStaff); setTimeout(function(){setActiveTechId('provider');setScreen('main');setPinDigits('');setPinMatch(null);},600);
+          return;
+        }
+        // No match
+        setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000);
+      });
     }
     return <CheckoutPinScreen pinDigits={pinDigits} pinError={pinError} pinMatch={pinMatch} onPinTap={pinTap} onOk={pinOk} onClear={function(){setPinDigits('');setPinError(false);}} onBackspace={function(){setPinDigits(function(p){return p.slice(0,-1);});}} onDone={onDone} />;
   }
