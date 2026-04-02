@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useTheme } from '../../lib/ThemeContext';
+import { useToast } from '../../lib/ToastContext';
+import { api } from '../../lib/apiClient';
 import { useClientStore } from '../../lib/stores/clientStore';
 import { useServiceStore } from '../../lib/stores/serviceStore';
 import { useGiftCardStore } from '../../lib/stores/giftCardStore';
@@ -91,12 +93,14 @@ var DATA_TYPES = [
 
 export default function DataImportExport() {
   var T = useTheme();
+  var toast = useToast();
   var fileRef = useRef(null);
   var [activeType, setActiveType] = useState(null);
   var [importMode, setImportMode] = useState(null); // null | 'preview'
   var [preview, setPreview] = useState(null); // { headers, rows, newCount, skipCount, type }
   var [importResult, setImportResult] = useState(null); // { added, skipped }
   var [exporting, setExporting] = useState(false);
+  var [deduping, setDeduping] = useState(false);
 
   // Stores
   var clients = useClientStore(function(s) { return s.clients; });
@@ -170,6 +174,23 @@ export default function DataImportExport() {
 
     if (csv) downloadCSV(filename, csv);
     setExporting(false);
+  }
+
+  // ── Dedup handler ──
+  async function handleDedup() {
+    setDeduping(true);
+    try {
+      var result = await api.post('/services/dedup', {});
+      if (result.deactivated > 0) {
+        toast.show('Removed ' + result.deactivated + ' duplicate services. ' + result.kept + ' unique services kept.', 'success');
+        fetchServices();
+      } else {
+        toast.show('No duplicate services found.', 'info');
+      }
+    } catch (err) {
+      toast.show('Dedup failed: ' + (err.message || 'Unknown error'), 'error');
+    }
+    setDeduping(false);
   }
 
   // ── Import handlers ──
@@ -446,6 +467,13 @@ export default function DataImportExport() {
                 onMouseLeave={function(e) { e.currentTarget.style.borderWidth = '1px'; e.currentTarget.style.padding = '9px 0'; }}
               >⬆ Import CSV</div>
             </div>
+            {dt.id === 'services' && count > 0 && (
+              <div onClick={deduping ? undefined : handleDedup}
+                style={{ marginTop: 8, padding: '9px 0', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: deduping ? 'wait' : 'pointer', textAlign: 'center', background: '#2D1B0E', color: '#FCA5A5', border: '1px solid #5C2D10', opacity: deduping ? 0.6 : 1 }}
+                onMouseEnter={function(e) { if (!deduping) { e.currentTarget.style.borderWidth = '2px'; e.currentTarget.style.padding = '8px 0'; } }}
+                onMouseLeave={function(e) { e.currentTarget.style.borderWidth = '1px'; e.currentTarget.style.padding = '9px 0'; }}
+              >{deduping ? 'Removing duplicates...' : '🧹 Remove Duplicate Services'}</div>
+            )}
           </div>
         );
       })}

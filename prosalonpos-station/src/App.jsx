@@ -387,39 +387,32 @@ export default function App() {
   }, [storeCategories]);
 
   // Rebuild svcSlots when services or categories change — fills in any categories that have no slot assignments
+  // Also re-populates categories whose saved slots all pointed to deleted/stale service IDs (S101 fix)
   useEffect(function() {
     if (storeCategories.length === 0 || storeServices.length === 0) return;
-    var serviceIdSet = {};
-    storeServices.forEach(function(s) { serviceIdSet[s.id] = true; });
-
+    var svcIdSet = {}; storeServices.forEach(function(s) { svcIdSet[s.id] = true; });
+    function autoAssign(catId) {
+      var inCat = storeServices.filter(function(s) { return s.category_ids && s.category_ids.includes(catId) && s.active !== false; })
+        .sort(function(a, b) { return (a.position || 0) - (b.position || 0); });
+      if (inCat.length === 0) return null;
+      var m = {}; inCat.forEach(function(s, i) { m[i] = s.id; }); return m;
+    }
     setSvcSlots(function(prev) {
-      var next = Object.assign({}, prev);
-      var changed = false;
+      var next = Object.assign({}, prev); var changed = false;
       storeCategories.forEach(function(cat) {
-        // If this category already has a slot map entry, don't touch it
-        // (manual slot assignments via handleQuickAddService manage their own slots)
         if (next[cat.id] !== undefined) {
-          // Just clean out stale service IDs that no longer exist
-          var existingSlots = next[cat.id] || {};
-          var cleaned = {};
-          Object.keys(existingSlots).forEach(function(k) {
-            if (serviceIdSet[existingSlots[k]]) cleaned[k] = existingSlots[k];
-          });
-          if (Object.keys(cleaned).length !== Object.keys(existingSlots).length) {
-            next[cat.id] = cleaned;
-            changed = true;
+          var existing = next[cat.id] || {}; var cleaned = {};
+          Object.keys(existing).forEach(function(k) { if (svcIdSet[existing[k]]) cleaned[k] = existing[k]; });
+          if (Object.keys(cleaned).length !== Object.keys(existing).length) { next[cat.id] = cleaned; changed = true; }
+          // S101: if all saved slots were stale, re-populate from actual services
+          if (Object.keys(existing).length > 0 && Object.keys(cleaned).length === 0) {
+            var fresh = autoAssign(cat.id);
+            if (fresh) { next[cat.id] = fresh; changed = true; }
           }
           return;
         }
-
-        // New category with no slot map — auto-assign services to sequential slots
-        var inCat = storeServices.filter(function(s) { return s.category_ids && s.category_ids.includes(cat.id); })
-          .sort(function(a, b) { return (a.position || 0) - (b.position || 0); });
-        if (inCat.length > 0) {
-          next[cat.id] = {};
-          inCat.forEach(function(s, i) { next[cat.id][i] = s.id; });
-          changed = true;
-        }
+        var fresh = autoAssign(cat.id);
+        if (fresh) { next[cat.id] = fresh; changed = true; }
       });
       return changed ? next : prev;
     });

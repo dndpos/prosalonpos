@@ -188,42 +188,44 @@ router.delete('/:id', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── POST /deduplicate — Remove duplicate services, keep first of each name ──
-router.post('/deduplicate', async function(req, res, next) {
+// ── POST /dedup — Remove duplicate active services by name (keep oldest) ──
+router.post('/dedup', async function(req, res, next) {
   try {
-    var all = await prisma.serviceCatalog.findMany({
+    var allActive = await prisma.serviceCatalog.findMany({
       where: { salon_id: req.salon_id, active: true },
-      orderBy: { created_at: 'asc' },
-      include: { category_links: true }
+      orderBy: { created_at: 'asc' }
     });
 
-    var seen = {};
-    var keepIds = [];
-    var deleteIds = [];
+    // Group by lowercase name
+    var groups = {};
+    allActive.forEach(function(s) {
+      var key = (s.name || '').toLowerCase().trim();
+      if (!key) return;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(s);
+    });
 
-    all.forEach(function(svc) {
-      var key = svc.name.trim().toLowerCase();
-      if (!seen[key]) {
-        seen[key] = svc.id;
-        keepIds.push(svc.id);
-      } else {
-        deleteIds.push(svc.id);
+    // For each group with more than 1 entry, soft-delete all but the first (oldest)
+    var deactivated = 0;
+    var kept = 0;
+    var dupNames = [];
+    var keys = Object.keys(groups);
+    for (var i = 0; i < keys.length; i++) {
+      var group = groups[keys[i]];
+      if (group.length <= 1) { kept++; continue; }
+      kept++;
+      dupNames.push(keys[i] + ' (' + group.length + ')');
+      for (var j = 1; j < group.length; j++) {
+        await prisma.serviceCatalog.update({
+          where: { id: group[j].id },
+          data: { active: false, version: { increment: 1 } }
+        });
+        deactivated++;
       }
-    });
-
-    // Hard delete the duplicates and their category links
-    if (deleteIds.length > 0) {
-      await prisma.serviceCatalogCategory.deleteMany({
-        where: { service_catalog_id: { in: deleteIds } }
-      });
-      await prisma.serviceCatalog.deleteMany({
-        where: { id: { in: deleteIds } }
-      });
     }
 
-    console.log('[deduplicate] Kept ' + keepIds.length + ', deleted ' + deleteIds.length + ' duplicate services');
-    emit(req, 'service:updated');
-    res.json({ kept: keepIds.length, deleted: deleteIds.length });
+    if (deactivated > 0) emit(req, 'service:updated');
+    res.json({ deactivated: deactivated, kept: kept, duplicateNames: dupNames });
   } catch (err) { next(err); }
 });
 

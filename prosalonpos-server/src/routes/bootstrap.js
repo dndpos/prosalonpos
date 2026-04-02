@@ -76,10 +76,9 @@ router.get('/', async function(req, res, next) {
         orderBy: { display_name: 'asc' }
       }),
 
-      // Services (with category links for category_ids)
+      // Services
       prisma.serviceCatalog.findMany({
         where: { salon_id: salonId },
-        include: { category_links: true },
         orderBy: { name: 'asc' }
       }),
 
@@ -188,14 +187,6 @@ router.get('/', async function(req, res, next) {
       }
       delete copy.pin_plain;
       return copy;
-    });
-
-    // Map services: add category_ids from category_links
-    services = services.map(function(s) {
-      var obj = Object.assign({}, s);
-      obj.category_ids = (s.category_links || []).map(function(l) { return l.category_id; });
-      delete obj.category_links;
-      return obj;
     });
 
     res.json({
