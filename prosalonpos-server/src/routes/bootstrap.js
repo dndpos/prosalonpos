@@ -110,7 +110,7 @@ router.get('/', async function(req, res, next) {
           created_at: { gte: bounds.start, lte: bounds.end }
         },
         include: {
-          line_items: true,
+          items: true,
           payments: true
         },
         orderBy: { created_at: 'desc' }
