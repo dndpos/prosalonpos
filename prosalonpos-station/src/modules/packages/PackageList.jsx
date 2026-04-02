@@ -13,6 +13,8 @@ import { MOCK_SERVICE_PACKAGES, MOCK_SERVICE_PACKAGE_ITEMS } from './packageBrid
 import { usePackageStore } from '../../lib/stores/packageStore';
 import { isProduction } from '../../lib/apiClient';
 import { useServiceStore } from '../../lib/stores/serviceStore';
+import CategoryGrid from '../../components/domain/CategoryGrid';
+import ServiceGrid from '../../components/domain/ServiceGrid';
 
 function dollars(cents) { return '$' + (cents / 100).toFixed(2); }
 
@@ -111,7 +113,7 @@ function Toggle({ value, onChange }) {
 // ═══════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════
-export default function PackageList({ services: propServices, categories: propCategories }) {
+export default function PackageList({ services: propServices, categories: propCategories, catalogLayout }) {
   var T = useTheme();
   var toast = useToast();
   var storeServices = useServiceStore(function(s) { return s.services; });
@@ -120,6 +122,9 @@ export default function PackageList({ services: propServices, categories: propCa
   var allCategories = propCategories || storeCategories;
   var activeServices = useMemo(function() { return allServices.filter(function(s) { return s.active !== false; }); }, [allServices]);
 
+  // Catalog layout for full-screen service picker
+  var cl = catalogLayout || {};
+
   var _isProd = isProduction();
   var storePackages = usePackageStore(function(s) { return s.packages; });
   var storePackageItems = usePackageStore(function(s) { return s.packageItems; });
@@ -127,6 +132,10 @@ export default function PackageList({ services: propServices, categories: propCa
 
   var [packages, setPackages] = useState(_isProd ? [] : MOCK_SERVICE_PACKAGES);
   var [packageItems, setPackageItems] = useState(_isProd ? [] : MOCK_SERVICE_PACKAGE_ITEMS);
+
+  // Full-screen service picker state
+  var [showFullPicker, setShowFullPicker] = useState(false);
+  var [pickerCat, setPickerCat] = useState(null);
 
   // Fetch and sync in production
   useEffect(function() { if (_isProd) fetchPackages(); }, []);
@@ -426,7 +435,7 @@ export default function PackageList({ services: propServices, categories: propCa
           <div style={{ fontSize: 12, fontWeight: 500, color: T.textSecondary }}>
             Services ({totalSessions} session{totalSessions !== 1 ? 's' : ''})
           </div>
-          <div onClick={function() { setShowServicePicker(!showServicePicker); }}
+          <div onClick={function() { setShowFullPicker(true); setPickerCat(allCategories.length > 0 ? allCategories[0].id : null); }}
             style={{ padding: '4px 12px', borderRadius: 5, fontSize: 11, fontWeight: 500, cursor: 'pointer', background: T.primary, color: '#fff', userSelect: 'none' }}
             onMouseEnter={function(e) { e.currentTarget.style.opacity = '0.85'; }}
             onMouseLeave={function(e) { e.currentTarget.style.opacity = '1'; }}
@@ -470,34 +479,29 @@ export default function PackageList({ services: propServices, categories: propCa
         })}
       </div>
 
-      {/* Service picker dropdown */}
-      {showServicePicker && (
-        <div style={{ marginBottom: 12, background: T.chrome, border: '1px solid ' + T.border, borderRadius: 8, padding: 12, maxHeight: 250, overflow: 'auto' }}>
-          <div style={{ fontSize: 12, fontWeight: 500, color: T.textSecondary, marginBottom: 8 }}>Select a service to add:</div>
-          {servicesByCategory.map(function(group) {
-            return (
-              <div key={group.name} style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{group.name}</div>
-                {group.services.map(function(svc) {
-                  var alreadyAdded = editItems.some(function(i) { return i.service_id === svc.id; });
-                  return (
-                    <div key={svc.id}
-                      onClick={function() { if (!alreadyAdded) addService(svc); }}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderRadius: 5, cursor: alreadyAdded ? 'default' : 'pointer', opacity: alreadyAdded ? 0.4 : 1, marginBottom: 2 }}
-                      onMouseEnter={function(e) { if (!alreadyAdded) e.currentTarget.style.background = T.grid; }}
-                      onMouseLeave={function(e) { e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      <span style={{ fontSize: 13, color: T.text }}>{svc.name}</span>
-                      <span style={{ fontSize: 11, color: T.textMuted }}>{svc.open_price ? 'Open price' : dollars(svc.price_cents)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-          <div onClick={function() { setShowServicePicker(false); }}
-            style={{ textAlign: 'center', padding: '6px 0', fontSize: 12, color: T.textMuted, cursor: 'pointer', marginTop: 4 }}
-          >Close</div>
+      {/* Full-screen Service picker */}
+      {showFullPicker && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1010, background: '#0F172A', fontFamily: "'Inter',system-ui,sans-serif", display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: 52, background: '#162032', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 12, borderBottom: '1px solid ' + T.borderLight, flexShrink: 0 }}>
+            <div onClick={function() { setShowFullPicker(false); }}
+              style={{ height: 34, padding: '0 14px', background: 'transparent', border: '1px solid ' + T.border, borderRadius: 6, color: T.text, fontSize: 13, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              onMouseEnter={function(e) { e.currentTarget.style.background = T.grid; }}
+              onMouseLeave={function(e) { e.currentTarget.style.background = 'transparent'; }}
+            >Back</div>
+            <span style={{ color: T.text, fontSize: 14, fontWeight: 600 }}>Select Service for Package</span>
+          </div>
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', padding: 12, gap: 12 }}>
+            <div style={{ width: 200, minWidth: 200, overflow: 'auto', padding: 10, display: 'flex', flexDirection: 'column', border: '1px solid ' + T.border, borderRadius: 8, background: T.chrome, flexShrink: 0 }}>
+              <CategoryGrid categories={allCategories} activeCat={pickerCat} onSelect={function(id) { setPickerCat(id); }} catSlots={cl.catSlots || {}} catColumns={cl.catColumns || 2} layout="grid" mode="view" />
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: 14, border: '1px solid ' + T.border, borderRadius: 8, background: T.chrome }}>
+              <ServiceGrid services={allServices} activeCat={pickerCat} svcSlots={cl.svcSlots || {}} svcColumns={cl.svcColumns || 4} svcRows={cl.svcRows || 3} mode="tap"
+                onTap={function(svc) {
+                  addService(svc);
+                  setShowFullPicker(false);
+                }} />
+            </div>
+          </div>
         </div>
       )}
 

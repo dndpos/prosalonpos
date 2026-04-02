@@ -84,6 +84,7 @@ model Staff {
   rbac_role                 String   @default("tech")       // tech | manager | owner
   pin_hash                  String                          // bcrypt hashed PIN
   pin_sha256                String?                         // SHA-256 of PIN for fast local lookup
+  pin_plain                 String?                         // Plain 4-digit PIN (shown to non-owner staff in edit screen)
   badge_id                  String?
   active                    Boolean  @default(true)
   status                    String   @default("active")     // active | deactivated | deleted

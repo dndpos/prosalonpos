@@ -36,6 +36,11 @@ router.get('/', async function(req, res, next) {
     var safe = staff.map(function(s) {
       var copy = Object.assign({}, s);
       delete copy.pin_hash;
+      // Show plain PIN for non-owners only
+      if (copy.role !== 'owner' && copy.pin_plain) {
+        copy.pin_display = copy.pin_plain;
+      }
+      delete copy.pin_plain;
       // Parse JSON fields from SQLite string storage
       JSON_FIELDS.forEach(function(f) { if (copy[f] !== undefined) copy[f] = fromDb(copy[f]); });
       copy.assigned_service_ids = (s.service_staff || []).map(function(ss) {
@@ -59,6 +64,10 @@ router.get('/:id', async function(req, res, next) {
     if (!s) return res.status(404).json({ error: 'Staff not found' });
 
     delete s.pin_hash;
+    if (s.role !== 'owner' && s.pin_plain) {
+      s.pin_display = s.pin_plain;
+    }
+    delete s.pin_plain;
     JSON_FIELDS.forEach(function(f) { if (s[f] !== undefined) s[f] = fromDb(s[f]); });
     s.assigned_service_ids = (s.service_staff || []).map(function(ss) {
       return ss.service_catalog_id;
@@ -136,6 +145,7 @@ router.post('/', async function(req, res, next) {
 
     // ── Run duplicate check + bcrypt hash in PARALLEL ──
     var newPinSha = pinSha256(newPin);
+    var newPinPlain = newPin; // Store plain PIN for display in edit screen
     var [existingStaff, salon, pinHashResult] = await Promise.all([
       prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true, role: { not: 'owner' } }, select: { pin_sha256: true, display_name: true } }),
       prisma.salon.findUnique({ where: { id: req.salon_id }, select: { owner_pin_sha256: true } }),
@@ -161,6 +171,7 @@ router.post('/', async function(req, res, next) {
         rbac_role: data.rbac_role || 'tech',
         pin_hash: pinHashResult,
         pin_sha256: newPinSha,
+        pin_plain: newPinPlain,
         badge_id: data.badge_id || null,
         active: data.active !== false,
         tech_turn_eligible: data.tech_turn_eligible !== false,
@@ -253,6 +264,7 @@ router.put('/:id', async function(req, res, next) {
       }
       updateData.pin_hash = pinHashResult;
       updateData.pin_sha256 = newPinSha;
+      updateData.pin_plain = data.pin;
     }
 
     updateData.version = { increment: 1 };
@@ -287,6 +299,10 @@ router.put('/:id', async function(req, res, next) {
 
     delete s.pin_hash;
     delete s.service_staff;
+    if (s.role !== 'owner' && s.pin_plain) {
+      s.pin_display = s.pin_plain;
+    }
+    delete s.pin_plain;
     JSON_FIELDS.forEach(function(f) { if (s[f] !== undefined) s[f] = fromDb(s[f]); });
     emit(req, 'staff:updated');
     res.json({ staff: s });

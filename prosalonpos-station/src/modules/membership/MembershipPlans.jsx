@@ -14,6 +14,8 @@ import { MOCK_MEMBERSHIP_PLANS, MOCK_MEMBERSHIP_PERKS, STATUS_COLORS, cycleName 
 import { useMembershipStore } from '../../lib/stores/membershipStore';
 import { isProduction } from '../../lib/apiClient';
 import { useServiceStore } from '../../lib/stores/serviceStore';
+import CategoryGrid from '../../components/domain/CategoryGrid';
+import ServiceGrid from '../../components/domain/ServiceGrid';
 
 
 function dollars(cents) { return '$' + (cents / 100).toFixed(2); }
@@ -152,6 +154,13 @@ export default function MembershipPlans({ catalogLayout }) {
   var [editingPerk, setEditingPerk] = useState(null);
   var [perkNumpad, setPerkNumpad] = useState(null);
   var [perkNumStr, setPerkNumStr] = useState('');
+
+  // Service picker for free_service perk
+  var [svcPickerPerkId, setSvcPickerPerkId] = useState(null);
+  var [svcPickerCat, setSvcPickerCat] = useState(null);
+  var cl = catalogLayout || {};
+  var _catList = cl.categories || MOCK_CATEGORIES;
+  var _svcList = cl.services || MOCK_SERVICES;
 
   function handleNumKey(key, setter) {
     setter(function(p) { if (key === 'C') return ''; if (key === '⌫') return p.slice(0, -1); if (/\d/.test(key)) return p + key; return p; });
@@ -378,6 +387,7 @@ export default function MembershipPlans({ catalogLayout }) {
     }
 
     if (pk.type === 'free_service') {
+      var selectedSvc = MOCK_SERVICES.find(function(s) { return s.id === pk.service_catalog_id; });
       return (
         <div key={pk.id} style={{ backgroundColor: T.grid, borderRadius: 6, padding: '10px 14px', marginBottom: 6, border: '1px solid ' + T.border }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -388,11 +398,20 @@ export default function MembershipPlans({ catalogLayout }) {
             <NumField value={perkNumpad === pk.id + '_qty' ? (parseInt(perkNumStr, 10) || 0) : pk.quantity_per_cycle} suffix="/cycle" active={perkNumpad === pk.id + '_qty'}
               onClick={function() { if (perkNumpad === pk.id + '_qty') { setPerkNumpad(null); } else { setPerkNumpad(pk.id + '_qty'); setPerkNumStr(String(pk.quantity_per_cycle || '')); } }} />
             <span style={{ fontSize: 11, color: T.textSecondary }}>×</span>
-            <select value={pk.service_catalog_id || ''} onChange={function(e) { updatePerk(pk.id, 'service_catalog_id', e.target.value); }}
-              style={{ background: T.chrome, color: T.text, border: '1px solid ' + T.border, borderRadius: 6, padding: '5px 10px', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer' }}>
-              <option value="">Select service...</option>
-              {MOCK_SERVICES.filter(function(s) { return s.active; }).map(function(s) { return <option key={s.id} value={s.id}>{s.name} ({dollars(s.price_cents)})</option>; })}
-            </select>
+            {selectedSvc ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{selectedSvc.name}</span>
+                <span style={{ fontSize: 11, color: T.textMuted }}>({dollars(selectedSvc.price_cents)})</span>
+                <div onClick={function() { setSvcPickerPerkId(pk.id); setSvcPickerCat(_catList.length > 0 ? _catList[0].id : null); }}
+                  style={{ fontSize: 11, color: T.blueLight, cursor: 'pointer', textDecoration: 'underline' }}>Change</div>
+              </div>
+            ) : (
+              <div onClick={function() { setSvcPickerPerkId(pk.id); setSvcPickerCat(_catList.length > 0 ? _catList[0].id : null); }}
+                style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #22C55E', background: 'rgba(34,197,94,0.1)', color: '#4ADE80', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
+                onMouseEnter={function(e) { e.currentTarget.style.background = 'rgba(34,197,94,0.2)'; }}
+                onMouseLeave={function(e) { e.currentTarget.style.background = 'rgba(34,197,94,0.1)'; }}
+              >+ Select Service</div>
+            )}
           </div>
           {perkNumpad === pk.id + '_qty' && (
             <div style={{ marginTop: 8 }}>
@@ -625,6 +644,32 @@ export default function MembershipPlans({ catalogLayout }) {
 
         </div>
       </div>
+
+      {/* ── Full-screen Service Picker for Free Service Perk ── */}
+      {svcPickerPerkId && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1010, background: T.bg || '#0F172A', fontFamily: "'Inter',system-ui,sans-serif", display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: 52, background: T.chromeDark || '#162032', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 12, borderBottom: '1px solid ' + T.borderLight, flexShrink: 0 }}>
+            <div onClick={function() { setSvcPickerPerkId(null); }}
+              style={{ height: 34, padding: '0 14px', background: 'transparent', border: '1px solid ' + T.border, borderRadius: 6, color: T.text, fontSize: 13, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              onMouseEnter={function(e) { e.currentTarget.style.background = T.grid; }}
+              onMouseLeave={function(e) { e.currentTarget.style.background = 'transparent'; }}
+            >Cancel</div>
+            <span style={{ color: T.text, fontSize: 14, fontWeight: 600 }}>Select Free Service</span>
+          </div>
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', padding: 12, gap: 12 }}>
+            <div style={{ width: 200, minWidth: 200, overflow: 'auto', padding: 10, display: 'flex', flexDirection: 'column', border: '1px solid ' + T.border, borderRadius: 8, background: T.chrome, flexShrink: 0 }}>
+              <CategoryGrid categories={_catList} activeCat={svcPickerCat} onSelect={function(id) { setSvcPickerCat(id); }} catSlots={cl.catSlots || {}} catColumns={cl.catColumns || 2} layout="grid" mode="view" />
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: 14, border: '1px solid ' + T.border, borderRadius: 8, background: T.chrome }}>
+              <ServiceGrid services={_svcList} activeCat={svcPickerCat} svcSlots={cl.svcSlots || {}} svcColumns={cl.svcColumns || 4} svcRows={cl.svcRows || 3} mode="tap"
+                onTap={function(svc) {
+                  updatePerk(svcPickerPerkId, 'service_catalog_id', svc.id);
+                  setSvcPickerPerkId(null);
+                }} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

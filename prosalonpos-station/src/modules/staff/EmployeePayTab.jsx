@@ -164,9 +164,10 @@ export default function EmployeePayTab({ ctx }) {
                   <div style={{ height: 44, padding: '0 8px', background: T.border, borderRadius: '0 8px 8px 0', display: 'flex', alignItems: 'center' }}>
                     <select value={salaryPeriod} onChange={function(e) { setSalaryPeriod(e.target.value); }}
                       style={{ background: 'transparent', border: 'none', color: T.text, fontSize: 12, fontWeight: 500, fontFamily: F, outline: 'none', cursor: 'pointer' }}>
-                      <option value="weekly">/week</option>
-                      <option value="biweekly">/2wk</option>
-                      <option value="monthly">/mo</option>
+                      <option value="weekly">/weekly</option>
+                      <option value="biweekly">/biweekly</option>
+                      <option value="bimonthly">/bi-monthly</option>
+                      <option value="monthly">/monthly</option>
                     </select>
                   </div>
                 </div>

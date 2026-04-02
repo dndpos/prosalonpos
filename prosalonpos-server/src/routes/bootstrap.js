@@ -178,6 +178,17 @@ router.get('/', async function(req, res, next) {
     // Include owner_pin_sha256 for local PIN check (same as settings route)
     if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
 
+    // Clean staff data — add pin_display for non-owners
+    staff = staff.map(function(s) {
+      var copy = Object.assign({}, s);
+      delete copy.pin_hash;
+      if (copy.role !== 'owner' && copy.pin_plain) {
+        copy.pin_display = copy.pin_plain;
+      }
+      delete copy.pin_plain;
+      return copy;
+    });
+
     res.json({
       staff: staff,
       services: services,

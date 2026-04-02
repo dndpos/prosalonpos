@@ -15,7 +15,7 @@ var TABS = [
   { id: 'settings', label: 'Settings', bg:'#182A3A', text:'#7EB8DC', border:'#264460' },
 ];
 
-export default function PackageModule({ salonSettings, onSettingsUpdate, services, categories }) {
+export default function PackageModule({ salonSettings, onSettingsUpdate, services, categories, catalogLayout }) {
   var T = useTheme();
   var [activeTab, setActiveTab] = useState('packages');
 
@@ -54,7 +54,7 @@ export default function PackageModule({ salonSettings, onSettingsUpdate, service
 
       {/* ── Tab content ── */}
       <div style={{ flex: 1, overflow: 'auto', padding: '4px 20px 20px 20px' }}>
-        {activeTab === 'packages' && <PackageList services={services} categories={categories} />}
+        {activeTab === 'packages' && <PackageList services={services} categories={categories} catalogLayout={catalogLayout} />}
         {activeTab === 'settings' && <PackageSettings settings={salonSettings} onUpdate={onSettingsUpdate} />}
       </div>
     </div>

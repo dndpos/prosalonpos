@@ -52,7 +52,9 @@ var useServiceStore = create(function(set, get) {
 
     createService: async function(serviceData) {
       var data = await api.post('/services', serviceData);
-      await get().fetchServices();
+      if (data.service) {
+        set(function(s) { return { services: s.services.concat([data.service]) }; });
+      }
       return data.service;
     },
 

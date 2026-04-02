@@ -135,7 +135,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
   var [payType, setPayType] = useState(isEdit ? (employee.pay_type || 'commission') : 'commission');
   var [hourlyRate, setHourlyRate] = useState(isEdit ? String(employee.hourly_rate_cents || '') : '');
   var [salaryAmount, setSalaryAmount] = useState(isEdit ? String(employee.salary_amount_cents || '') : '');
-  var [salaryPeriod, setSalaryPeriod] = useState(isEdit ? (employee.salary_period || 'biweekly') : 'biweekly');
+  var [salaryPeriod, setSalaryPeriod] = useState(isEdit ? (employee.salary_period || 'biweekly') : (_ss.pay_frequency || 'biweekly'));
   var [commissionPct, setCommissionPct] = useState(isEdit ? String(employee.commission_pct || '') : '');
   var [commissionBonusEnabled, setCommissionBonusEnabled] = useState(isEdit ? !!employee.commission_bonus_enabled : false);
   var [categoryCommRates, setCategoryCommRates] = useState(isEdit ? (employee.category_commission_rates || {}) : {});
@@ -373,7 +373,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{isEdit ? 'Edit Employee' : 'Add Employee'}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{isEdit ? 'Edit Staff' : 'Add Staff'}</div>
           <div onClick={handleClose} style={{ width: 30, height: 30, borderRadius: 6, background: 'transparent', color: T.textMuted, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             onMouseEnter={function(e) { e.currentTarget.style.color = T.text; e.currentTarget.style.background = T.grid; }}
             onMouseLeave={function(e) { e.currentTarget.style.color = T.textMuted; e.currentTarget.style.background = 'transparent'; }}
@@ -415,16 +415,25 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
             {role !== 'owner' ? (
             <div style={{ marginBottom: 14 }}>
               <label style={LBL}>{isEdit ? 'Change PIN' : 'PIN'} <span style={{ color: T.textMuted, fontWeight: 400 }}>(4 digits)</span></label>
+              {isEdit && employee.pin_display && !pin && (
+                <div style={{ padding: '6px 12px', background: T.raised, border: '1px solid ' + T.border, borderRadius: 6, fontSize: 14, color: T.text, fontWeight: 600, letterSpacing: '4px', fontVariantNumeric: 'tabular-nums', marginBottom: 6 }}>
+                  {employee.pin_display}
+                </div>
+              )}
               <div onClick={function() { setShowPinPad(!showPinPad); }}
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: showPinPad ? T.bg : T.raised, border: '1px solid ' + (showPinPad ? T.primary + '60' : T.border), borderRadius: 6, cursor: 'pointer', transition: 'border 150ms, background 150ms' }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {[0, 1, 2, 3].map(function(i) {
-                    return (<div key={i} style={{ width: 16, height: 16, borderRadius: '50%', background: i < pin.length ? T.primary : 'transparent', border: '2px solid ' + (i < pin.length ? T.primary : T.border) }} />);
-                  })}
-                </div>
+                {pin.length > 0 ? (
+                  <span style={{ fontSize: 18, fontWeight: 600, color: T.text, letterSpacing: '6px', fontVariantNumeric: 'tabular-nums' }}>{pin}</span>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {[0, 1, 2, 3].map(function(i) {
+                      return (<div key={i} style={{ width: 16, height: 16, borderRadius: '50%', background: 'transparent', border: '2px solid ' + T.border }} />);
+                    })}
+                  </div>
+                )}
                 {pin.length === 4 && <span style={{ color: T.success, fontSize: 11, fontWeight: 500 }}>✓ Set</span>}
                 {pin.length > 0 && pin.length < 4 && <span style={{ color: T.textMuted, fontSize: 11 }}>{pin.length}/4</span>}
-                {pin.length === 0 && <span style={{ color: T.textMuted, fontSize: 11 }}>Tap to set</span>}
+                {pin.length === 0 && <span style={{ color: T.textMuted, fontSize: 11 }}>Tap to {isEdit ? 'change' : 'set'}</span>}
               </div>
               {showPinPad && (
                 <div style={{ background: T.bg, border: '1px solid ' + T.border, borderRadius: 8, padding: 10, width: 170, marginTop: 8 }}>
@@ -481,7 +490,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
 
             <div style={{ borderTop: '1px solid ' + T.border, paddingTop: 8 }}>
               <Toggle value={techTurnEligible} onChange={setTechTurnEligible} label="Tech Turn Eligible" />
-              {isEdit && <Toggle value={!isActive} onChange={function(v) { setIsActive(!v); }} label="Deactivate Employee" />}
+              {isEdit && <Toggle value={!isActive} onChange={function(v) { setIsActive(!v); }} label="Deactivate Staff" />}
             </div>
           </div>
         )}
@@ -489,7 +498,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
         {/* ── SCHEDULE TAB ── */}
         {activeTab === 'schedule' && (
           <div>
-            <div style={{ color: T.textSecondary, fontSize: 12, marginBottom: 14, lineHeight: 1.5 }}>Set which days and hours this employee works.</div>
+            <div style={{ color: T.textSecondary, fontSize: 12, marginBottom: 14, lineHeight: 1.5 }}>Set which days and hours this staff member works.</div>
             {DAYS.map(function(day) {
               var d = schedule[day.key] || { enabled: false, start: 540, end: 1020 };
               return (
@@ -578,11 +587,11 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
               >Cancel</div>
               <div onClick={handleSave} style={{ height: 36, padding: '0 18px', borderRadius: 6, border: 'none', background: canSave ? T.primary : T.grid, color: canSave ? '#FFFFFF' : T.textMuted, fontSize: 13, fontWeight: 500, cursor: canSave ? 'pointer' : 'default', fontFamily: F, display: 'flex', alignItems: 'center' }}
                 onMouseEnter={function(e) { if (canSave) e.currentTarget.style.background = '#1D4FD7'; }} onMouseLeave={function(e) { if (canSave) e.currentTarget.style.background = T.primary; }}
-              >{isEdit ? 'Save Changes' : 'Add Employee'}</div>
+              >{isEdit ? 'Save Changes' : 'Add Staff'}</div>
             </div>
           ) : (
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <div onClick={onClose} style={{ height: 36, padding: '0 18px', borderRadius: 6, border: '1px solid ' + T.border, background: 'transparent', color: T.text, fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: F, display: 'flex', alignItems: 'center' }}
+              <div onClick={onClose} style={{ height: 44, padding: '0 28px', borderRadius: 6, border: '1px solid ' + T.border, background: 'transparent', color: T.text, fontSize: 18, fontWeight: 600, cursor: 'pointer', fontFamily: F, display: 'flex', alignItems: 'center' }}
                 onMouseEnter={function(e) { e.currentTarget.style.background = T.grid; }} onMouseLeave={function(e) { e.currentTarget.style.background = 'transparent'; }}
               >Close</div>
             </div>

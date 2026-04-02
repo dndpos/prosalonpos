@@ -13,6 +13,7 @@ import DebugLabel from '../../components/debug/DebugLabel';
 import DateRangePicker from './PayrollDatePicker';
 import CheckOverrideModal from './CheckOverrideModal';
 import PayrollCheckConfirmModal from './PayrollCheckConfirmModal';
+import PayPeriodPopup from './PayPeriodPopup';
 import TimeClockTimesheets from '../time-clock/TimeClockTimesheets';
 import { fmt } from '../../lib/formatUtils';
 import { reshapeTicketForPayroll, calculateHoursFromPunches, calculateTipsFromTickets, reshapePayrollHistory } from './payrollDataHelpers';
@@ -264,6 +265,12 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
   var [activeTab, setActiveTab] = useState('current');
   var [selectedId, setSelectedId] = useState(null);
   var [runStatus, setRunStatus] = useState('draft');
+
+  // Pay period settings
+  var [showPayPeriodPopup, setShowPayPeriodPopup] = useState(false);
+  var payFrequency = MOCK_SALON_SETTINGS.pay_frequency || 'biweekly';
+  var payPeriodStartDay = MOCK_SALON_SETTINGS.pay_period_start_day || 'monday';
+  var updateSettings = useSettingsStore(function(s) { return s.updateSetting; });
 
   // Default period: current biweekly (last 14 days ending yesterday)
   var _defaultPeriod = useMemo(function() {
@@ -550,6 +557,14 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
             >{tab.label}</div>
           );
         })}
+
+        {/* Pay Period Settings button */}
+        <div onClick={function() { setShowPayPeriodPopup(true); }}
+          style={{ padding: '8px 18px', cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: 'inherit', color: '#E879F9', background: '#3B0764', border: '1px solid #581C87', borderRadius: 7, transition: 'all 150ms', userSelect: 'none' }}
+          onMouseEnter={function(e) { e.currentTarget.style.borderWidth = '2px'; e.currentTarget.style.padding = '7px 17px'; }}
+          onMouseLeave={function(e) { e.currentTarget.style.borderWidth = '1px'; e.currentTarget.style.padding = '8px 18px'; }}
+        >Pay Period</div>
+
         <div style={{ flex: 1 }} />
         <div onClick={function() {
             printTickets({
@@ -754,6 +769,16 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
         periodLabel={fmtPeriodLabel(periodStart, periodEnd)}
         payTypeDisplay={payTypeDisplay}
       />
+
+      {/* ── Pay Period Settings Popup ── */}
+      {showPayPeriodPopup && (
+        <PayPeriodPopup
+          payFrequency={payFrequency}
+          payPeriodStartDay={payPeriodStartDay}
+          onUpdateSetting={updateSettings}
+          onClose={function() { setShowPayPeriodPopup(false); }}
+        />
+      )}
     </div>
   );
 }

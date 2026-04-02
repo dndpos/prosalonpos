@@ -212,7 +212,7 @@ export default function OwnerDashboard({ salonSettings, onSettingsUpdate, onBack
   );
 
   const renderPackages = () => (
-    <PackageModule salonSettings={salonSettings} onSettingsUpdate={onSettingsUpdate} services={services} categories={categories} />
+    <PackageModule salonSettings={salonSettings} onSettingsUpdate={onSettingsUpdate} services={services} categories={categories} catalogLayout={catalogLayout} />
   );
 
   const renderGiftCards = () => (

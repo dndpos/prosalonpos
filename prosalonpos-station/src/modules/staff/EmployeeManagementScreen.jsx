@@ -126,7 +126,7 @@ export default function EmployeeManagementScreen({
     staffActions.updateStaff(editingEmployee.id, updates).then(function() {
       setEditingEmployee(null);
     }).catch(function(err) {
-      toast.show(err.message || 'Failed to save employee', 'error');
+      toast.show(err.message || 'Failed to save staff', 'error');
     });
   }
 
@@ -155,7 +155,7 @@ export default function EmployeeManagementScreen({
       }
       setAddSlotIdx(null);
     }).catch(function(err) {
-      toast.show(err.message || 'Failed to create employee', 'error');
+      toast.show(err.message || 'Failed to create staff', 'error');
     });
   }
 
@@ -270,7 +270,7 @@ export default function EmployeeManagementScreen({
               </div>
               {filteredActive.length === 0 && (
                 <div style={{ color: T.textSecondary, fontSize: 12, textAlign: 'center', padding: 16 }}>
-                  {searchText ? 'No matching employees' : 'No active employees'}
+                  {searchText ? 'No matching staff' : 'No active staff'}
                 </div>
               )}
               {filteredActive.map(function(emp) {
@@ -291,7 +291,7 @@ export default function EmployeeManagementScreen({
               </div>
               {filteredDeactivated.length === 0 && (
                 <div style={{ color: T.textSecondary, fontSize: 12, textAlign: 'center', padding: 16 }}>
-                  {searchText ? 'No matching employees' : 'No deactivated employees'}
+                  {searchText ? 'No matching staff' : 'No deactivated staff'}
                 </div>
               )}
               {filteredDeactivated.map(function(emp) {
@@ -311,7 +311,7 @@ export default function EmployeeManagementScreen({
               </div>
               {filteredDeleted.length === 0 && (
                 <div style={{ color: T.textSecondary, fontSize: 12, textAlign: 'center', padding: 16 }}>
-                  {searchText ? 'No matching employees' : 'No deleted employees'}
+                  {searchText ? 'No matching staff' : 'No deleted staff'}
                 </div>
               )}
               {filteredDeleted.map(function(emp) {
@@ -321,7 +321,7 @@ export default function EmployeeManagementScreen({
               })}
               {filteredDeleted.length > 0 && (
                 <div style={{ color: T.textSecondary, fontSize: 10, fontStyle: 'italic', padding: '8px 4px', lineHeight: 1.4 }}>
-                  Restored employees return to Deactivated status. All historical records are permanently preserved.
+                  Restored staff return to Deactivated status. All historical records are permanently preserved.
                 </div>
               )}
             </div>
@@ -351,7 +351,7 @@ export default function EmployeeManagementScreen({
           {staffTab === 'deactivated' && (
             <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
               <div style={{ fontSize: 36, opacity: 0.3 }}>👤</div>
-              <div style={{ color: T.textSecondary, fontSize: 14, fontWeight: 500 }}>Deactivated Employees</div>
+              <div style={{ color: T.textSecondary, fontSize: 14, fontWeight: 500 }}>Deactivated Staff</div>
               <div style={{ color: T.textSecondary, fontSize: 12, maxWidth: 320, textAlign: 'center', lineHeight: 1.5 }}>
                 Deactivated employees are hidden from the calendar, booking flow, checkout, and tech turn rotation. Reactivate anytime to restore full access.
               </div>
@@ -360,7 +360,7 @@ export default function EmployeeManagementScreen({
           {staffTab === 'deleted' && (
             <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
               <div style={{ fontSize: 36, opacity: 0.3 }}>🗂️</div>
-              <div style={{ color: T.textSecondary, fontSize: 14, fontWeight: 500 }}>Deleted Employee Archive</div>
+              <div style={{ color: T.textSecondary, fontSize: 14, fontWeight: 500 }}>Deleted Staff Archive</div>
               <div style={{ color: T.textSecondary, fontSize: 12, maxWidth: 320, textAlign: 'center', lineHeight: 1.5 }}>
                 Permanently deleted employees are kept here for record-keeping. All historical data (tickets, commissions, payroll, tips) is preserved forever.
               </div>
@@ -413,7 +413,7 @@ export default function EmployeeManagementScreen({
                   This will permanently delete <span style={{ fontWeight: 700 }}>{confirmDelete.display_name}</span>.
                 </div>
                 <div style={{ color: '#F59E0B', fontSize: 12, lineHeight: 1.5, marginBottom: 20, padding: '8px 12px', background: '#F59E0B15', borderRadius: 6, border: '1px solid #F59E0B33' }}>
-                  This action cannot be undone from this screen. The employee can only be restored by an owner from the Deleted tab.
+                  This action cannot be undone from this screen. The staff member can only be restored by an owner from the Deleted tab.
                 </div>
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                   <div onClick={cancelDelete} style={{
@@ -442,7 +442,7 @@ export default function EmployeeManagementScreen({
         />
       )}
 
-      {/* ── Add Employee Modal ── */}
+      {/* ── Add Staff Modal ── */}
       {addSlotIdx !== null && (
         <EmployeeModal
           onSave={handleSaveNew}
