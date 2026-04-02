@@ -142,7 +142,7 @@ router.get('/', async function(req, res, next) {
       // Messaging templates
       prisma.messageTemplate.findMany({
         where: { salon_id: salonId },
-        orderBy: { name: 'asc' }
+        orderBy: { type: 'asc' }
       }),
 
       // Packages
