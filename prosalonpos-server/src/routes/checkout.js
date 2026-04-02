@@ -37,20 +37,54 @@ var router = Router();
 
 /**
  * Get start-of-day and end-of-day boundaries for a date string (YYYY-MM-DD).
- * If no date provided, uses today.
+ * If no date provided, uses today in US Eastern time.
+ *
+ * Railway runs in UTC. We must convert to Eastern time (UTC-5 or UTC-4 during DST)
+ * to get correct day boundaries for Florida salons.
+ * Returns UTC Date objects that Prisma can query against.
  */
 function dayBounds(dateStr) {
-  var d;
   if (dateStr) {
-    // Parse as local date (not UTC) so "2026-03-29" means midnight local time
+    // Explicit date string like "2026-04-01" — convert to Eastern midnight boundaries
+    // We create the date at noon UTC to avoid DST edge cases, then find the ET offset
     var parts = dateStr.split('-');
-    d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    var y = parseInt(parts[0]);
+    var m = parseInt(parts[1]) - 1;
+    var day = parseInt(parts[2]);
+    // Create a date at noon UTC on that day, then find the Eastern offset
+    var probe = new Date(Date.UTC(y, m, day, 12, 0, 0));
+    var etOffset = getEasternOffset(probe); // minutes behind UTC (300 or 240)
+    // Start of day in Eastern = midnight ET = etOffset minutes into UTC
+    var start = new Date(Date.UTC(y, m, day, 0, 0, 0, 0));
+    start.setUTCMinutes(start.getUTCMinutes() + etOffset);
+    var end = new Date(Date.UTC(y, m, day, 23, 59, 59, 999));
+    end.setUTCMinutes(end.getUTCMinutes() + etOffset);
+    return { start: start, end: end };
   } else {
-    d = new Date();
+    // No date — use "now" in Eastern time to figure out what day it is
+    var now = new Date();
+    var etOffset = getEasternOffset(now);
+    var etNow = new Date(now.getTime() - etOffset * 60000);
+    var yy = etNow.getUTCFullYear();
+    var mm = etNow.getUTCMonth();
+    var dd = etNow.getUTCDate();
+    var start = new Date(Date.UTC(yy, mm, dd, 0, 0, 0, 0));
+    start.setUTCMinutes(start.getUTCMinutes() + etOffset);
+    var end = new Date(Date.UTC(yy, mm, dd, 23, 59, 59, 999));
+    end.setUTCMinutes(end.getUTCMinutes() + etOffset);
+    return { start: start, end: end };
   }
-  var start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-  var end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
-  return { start: start, end: end };
+}
+
+/**
+ * Get US Eastern timezone offset in minutes (300 = EST, 240 = EDT).
+ * Uses Intl to determine if DST is active for a given date.
+ */
+function getEasternOffset(date) {
+  // Format the date in America/New_York to see if it's EDT or EST
+  var str = date.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+  if (str.indexOf('EDT') >= 0) return 240; // UTC-4
+  return 300; // UTC-5 (EST)
 }
 
 /**
@@ -394,12 +428,10 @@ router.post('/tickets/:id/void', async function(req, res, next) {
       return res.status(400).json({ error: 'Cannot void a ticket that has been refunded' });
     }
 
-    // Same-day check: ticket must have been created today
-    var today = new Date();
-    var ticketDate = new Date(existing.created_at);
-    if (ticketDate.getFullYear() !== today.getFullYear() ||
-        ticketDate.getMonth() !== today.getMonth() ||
-        ticketDate.getDate() !== today.getDate()) {
+    // Same-day check: ticket must have been created today (Eastern time)
+    var todayBounds = dayBounds(); // uses Eastern time
+    var ticketCreated = new Date(existing.created_at);
+    if (ticketCreated < todayBounds.start || ticketCreated > todayBounds.end) {
       return res.status(400).json({ error: 'Void is same-day only. Use refund for older tickets.' });
     }
 

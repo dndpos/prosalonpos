@@ -6,13 +6,6 @@
  * Frontend auto-detects this server via GET /api/health.
  */
 import 'dotenv/config';
-
-// ── Force server timezone to US Eastern (Florida) ──
-// Railway runs UTC by default. All date boundaries (dayBounds, reports, void same-day checks)
-// must use the salon's local time. When multi-timezone support is added, this moves to per-salon config.
-if (!process.env.TZ) {
-  process.env.TZ = 'America/New_York';
-}
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
