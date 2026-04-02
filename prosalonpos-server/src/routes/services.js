@@ -188,4 +188,43 @@ router.delete('/:id', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── POST /deduplicate — Remove duplicate services, keep first of each name ──
+router.post('/deduplicate', async function(req, res, next) {
+  try {
+    var all = await prisma.serviceCatalog.findMany({
+      where: { salon_id: req.salon_id, active: true },
+      orderBy: { created_at: 'asc' },
+      include: { category_links: true }
+    });
+
+    var seen = {};
+    var keepIds = [];
+    var deleteIds = [];
+
+    all.forEach(function(svc) {
+      var key = svc.name.trim().toLowerCase();
+      if (!seen[key]) {
+        seen[key] = svc.id;
+        keepIds.push(svc.id);
+      } else {
+        deleteIds.push(svc.id);
+      }
+    });
+
+    // Hard delete the duplicates and their category links
+    if (deleteIds.length > 0) {
+      await prisma.serviceCatalogCategory.deleteMany({
+        where: { service_catalog_id: { in: deleteIds } }
+      });
+      await prisma.serviceCatalog.deleteMany({
+        where: { id: { in: deleteIds } }
+      });
+    }
+
+    console.log('[deduplicate] Kept ' + keepIds.length + ', deleted ' + deleteIds.length + ' duplicate services');
+    emit(req, 'service:updated');
+    res.json({ kept: keepIds.length, deleted: deleteIds.length });
+  } catch (err) { next(err); }
+});
+
 export default router;
