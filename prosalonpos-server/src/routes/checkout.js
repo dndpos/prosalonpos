@@ -40,16 +40,24 @@ var router = Router();
  * If no date provided, uses today.
  */
 function dayBounds(dateStr) {
+  // Railway runs in UTC. Salon dates come as local dates (e.g. "2026-04-01" meaning April 1 in salon timezone).
+  // We offset by -5 hours (ET) so midnight local = 5am UTC, end of day = next day 4:59am UTC.
+  // This ensures tickets created at e.g. 10pm ET (3am UTC next day) still match the correct local date.
+  // TODO: read timezone offset from salon settings for multi-timezone support.
+  var TZ_OFFSET_HOURS = 5; // Eastern Time (UTC-5). DST would be 4 — close enough for date bucketing.
+
   var d;
   if (dateStr) {
-    // Parse as local date (not UTC) so "2026-03-29" means midnight local time
     var parts = dateStr.split('-');
-    d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    d = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), TZ_OFFSET_HOURS, 0, 0, 0));
   } else {
-    d = new Date();
+    // No date = today in salon local time
+    var now = new Date();
+    var localNow = new Date(now.getTime() - TZ_OFFSET_HOURS * 3600000);
+    d = new Date(Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate(), TZ_OFFSET_HOURS, 0, 0, 0));
   }
-  var start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-  var end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+  var start = new Date(d.getTime());
+  var end = new Date(d.getTime() + 24 * 3600000 - 1);
   return { start: start, end: end };
 }
 
@@ -150,11 +158,10 @@ router.get('/tickets', async function(req, res, next) {
 
     if (req.query.start && req.query.end) {
       // Date range query — for reports, payroll, etc.
-      var startParts = req.query.start.split('-');
-      var endParts = req.query.end.split('-');
-      var rangeStart = new Date(parseInt(startParts[0]), parseInt(startParts[1]) - 1, parseInt(startParts[2]), 0, 0, 0, 0);
-      var rangeEnd = new Date(parseInt(endParts[0]), parseInt(endParts[1]) - 1, parseInt(endParts[2]), 23, 59, 59, 999);
-      where.created_at = { gte: rangeStart, lte: rangeEnd };
+      // Use dayBounds for consistent timezone handling
+      var rangeStartBounds = dayBounds(req.query.start);
+      var rangeEndBounds = dayBounds(req.query.end);
+      where.created_at = { gte: rangeStartBounds.start, lte: rangeEndBounds.end };
     } else {
       // Single day (default: today)
       var bounds = dayBounds(req.query.date);

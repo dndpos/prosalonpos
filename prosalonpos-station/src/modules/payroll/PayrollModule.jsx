@@ -268,7 +268,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
   // Default period: current biweekly (last 14 days ending yesterday)
   var _defaultPeriod = useMemo(function() {
     var today = new Date();
-    var end = new Date(today); end.setDate(end.getDate() - 1);
+    var end = new Date(today);
     var start = new Date(end); start.setDate(start.getDate() - 13);
     function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
     return { start: ymd(start), end: ymd(end) };
