@@ -398,44 +398,30 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     setItems, setClient, setDepositCents, setPayments, setGcLookup, setGcCodeInput, setGcError,
     onCombineTicket: handleCombine,
   });
-  // PIN SCREEN — extracted to CheckoutPinScreen (Session 63 split)
+  // PIN SCREEN — type PIN, hit OK to check
   // Keyboard support for PIN entry
   useNumpadKeyboard(screen==='pin', function(d){ if(pinDigits.length<8){ var next=pinDigits+d; setPinDigits(next); setPinError(false); } }, function(){ setPinDigits(function(p){ return p.slice(0,-1); }); }, null, onDone, [screen, pinDigits]);
-  // Auto-submit when keyboard brings pinDigits to 2+
-  useEffect(function(){
-    if(screen!=='pin'||pinDigits.length<2) return;
-    if(staffSource==='api'){
-      verifyAnyPin(pinDigits).then(function(result){
-        if(result.valid&&result.staff){ setPinMatch(result.staff); setTimeout(function(){setActiveTechId(result.staff.id);setScreen('main');setPinDigits('');setPinMatch(null);},600); }
-        else if(pinDigits.length>=8){ setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000); }
-      }).catch(function(){ if(pinDigits.length>=8){ setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000); } });
-    } else {
-      var match=CHECKOUT_STAFF.find(function(s){return s.pin===pinDigits;});
-      if(match){ setPinMatch(match); setTimeout(function(){setActiveTechId(match.id);setScreen('main');setPinDigits('');setPinMatch(null);},600); }
-      else if(pinDigits.length>=8){ setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000); }
-    }
-  }, [pinDigits]);
   if(screen==='pin'){
-    function pinTap(d){ if(pinDigits.length>=8)return; const next=pinDigits+d; setPinDigits(next); setPinError(false);
-      if(next.length>=2){
-        if(staffSource==='api'){
-          verifyAnyPin(next).then(function(result){
-            if(result.valid&&result.staff){
-              setPinMatch(result.staff); setTimeout(()=>{setActiveTechId(result.staff.id);setScreen('main');setPinDigits('');setPinMatch(null);},600);
-            } else {
-              setPinError(true); setTimeout(()=>{setPinDigits('');setPinError(false);},1000);
-            }
-          }).catch(function(){
-            setPinError(true); setTimeout(()=>{setPinDigits('');setPinError(false);},1000);
-          });
-        } else {
-          const match=CHECKOUT_STAFF.find(s=>s.pin===next);
-          if(match){ setPinMatch(match); setTimeout(()=>{setActiveTechId(match.id);setScreen('main');setPinDigits('');setPinMatch(null);},600);}
-          else{ setPinError(true); setTimeout(()=>{setPinDigits('');setPinError(false);},1000);}
-        }
+    function pinTap(d){ if(pinDigits.length>=8)return; setPinDigits(function(p){ return p+d; }); setPinError(false); }
+    function pinOk(){
+      if(pinDigits.length===0) return;
+      if(staffSource==='api'){
+        verifyAnyPin(pinDigits).then(function(result){
+          if(result.valid&&result.staff){
+            setPinMatch(result.staff); setTimeout(function(){setActiveTechId(result.staff.id);setScreen('main');setPinDigits('');setPinMatch(null);},600);
+          } else {
+            setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000);
+          }
+        }).catch(function(){
+          setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000);
+        });
+      } else {
+        var match=CHECKOUT_STAFF.find(function(s){return s.pin===pinDigits;});
+        if(match){ setPinMatch(match); setTimeout(function(){setActiveTechId(match.id);setScreen('main');setPinDigits('');setPinMatch(null);},600); }
+        else{ setPinError(true); setTimeout(function(){setPinDigits('');setPinError(false);},1000); }
       }
     }
-    return <CheckoutPinScreen pinDigits={pinDigits} pinError={pinError} pinMatch={pinMatch} onPinTap={pinTap} onClear={function(){setPinDigits('');setPinError(false);}} onBackspace={function(){setPinDigits(function(p){return p.slice(0,-1);});}} onDone={onDone} />;
+    return <CheckoutPinScreen pinDigits={pinDigits} pinError={pinError} pinMatch={pinMatch} onPinTap={pinTap} onOk={pinOk} onClear={function(){setPinDigits('');setPinError(false);}} onBackspace={function(){setPinDigits(function(p){return p.slice(0,-1);});}} onDone={onDone} />;
   }
   // TIP DISTRIBUTION — after tip entry (multi-tech) or after receipt before close
   if(showTipDist && isMultiTech && tipAmount > 0){
