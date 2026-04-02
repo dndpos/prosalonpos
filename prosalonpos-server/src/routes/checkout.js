@@ -537,4 +537,79 @@ router.put('/tickets/:id/tip', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── POST /tickets/quick-close — Create + Pay + Close in one call ──
+// For walk-in sales from Checkout (no pre-existing open ticket).
+// Creates the ticket already as 'paid' so it never flickers as 'open'.
+router.post('/tickets/quick-close', async function(req, res, next) {
+  try {
+    var data = req.body;
+    var bounds = dayBounds();
+
+    // Get next ticket number for today
+    var lastTicket = await prisma.ticket.findFirst({
+      where: {
+        salon_id: req.salon_id,
+        created_at: { gte: bounds.start, lte: bounds.end },
+      },
+      orderBy: { ticket_number: 'desc' },
+      select: { ticket_number: true },
+    });
+    var ticketNumber = lastTicket ? lastTicket.ticket_number + 1 : 1;
+
+    // Build line items
+    var itemsCreate = (data.items || []).map(function(item) {
+      return {
+        type: item.type || 'service',
+        name: item.name || 'Service',
+        price_cents: item.price_cents || 0,
+        original_price_cents: item.original_price_cents || item.price_cents || 0,
+        tech_id: item.tech_id || item.techId || null,
+        tech_name: item.tech_name || item.tech || null,
+        service_id: item.service_id || null,
+        product_id: item.product_id || null,
+        color: item.color || null,
+      };
+    });
+
+    // Build payments
+    var paymentsCreate = (data.payments || []).map(function(p) {
+      return {
+        method: p.method || 'credit',
+        amount_cents: p.amount_cents || 0,
+        gc_id: p.gc_id || null,
+        gc_code: p.gc_code || null,
+      };
+    });
+
+    // Create ticket already as 'paid' with items and payments in one transaction
+    var ticket = await prisma.ticket.create({
+      data: {
+        salon_id: req.salon_id,
+        ticket_number: ticketNumber,
+        appointment_id: data.appointment_id || null,
+        client_id: data.client_id || null,
+        client_name: data.client_name || null,
+        status: 'paid',
+        subtotal_cents: data.subtotal_cents || 0,
+        tax_cents: data.tax_cents || 0,
+        discount_cents: data.discount_cents || 0,
+        tip_cents: data.tip_cents || 0,
+        surcharge_cents: data.surcharge_cents || 0,
+        deposit_cents: data.deposit_cents || 0,
+        total_cents: data.total_cents || 0,
+        payment_method: data.payment_method || null,
+        cashier_id: data.cashier_id || null,
+        cashier_name: data.cashier_name || null,
+        tip_distributions: toDb(data.tip_distributions || null),
+        items: { create: itemsCreate },
+        payments: { create: paymentsCreate },
+      },
+      include: { items: true, payments: true },
+    });
+
+    emit(req, 'ticket:closed');
+    res.status(201).json({ ticket: formatTicket(ticket) });
+  } catch (err) { next(err); }
+});
+
 export default router;

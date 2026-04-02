@@ -84,6 +84,15 @@ var useTicketStore = create(function(set, get) {
       return ticket;
     },
 
+    quickCloseTicket: async function(ticketData) {
+      var data = await api.post('/checkout/tickets/quick-close', ticketData);
+      var ticket = data.ticket;
+      set(function(s) {
+        return { closedTickets: [ticket].concat(s.closedTickets) };
+      });
+      return ticket;
+    },
+
     updateTicket: async function(ticketId, updates) {
       var data = await api.put('/checkout/tickets/' + ticketId, updates);
       set(function(s) {

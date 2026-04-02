@@ -14,6 +14,7 @@ export default function useTicketHandlers() {
   var closedTickets = useTicketStore(function(s) { return s.closedTickets; });
   var storeAddClosedTicket = useTicketStore(function(s) { return s.addClosedTicket; });
   var storeCreateTicket = useTicketStore(function(s) { return s.createTicket; });
+  var storeQuickCloseTicket = useTicketStore(function(s) { return s.quickCloseTicket; });
   var storeCloseTicket = useTicketStore(function(s) { return s.closeTicket; });
   var storeAddPayment = useTicketStore(function(s) { return s.addPayment; });
   var storeSource = useTicketStore(function(s) { return s.source; });
@@ -76,14 +77,22 @@ export default function useTicketHandlers() {
       }
 
       if (needsCreate) {
-        // Ticket was created from Checkout directly (not from calendar appointment)
-        // Create it in the database first, then add payments and close
-        var createData = {
+        // Walk-in sale from Checkout — use quick-close (one API call, no open→paid flicker)
+        var quickData = {
           client_id: ticket.client ? ticket.client.id : null,
           client_name: ticket.clientName || null,
           appointment_id: ticket.appointmentId || null,
           deposit_cents: ticket.depositCents || 0,
           cashier_id: ticket.closedBy || null,
+          cashier_name: ticket.cashierName || null,
+          subtotal_cents: ticket.subtotalCents || 0,
+          tax_cents: ticket.taxCents || 0,
+          discount_cents: ticket.discountCents || 0,
+          tip_cents: ticket.tipCents || 0,
+          surcharge_cents: ticket.surchargeCents || 0,
+          total_cents: ticket.totalCents || 0,
+          payment_method: (ticket.payments && ticket.payments[0]) ? ticket.payments[0].method : null,
+          tip_distributions: ticket.tipDistributions || null,
           items: (ticket.items || []).map(function(it) {
             return {
               type: it.type || 'service',
@@ -97,12 +106,19 @@ export default function useTicketHandlers() {
               color: it.color || null,
             };
           }),
+          payments: (ticket.payments || []).map(function(p) {
+            return {
+              method: p.method || 'credit',
+              amount_cents: p.amount_cents || p.amountCents || 0,
+              gc_id: p.gc_id || null,
+              gc_code: p.gc_code || null,
+            };
+          }),
         };
-        storeCreateTicket(createData).then(function(dbTicket) {
-          console.log('[handleCloseTicket] Ticket created in database:', dbTicket.id);
-          addPaymentsAndClose(dbTicket.id);
+        storeQuickCloseTicket(quickData).then(function(dbTicket) {
+          console.log('[handleCloseTicket] Quick-close ticket saved:', dbTicket.id);
         }).catch(function(err) {
-          console.warn('[handleCloseTicket] API create failed, ticket saved locally:', err.message);
+          console.warn('[handleCloseTicket] Quick-close failed, saved locally:', err.message);
           storeAddClosedTicket(ticket);
         });
       } else {
