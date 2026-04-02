@@ -2,37 +2,26 @@
  * useCalendarPersist.js — Server persistence for calendar operations
  * Session 99 | Wires local-only calendar state to the real API
  *
- * PROBLEM: Mock-to-live migration left all calendar operations as
- * local state only (setServiceLines). Nothing was saved to the database.
- * Appointments would disappear on page refresh.
- *
- * SOLUTION: After each local state update (optimistic UI), this hook
- * fires the corresponding API call in the background. If the API call
- * fails, the next store refetch will correct the UI.
+ * KEY DESIGN: Calls the API directly (not through the store) to avoid
+ * triggering fetchServiceLines() which causes a full calendar flash.
+ * The local state is already correct from the optimistic update.
+ * The store will sync naturally via Socket.io events from other stations.
  *
  * Usage in CalendarDayView:
- *   var persist = useCalendarPersist(fetchServiceLines);
- *   // After a booking: persist.saveBooking(newLines, clientName);
- *   // After a status change: persist.saveStatus(sl, newStatus);
- *   // After a drag move: persist.saveMove(serviceLineId, updates);
+ *   var persist = useCalendarPersist();
+ *   persist.saveBooking(newLines, clientName);
+ *   persist.saveStatus(sl, newStatus);
+ *   persist.saveMove(serviceLineId, updates);
  */
 
-import { useAppointmentStore } from '../../lib/stores/appointmentStore';
+import { api } from '../../lib/apiClient';
 import { debugLog } from '../../lib/debugLog';
 
 function useCalendarPersist() {
-  var createAppointment = useAppointmentStore(function(s) { return s.createAppointment; });
-  var updateAppointment = useAppointmentStore(function(s) { return s.updateAppointment; });
-  var updateServiceLine = useAppointmentStore(function(s) { return s.updateServiceLine; });
-  var cancelAppointment = useAppointmentStore(function(s) { return s.cancelAppointment; });
 
   /**
    * Save a new booking to the server.
    * Called after handleBookingSave adds lines to local state.
-   *
-   * @param {Array} lines - the new service line objects from the booking
-   * @param {string} clientName - display name of the client
-   * @param {string} clientId - client ID (if known)
    */
   function saveBooking(lines, clientName, clientId) {
     if (!lines || lines.length === 0) return;
@@ -68,7 +57,7 @@ function useCalendarPersist() {
         }),
       };
 
-      createAppointment(payload).then(function(appt) {
+      api.post('/appointments', payload).then(function() {
         debugLog('PERSIST', 'Booking saved: ' + group.clientName + ' (' + group.lines.length + ' services)');
       }).catch(function(err) {
         console.error('[CalendarPersist] Failed to save booking:', err.message);
@@ -78,15 +67,13 @@ function useCalendarPersist() {
 
   /**
    * Save a status change to the server.
-   * Called after applyStatusChange updates local state.
    */
   function saveStatus(sl, newStatus) {
     if (!sl || !sl.appointment_id) {
-      // Local-only line (just created, not yet saved) — can't update by ID
       debugLog('PERSIST', 'Status change on unsaved line — will sync on next refetch');
       return;
     }
-    updateAppointment(sl.appointment_id, { status: newStatus }).then(function() {
+    api.put('/appointments/' + sl.appointment_id, { status: newStatus }).then(function() {
       debugLog('PERSIST', 'Status saved: ' + sl.client + ' → ' + newStatus);
     }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save status:', err.message);
@@ -95,11 +82,9 @@ function useCalendarPersist() {
 
   /**
    * Save a service line move (drag-drop, tech change) to the server.
-   * Called after the local state is updated.
    */
   function saveMove(serviceLineId, updates) {
     if (!serviceLineId || serviceLineId.indexOf('sl-') === 0) {
-      // Temp ID (not yet in DB) — skip
       return;
     }
     var payload = {};
@@ -109,7 +94,7 @@ function useCalendarPersist() {
     }
     if (updates.duration_minutes) payload.duration_minutes = updates.duration_minutes;
 
-    updateServiceLine(serviceLineId, payload).then(function() {
+    api.put('/appointments/service-line/' + serviceLineId, payload).then(function() {
       debugLog('PERSIST', 'Move saved: ' + serviceLineId);
     }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save move:', err.message);
@@ -121,7 +106,7 @@ function useCalendarPersist() {
    */
   function saveAddTime(sl, newDuration) {
     if (!sl || !sl.id || sl.id.indexOf('sl-') === 0) return;
-    updateServiceLine(sl.id, { duration_minutes: newDuration }).catch(function(err) {
+    api.put('/appointments/service-line/' + sl.id, { duration_minutes: newDuration }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save add time:', err.message);
     });
   }
@@ -131,7 +116,7 @@ function useCalendarPersist() {
    */
   function saveCancel(appointmentId) {
     if (!appointmentId) return;
-    cancelAppointment(appointmentId).catch(function(err) {
+    api.del('/appointments/' + appointmentId).catch(function(err) {
       console.error('[CalendarPersist] Failed to cancel:', err.message);
     });
   }
