@@ -262,37 +262,39 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
             })}
           </div>
 
-        </div>
-
-        {/* OK + Cancel buttons — side by side */}
-        <div style={{ display: 'flex', gap: 8, maxWidth: 260, margin: '12px auto 0' }}>
-          <div
-            onClick={handleCancelDirect}
-            style={{
-              flex: 1, height: 56, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: '#3D1C1E', border: '1px solid #5C2B2E',
-              color: '#F87171', fontSize: 16, fontWeight: 700, cursor: 'pointer',
-              userSelect: 'none', letterSpacing: 0.5,
-              transition: 'background 150ms',
-            }}
-            onMouseEnter={function(e) { e.currentTarget.style.background = '#4D2426'; }}
-            onMouseLeave={function(e) { e.currentTarget.style.background = '#3D1C1E'; }}
-          >Cancel</div>
-          <div
-            onClick={handleOk}
-            style={{
-              flex: 1, height: 56, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: digits.length === 0 || checking ? T.grid : '#1C3D2A',
-              border: '1px solid ' + (digits.length === 0 || checking ? T.borderLight : '#2E5C3F'),
-              color: digits.length === 0 || checking ? T.textMuted : '#4ADE80',
-              fontSize: 16, fontWeight: 700,
-              cursor: digits.length === 0 || checking ? 'not-allowed' : 'pointer',
-              userSelect: 'none', letterSpacing: 0.5,
-              transition: 'background 150ms, color 150ms',
-            }}
-            onMouseEnter={function(e) { if (digitsRef.current.length > 0) e.currentTarget.style.background = '#245236'; }}
-            onMouseLeave={function(e) { e.currentTarget.style.background = digitsRef.current.length === 0 ? T.grid : '#1C3D2A'; }}
-          >{checking ? 'Checking...' : 'OK'}</div>
+          {/* Cancel + OK buttons — side by side */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <div
+              onClick={handleCancelDirect}
+              style={{
+                flex: 1, height: 76, borderRadius: 8, display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                background: '#3B1C1C', color: '#F87171',
+                border: '1px solid #5C2626',
+                fontSize: 18, fontWeight: 700, cursor: 'pointer',
+                userSelect: 'none', letterSpacing: 0.5,
+                transition: 'background 120ms',
+              }}
+              onMouseEnter={function(e) { e.currentTarget.style.background = '#4C2222'; }}
+              onMouseLeave={function(e) { e.currentTarget.style.background = '#3B1C1C'; }}
+            >Cancel</div>
+            <div
+              onClick={handleOk}
+              style={{
+                flex: 1, height: 76, borderRadius: 8, display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                background: digits.length === 0 || checking ? T.grid : '#1C3B2A',
+                color: digits.length === 0 || checking ? T.textMuted : '#4ADE80',
+                border: '1px solid ' + (digits.length === 0 || checking ? T.borderLight : '#2D5A3E'),
+                fontSize: 18, fontWeight: 700,
+                cursor: digits.length === 0 || checking ? 'not-allowed' : 'pointer',
+                userSelect: 'none', letterSpacing: 0.5,
+                transition: 'background 120ms, color 120ms',
+              }}
+              onMouseEnter={function(e) { if (digits.length > 0 && !checking) e.currentTarget.style.background = '#245638'; }}
+              onMouseLeave={function(e) { if (digits.length > 0 && !checking) e.currentTarget.style.background = '#1C3B2A'; }}
+            >{checking ? 'Checking...' : 'OK'}</div>
+          </div>
         </div>
       </div>
     </div>
