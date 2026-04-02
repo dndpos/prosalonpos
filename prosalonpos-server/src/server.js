@@ -112,12 +112,15 @@ var staticPath = join(__dirname, '..', 'public');
 
 if (existsSync(staticPath)) {
   console.log('[Static] Serving frontend from:', staticPath);
-  app.use(express.static(staticPath));
+  // Hashed assets (JS/CSS) — cache for 1 year (filename changes on rebuild)
+  app.use('/assets', express.static(join(staticPath, 'assets'), { maxAge: '1y', immutable: true }));
+  // Everything else (index.html) — no cache so browser always gets latest
+  app.use(express.static(staticPath, { maxAge: 0, etag: false }));
 
-  // SPA fallback — any non-API route serves index.html
-  // This lets React Router / client-side routing work on page refresh
+  // SPA fallback — any non-API route serves index.html with no-cache headers
   app.get('*', function(req, res) {
     if (!req.path.startsWith('/api/')) {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(join(staticPath, 'index.html'));
     }
   });

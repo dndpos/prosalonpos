@@ -21,6 +21,9 @@ export default function useBarcodeScanner({
     function handleKey(e){
       if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
       if(e.key==='Enter'){ e.preventDefault(); return; }
+      // On PIN screen, completely skip — useNumpadKeyboard handles all digit input.
+      // Badge scanning on PIN screen is not needed (user types PIN or taps OK).
+      if(screen==='pin') return;
       if(e.key>='0'&&e.key<='9'){
         e.preventDefault();
         scanBuf.current+=e.key;
@@ -52,27 +55,6 @@ export default function useBarcodeScanner({
 
           // Try badge match first (any length)
           var badgeMatch=staffList.find(function(s){return s.badge_id===code;});
-
-          if(screen==='pin'){
-            if(badgeMatch){
-              setPinMatch(badgeMatch); setPinError(false); setPinDigits('••••');
-              setTimeout(function(){setActiveTechId(badgeMatch.id);setScreen('main');setPinDigits('');setPinMatch(null);},600);
-              return;
-            }
-            var tktNum=parseInt(code,10);
-            var tkt=openTickets.find(function(t){return t.ticketNumber===tktNum;});
-            if(tkt){
-              setItems(tkt.items.map(function(it){return{...it,type:it.type||'service'};}));
-              if(tkt.client) setClient(tkt.client);
-              if(tkt.depositCents) setDepositCents(tkt.depositCents);
-              if(tkt.items[0]&&tkt.items[0].techId) setActiveTechId(tkt.items[0].techId);
-              if(onCombineTicket) onCombineTicket(tkt.id);
-              setScreen('main');
-              return;
-            }
-            setPinError(true);
-            setTimeout(function(){setPinDigits('');setPinError(false);},1000);
-          }
 
           if(screen==='main'){
             if(badgeMatch) return;
