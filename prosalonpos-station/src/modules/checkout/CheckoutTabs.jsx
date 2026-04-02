@@ -47,7 +47,7 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
   // Auto-generate slot assignments per category so ServiceGrid renders them
   var retailSlots = {};
   retailCatObjects.forEach(function(cat) {
-    var prods = retailAsServices.filter(function(p) { return p.category_ids.includes(cat.id); });
+    var prods = retailAsServices.filter(function(p) { return p.category_ids && p.category_ids.includes(cat.id); });
     var catMap = {};
     prods.forEach(function(p, idx) { catMap[idx] = p.id; });
     retailSlots[cat.id] = catMap;

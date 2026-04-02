@@ -101,7 +101,7 @@ export default function OnlineBookingPortal({ salonSettings: _ss }) {
   }, [MOCK_SERVICES]);
   var onlineCategories = useMemo(function () {
     return MOCK_CATEGORIES.filter(function (cat) {
-      return cat.active && onlineServices.some(function (s) { return s.category_ids.includes(cat.id); });
+      return cat.active && onlineServices.some(function (s) { return s.category_ids && s.category_ids.includes(cat.id); });
     });
   }, [MOCK_CATEGORIES, onlineServices]);
   var onlineTechs = useMemo(function () {
@@ -255,7 +255,7 @@ export default function OnlineBookingPortal({ salonSettings: _ss }) {
 
   // ═══════ STEP 3: SERVICES ═══════
   if (step === 'services') {
-    var catServices = onlineServices.filter(function (s) { return s.category_ids.includes(activeCat); });
+    var catServices = onlineServices.filter(function (s) { return s.category_ids && s.category_ids.includes(activeCat); });
     var techLabel = selectedTech ? 'With ' + selectedTech.display_name : 'Any available technician';
 
     function handleServicesNext() {

@@ -72,7 +72,7 @@ export default function ServiceGrid({
       if (svc && !isEdit && !svc.active) { svc = null; }
       if (svc && isEdit && !showInactive && !svc.active) { svc = null; }
       // Only show if in this category
-      if (svc && !svc.category_ids.includes(activeCat)) { svc = null; }
+      if (svc && (!svc.category_ids || !svc.category_ids.includes(activeCat))) { svc = null; }
 
       var isDragOver = dragOverSlot === slotIdx;
       var isDragging = draggingId && svc && svc.id === draggingId;
@@ -133,12 +133,12 @@ export default function ServiceGrid({
               )}
             </div>
             {/* Badges (edit mode only) */}
-            {isEdit && (isInact || !svc.online_booking_enabled || svc.requires_room || svc.category_ids.length > 1) && (
+            {isEdit && (isInact || !svc.online_booking_enabled || svc.requires_room || (svc.category_ids && svc.category_ids.length > 1)) && (
               <div style={{ display: 'flex', gap: 5, marginTop: 10, flexWrap: 'wrap' }}>
                 {isInact && <Badge color="#EF4444" label="Inactive" />}
                 {!svc.online_booking_enabled && <Badge color="#64748B" label="No Online" />}
                 {svc.requires_room && <Badge color="#8B5CF6" label="Room" />}
-                {svc.category_ids.length > 1 && <Badge color="#14B8A6" label={svc.category_ids.length + ' cats'} />}
+                {svc.category_ids && svc.category_ids.length > 1 && <Badge color="#14B8A6" label={svc.category_ids.length + ' cats'} />}
               </div>
             )}
             {/* Checkmark (multi mode) */}
