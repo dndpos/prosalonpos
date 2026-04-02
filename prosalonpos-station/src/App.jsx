@@ -229,10 +229,8 @@ export default function App() {
     setSalonSettings(function(prev) { var next = Object.assign({}, prev); next[key] = val; return next; });
     settingsStoreUpdate(key, val);
   }
-
   // ── Grid layout persistence (TD-102) ──
   var gridPersist = useGridPersistence(salonSettings, handleSettingsUpdate);
-
   // ── Resolved theme from settings ──
   var C = getTheme(salonSettings.theme || 'dark');
 
@@ -374,9 +372,7 @@ export default function App() {
     }
   }, [storeStaff]);
 
-  useEffect(function() {
-    setSvcCatServices(storeServices);
-  }, [storeServices]);
+  useEffect(function() { setSvcCatServices(storeServices); }, [storeServices]);
 
   useEffect(function() {
     setSvcCatCategories(storeCategories);
@@ -394,8 +390,7 @@ export default function App() {
     });
   }, [storeCategories]);
 
-  // Rebuild svcSlots when services or categories change — fills in any categories that have no slot assignments
-  // Also re-populates categories whose saved slots all pointed to deleted/stale service IDs (S101 fix)
+  // Rebuild svcSlots — fill empty categories, recover stale saved slots (S101)
   useEffect(function() {
     if (storeCategories.length === 0 || storeServices.length === 0) return;
     var svcIdSet = {}; storeServices.forEach(function(s) { svcIdSet[s.id] = true; });
@@ -448,15 +443,26 @@ export default function App() {
       var gl = storeSettings.grid_layout;
       _restoringGrid.current = true; // guard: prevent save-loop
       if (gl.catSlots) setSvcCatSlots(gl.catSlots);
-      if (gl.svcSlots) setSvcSlots(gl.svcSlots);
+      if (gl.svcSlots) {
+        // S101: Validate saved svcSlots — skip stale service IDs, skip if services not loaded
+        if (storeServices.length > 0) {
+          var validIds = {}; storeServices.forEach(function(s) { validIds[s.id] = true; });
+          var validated = {};
+          Object.keys(gl.svcSlots).forEach(function(catKey) {
+            var catMap = gl.svcSlots[catKey] || {}; var clean = {};
+            Object.keys(catMap).forEach(function(slot) { if (validIds[catMap[slot]]) clean[slot] = catMap[slot]; });
+            validated[catKey] = clean;
+          });
+          setSvcSlots(validated);
+        }
+      }
       if (gl.empSlots && Object.keys(gl.empSlots).length > 0) setEmpSlots(gl.empSlots);
       if (gl.svcCatColumns !== undefined) setSvcCatColumns(gl.svcCatColumns);
       if (gl.svcGridColumns !== undefined) setSvcGridColumns(gl.svcGridColumns);
       if (gl.svcGridRows !== undefined) setSvcGridRows(gl.svcGridRows);
       if (gl.empColumns !== undefined) setEmpColumns(gl.empColumns);
       if (gl.empRows !== undefined) setEmpRows(gl.empRows);
-      console.log('[App] Grid layout restored from settings');
-      // Release guard after React processes the state updates
+      console.log('[App] Grid layout restored (svcSlots validated)');
       setTimeout(function() { _restoringGrid.current = false; }, 500);
     }
   }, [storeSettings]);
