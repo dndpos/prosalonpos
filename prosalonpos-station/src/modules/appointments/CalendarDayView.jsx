@@ -108,7 +108,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     var pos=1;
     return STAFF.map(function(t,i){
       var isBusy=!!busyIds[t.id];
-      return{id:t.id,name:t.name,photo_url:t.photo_url||null,status:isBusy?'busy':'available',position:isBusy?null:pos++,clockedInAt:Date.now()+i,dailyServiceCount:0,preservedPosition:null,lastFreeAt:Date.now()+i};
+      return{id:t.id,name:t.display_name||t.name||'',photo_url:t.photo_url||null,status:isBusy?'busy':'available',position:isBusy?null:pos++,clockedInAt:Date.now()+i,dailyServiceCount:0,preservedPosition:null,lastFreeAt:Date.now()+i};
     });
   },[storeServiceLines]);
   const[turnState,setTurnState]=useState({techs:_initTechs,turnLog:[]});
