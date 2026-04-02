@@ -411,29 +411,16 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
               </select>
             </div>
 
-            {/* PIN — collapsible dark numpad (hidden for owner role — uses salon owner PIN) */}
+            {/* PIN — clean display: just show the number, tap to change */}
             {role !== 'owner' ? (
             <div style={{ marginBottom: 14 }}>
-              <label style={LBL}>{isEdit ? 'Change PIN' : 'PIN'} <span style={{ color: T.textMuted, fontWeight: 400 }}>(4 digits)</span></label>
-              {isEdit && employee.pin_display && !pin && (
-                <div style={{ padding: '6px 12px', background: T.raised, border: '1px solid ' + T.border, borderRadius: 6, fontSize: 14, color: T.text, fontWeight: 600, letterSpacing: '4px', fontVariantNumeric: 'tabular-nums', marginBottom: 6 }}>
-                  {employee.pin_display}
-                </div>
-              )}
+              <label style={LBL}>PIN <span style={{ color: T.textMuted, fontWeight: 400 }}>(4 digits)</span></label>
               <div onClick={function() { setShowPinPad(!showPinPad); }}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: showPinPad ? T.bg : T.raised, border: '1px solid ' + (showPinPad ? T.primary + '60' : T.border), borderRadius: 6, cursor: 'pointer', transition: 'border 150ms, background 150ms' }}>
-                {pin.length > 0 ? (
-                  <span style={{ fontSize: 18, fontWeight: 600, color: T.text, letterSpacing: '6px', fontVariantNumeric: 'tabular-nums' }}>{pin}</span>
-                ) : (
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {[0, 1, 2, 3].map(function(i) {
-                      return (<div key={i} style={{ width: 16, height: 16, borderRadius: '50%', background: 'transparent', border: '2px solid ' + T.border }} />);
-                    })}
-                  </div>
-                )}
-                {pin.length === 4 && <span style={{ color: T.success, fontSize: 11, fontWeight: 500 }}>✓ Set</span>}
-                {pin.length > 0 && pin.length < 4 && <span style={{ color: T.textMuted, fontSize: 11 }}>{pin.length}/4</span>}
-                {pin.length === 0 && <span style={{ color: T.textMuted, fontSize: 11 }}>Tap to {isEdit ? 'change' : 'set'}</span>}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 14px', background: showPinPad ? T.bg : T.raised, border: '1px solid ' + (showPinPad ? T.primary + '60' : T.border), borderRadius: 6, cursor: 'pointer', transition: 'border 150ms, background 150ms', minHeight: 40 }}>
+                <span style={{ fontSize: 20, fontWeight: 600, color: T.text, letterSpacing: '6px', fontVariantNumeric: 'tabular-nums' }}>
+                  {pin.length > 0 ? pin : (isEdit && employee.pin_display ? employee.pin_display : '----')}
+                </span>
+                {pin.length === 4 && <span style={{ color: T.success, fontSize: 11, fontWeight: 500 }}>✓</span>}
               </div>
               {showPinPad && (
                 <div style={{ background: T.bg, border: '1px solid ' + T.border, borderRadius: 8, padding: 10, width: 170, marginTop: 8 }}>
