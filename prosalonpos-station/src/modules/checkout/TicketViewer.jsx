@@ -59,6 +59,7 @@ export default function TicketViewer({ openTickets, closedTickets, onBack, onReo
 
   const selectedClosed = closedTickets.find(t=>t.id===selectedClosedId);
   const tipPerm = CHECKOUT_SETTINGS.tip_edit_permission;
+  const permission = CHECKOUT_SETTINGS.void_refund_permission || 'manager_owner';
 
   // Detect credit card tickets needing tip action
   function needsTipAction(ticket){
