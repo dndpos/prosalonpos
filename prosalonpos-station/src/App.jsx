@@ -54,11 +54,6 @@ import TimeClockPopup from './modules/time-clock/TimeClockPopup';
 import ProviderAdminPanel from './modules/provider-admin/ProviderAdminPanel';
 import DebugPanel from './components/debug/DebugPanel';
 import { debugLog } from './lib/debugLog';
-
-
-// Online bookings — loaded from API (no mock data)
-
-// Session 88: Mock data removed — all data comes from stores after login
 import { phoneToDigits } from './lib/formatUtils';
 function enrichClientBalance(client) {
   if (!client) return client;
@@ -81,7 +76,6 @@ const NAV_ITEMS = [
   { id: 'tickets',         label: 'Tickets' },
   { id: 'clients',         label: 'Clients' },
 ];
-
 
 export default function App() {
   const [activePage, setActivePage] = useState('calendar');
@@ -361,8 +355,22 @@ export default function App() {
     setEmpStaff(storeStaff);
     // Rebuild empSlots when staff data arrives from API
     if (storeStaff.length > 0) {
+      var activeIds = {};
+      storeStaff.filter(function(s) { return s.active; }).forEach(function(s) { activeIds[s.id] = true; });
+
       setEmpSlots(function(prev) {
-        if (Object.keys(prev).length > 0) return prev; // already has manual slots
+        // If we have existing slots, validate that the IDs still exist in staff
+        if (Object.keys(prev).length > 0) {
+          var cleaned = {};
+          var validCount = 0;
+          Object.keys(prev).forEach(function(k) {
+            if (activeIds[prev[k]]) { cleaned[k] = prev[k]; validCount++; }
+          });
+          // If at least some valid slots remain, keep the cleaned version
+          if (validCount > 0) return cleaned;
+          // Otherwise fall through to auto-assign below
+        }
+        // Auto-assign active staff to sequential slots
         var slots = {};
         storeStaff.filter(function(s) { return s.active; }).forEach(function(emp, i) { slots[i] = emp.id; });
         return slots;
@@ -444,7 +452,7 @@ export default function App() {
       _restoringGrid.current = true; // guard: prevent save-loop
       if (gl.catSlots) setSvcCatSlots(gl.catSlots);
       if (gl.svcSlots) setSvcSlots(gl.svcSlots);
-      if (gl.empSlots) setEmpSlots(gl.empSlots);
+      if (gl.empSlots && Object.keys(gl.empSlots).length > 0) setEmpSlots(gl.empSlots);
       if (gl.svcCatColumns !== undefined) setSvcCatColumns(gl.svcCatColumns);
       if (gl.svcGridColumns !== undefined) setSvcGridColumns(gl.svcGridColumns);
       if (gl.svcGridRows !== undefined) setSvcGridRows(gl.svcGridRows);
@@ -701,10 +709,7 @@ export default function App() {
     }
   }
 
-
-  // ─── License Activation Gate ───
-  // In production, we check the license API on startup.
-  // Show a brief loading screen while the check is in progress.
+  // ─── License Activation Gate — show loading while checking ───
   if (!licenseChecked) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0B1220', fontFamily: "'Inter',system-ui,sans-serif" }}>
