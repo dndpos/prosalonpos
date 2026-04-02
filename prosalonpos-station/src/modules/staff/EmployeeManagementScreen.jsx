@@ -123,8 +123,11 @@ export default function EmployeeManagementScreen({
       rbac_role: data.rbac_role || editingEmployee.rbac_role, permissions: data.permissions,
     };
     if (data.pin) updates.pin = data.pin;
-    staffActions.updateStaff(editingEmployee.id, updates);
-    setEditingEmployee(null);
+    staffActions.updateStaff(editingEmployee.id, updates).then(function() {
+      setEditingEmployee(null);
+    }).catch(function(err) {
+      toast.show(err.message || 'Failed to save employee', 'error');
+    });
   }
 
   function handleSaveNew(data) {
@@ -150,8 +153,10 @@ export default function EmployeeManagementScreen({
       if (addSlotIdx !== null && created) {
         setEmpSlots(function(prev) { var slots = { ...prev }; slots[addSlotIdx] = created.id; return slots; });
       }
+      setAddSlotIdx(null);
+    }).catch(function(err) {
+      toast.show(err.message || 'Failed to create employee', 'error');
     });
-    setAddSlotIdx(null);
   }
 
   // ── Tab button style ──

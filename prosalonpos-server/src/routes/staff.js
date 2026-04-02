@@ -72,6 +72,23 @@ router.get('/:id', async function(req, res, next) {
 router.post('/', async function(req, res, next) {
   try {
     var data = req.body;
+    var newPin = data.pin || '0000';
+
+    // ── Duplicate PIN check ──
+    var newPinHash = pinSha256(newPin);
+    var existingStaff = await prisma.staff.findMany({
+      where: { salon_id: req.salon_id, active: true }
+    });
+    var dupStaff = existingStaff.find(function(s) { return s.pin_sha256 === newPinHash; });
+    if (dupStaff) {
+      return res.status(409).json({ error: 'PIN already in use by ' + dupStaff.display_name });
+    }
+    // Also check owner PIN
+    var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
+    if (salon && salon.owner_pin_sha256 && salon.owner_pin_sha256 === newPinHash) {
+      return res.status(409).json({ error: 'PIN already in use by Owner' });
+    }
+
     var s = await prisma.staff.create({
       data: {
         salon_id: req.salon_id,
@@ -144,8 +161,22 @@ router.put('/:id', async function(req, res, next) {
       }
     });
 
-    // Handle PIN change separately (needs hashing)
+    // Handle PIN change separately (needs hashing + duplicate check)
     if (data.pin) {
+      var newPinHash = pinSha256(data.pin);
+      // Check all other active staff for duplicate PIN
+      var otherStaff = await prisma.staff.findMany({
+        where: { salon_id: req.salon_id, active: true, id: { not: req.params.id } }
+      });
+      var dupStaff = otherStaff.find(function(s) { return s.pin_sha256 === newPinHash; });
+      if (dupStaff) {
+        return res.status(409).json({ error: 'PIN already in use by ' + dupStaff.display_name });
+      }
+      // Also check owner PIN
+      var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
+      if (salon && salon.owner_pin_sha256 && salon.owner_pin_sha256 === newPinHash) {
+        return res.status(409).json({ error: 'PIN already in use by Owner' });
+      }
       updateData.pin_hash = hashPin(data.pin);
       updateData.pin_sha256 = pinSha256(data.pin);
     }
@@ -209,46 +240,64 @@ router.delete('/:id', async function(req, res, next) {
 
 // ── POST /verify-any-pin — Verify any staff PIN (RBAC checkout login) ──
 // Must be before /:id routes so Express doesn't treat 'verify-any-pin' as an id
-// Check order: 1) Staff PINs  2) Owner PIN (salon record)  3) Provider master code
+// Fast path: SHA-256 lookup table (instant). Fallback: sequential bcrypt (slow but catches edge cases).
 router.post('/verify-any-pin', async function(req, res, next) {
   try {
     var pin = req.body.pin;
+    var inputHash = pinSha256(pin);
 
-    // 1. Check staff PINs (async — non-blocking)
+    // 1. Build SHA-256 lookup table from all active staff
     var allStaff = await prisma.staff.findMany({
       where: { salon_id: req.salon_id, active: true }
     });
 
-    var match = null;
+    // Fast SHA-256 match
+    var sha256Match = null;
     for (var i = 0; i < allStaff.length; i++) {
-      if (allStaff[i].pin_hash) {
-        var isMatch = await comparePinAsync(pin, allStaff[i].pin_hash);
-        if (isMatch) {
-          match = allStaff[i];
-          break;
-        }
+      if (allStaff[i].pin_sha256 && allStaff[i].pin_sha256 === inputHash) {
+        sha256Match = allStaff[i];
+        break;
       }
     }
 
-    if (match) {
+    if (sha256Match) {
       return res.json({
         valid: true,
         staff: {
-          id: match.id,
-          display_name: match.display_name,
-          role: match.role,
-          rbac_role: match.rbac_role,
-          permissions: match.permissions,
-          permission_overrides: match.permission_overrides,
+          id: sha256Match.id,
+          display_name: sha256Match.display_name,
+          role: sha256Match.role,
+          rbac_role: sha256Match.rbac_role,
+          permissions: sha256Match.permissions,
+          permission_overrides: sha256Match.permission_overrides,
         }
       });
     }
 
-    // 2. Check owner PIN on Salon record
+    // 2. Check owner PIN — SHA-256 fast path first
     var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
+    if (salon && salon.owner_pin_sha256 && salon.owner_pin_sha256 === inputHash) {
+      return res.json({
+        valid: true,
+        staff: {
+          id: 'owner',
+          display_name: 'Owner',
+          role: 'owner',
+          rbac_role: 'owner',
+          permissions: null,
+          permission_overrides: null,
+        }
+      });
+    }
+
+    // 3. Owner bcrypt fallback (covers cases where sha256 not yet backfilled)
     if (salon && salon.owner_pin_hash) {
       var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
       if (ownerMatch) {
+        // Backfill sha256 for next time
+        if (!salon.owner_pin_sha256) {
+          prisma.salon.update({ where: { id: req.salon_id }, data: { owner_pin_sha256: inputHash } }).catch(function() {});
+        }
         return res.json({
           valid: true,
           staff: {
@@ -263,7 +312,7 @@ router.post('/verify-any-pin', async function(req, res, next) {
       }
     }
 
-    // 3. Provider master code
+    // 4. Provider master code
     if (pin === '90706') {
       return res.json({
         valid: true,
@@ -276,6 +325,28 @@ router.post('/verify-any-pin', async function(req, res, next) {
           permission_overrides: null,
         }
       });
+    }
+
+    // 5. Slow bcrypt fallback for staff (covers missing pin_sha256)
+    for (var j = 0; j < allStaff.length; j++) {
+      if (allStaff[j].pin_hash && !allStaff[j].pin_sha256) {
+        var isMatch = await comparePinAsync(pin, allStaff[j].pin_hash);
+        if (isMatch) {
+          // Backfill sha256 for next time
+          prisma.staff.update({ where: { id: allStaff[j].id }, data: { pin_sha256: inputHash } }).catch(function() {});
+          return res.json({
+            valid: true,
+            staff: {
+              id: allStaff[j].id,
+              display_name: allStaff[j].display_name,
+              role: allStaff[j].role,
+              rbac_role: allStaff[j].rbac_role,
+              permissions: allStaff[j].permissions,
+              permission_overrides: allStaff[j].permission_overrides,
+            }
+          });
+        }
+      }
     }
 
     return res.json({ valid: false });
