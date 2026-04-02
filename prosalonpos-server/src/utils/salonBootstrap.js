@@ -156,6 +156,18 @@ async function bootstrapSalon(salonName, licenseKey) {
       return { salon: existing, created: false, seeded: true };
     }
 
+    // Clean up any legacy owner staff records (pre-Session 98)
+    // Owner login is salon-level only — owner staff records with stale PINs cause conflicts
+    var ownerStaff = await prisma.staff.findMany({
+      where: { salon_id: existing.id, role: 'owner' }
+    });
+    if (ownerStaff.length > 0) {
+      for (var oi = 0; oi < ownerStaff.length; oi++) {
+        await prisma.staff.delete({ where: { id: ownerStaff[oi].id } });
+      }
+      console.log('[Bootstrap] 🧹 Removed ' + ownerStaff.length + ' legacy owner staff record(s) — owner PIN is salon-level only');
+    }
+
     return { salon: existing, created: false, seeded: false };
   }
 

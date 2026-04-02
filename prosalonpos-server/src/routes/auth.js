@@ -74,7 +74,9 @@ router.get('/pin-table/:salon_id', async function(req, res, next) {
           id: staff[i].id,
           display_name: staff[i].display_name,
           role: staff[i].role,
-          rbac_role: staff[i].rbac_role
+          rbac_role: staff[i].rbac_role,
+          permissions: fromDb(staff[i].permissions),
+          permission_overrides: fromDb(staff[i].permission_overrides)
         };
       }
     }
