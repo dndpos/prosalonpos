@@ -27,9 +27,7 @@ var useStaffStore = create(function(set, get) {
     // ─── Actions ───
 
     fetchStaff: async function() {
-      var available = isBackendAvailable();
-      if (available === null) available = await checkBackend();
-      if (!available) {
+      if (isBackendAvailable() === false) {
         set({ initialized: true, source: 'error', error: 'Server not available' });
         return;
       }

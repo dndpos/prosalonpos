@@ -284,6 +284,7 @@ model ServiceLine {
 
   @@index([appointment_id])
   @@index([staff_id, starts_at])
+  @@index([starts_at])
 }
 
 // ════════════════════════════════════════════

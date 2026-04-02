@@ -6,6 +6,7 @@ import { useServiceStore } from './lib/stores/serviceStore';
 import { useSettingsStore } from './lib/stores/settingsStore';
 import { useClientStore } from './lib/stores/clientStore';
 import { useAppointmentStore } from './lib/stores/appointmentStore';
+import { bootstrapStores } from './lib/hooks/useBootstrap';
 import { useTicketStore } from './lib/stores/ticketStore';
 import { useGiftCardStore } from './lib/stores/giftCardStore';
 import { useInventoryStore } from './lib/stores/inventoryStore';
@@ -273,77 +274,72 @@ export default function App() {
     // Only fetch data after login (we need a JWT for all protected routes)
     if (!loggedIn) return;
 
-    // If we got here via login, the backend is already proven up — skip health check.
-    // Fire all store fetches immediately in parallel.
-    fetchStaff();
-    fetchServices();
-    fetchSettings();
-    fetchClients();
-    fetchServiceLines();
-    fetchTickets();
-    fetchGiftCards();
-    fetchProducts();
-    fetchLoyaltyProgram();
-    fetchMembershipPlans();
-    fetchTemplates();
-    fetchPayrollRuns();
-    fetchPackages();
-    fetchCommission();
+    // ── BOOTSTRAP: single API call loads ALL data at once ──
+    // Replaces 14 separate fetch calls, eliminating 13 round trips to Railway.
+    // Falls back to individual fetches if bootstrap endpoint is unavailable.
+    bootstrapStores().then(function(success) {
+      if (!success) {
+        // Bootstrap failed — fall back to individual fetches (pre-S99 behavior)
+        fetchStaff(); fetchServices(); fetchSettings(); fetchClients();
+        fetchServiceLines(); fetchTickets(); fetchGiftCards(); fetchProducts();
+        fetchLoyaltyProgram(); fetchMembershipPlans(); fetchTemplates();
+        fetchPackages();
+      }
+      // Payroll + commission always fetched individually (not in bootstrap)
+      fetchPayrollRuns();
+      fetchCommission();
+    });
 
     // Connect WebSocket for real-time multi-station sync
-    checkBackend().then(function(available) {
-      if (available) {
-        connectSocket();
+    connectSocket();
 
-        // When another station makes changes, refresh the affected store
-        onSocketEvent('staff:created', function() { fetchStaff(); });
-        onSocketEvent('staff:updated', function() { fetchStaff(); });
-        onSocketEvent('staff:deleted', function() { fetchStaff(); });
-        onSocketEvent('service:created', function() { fetchServices(); });
-        onSocketEvent('service:updated', function() { fetchServices(); });
-        onSocketEvent('service:deleted', function() { fetchServices(); });
-        onSocketEvent('category:created', function() { fetchServices(); });
-        onSocketEvent('category:updated', function() { fetchServices(); });
-        onSocketEvent('category:deleted', function() { fetchServices(); });
-        onSocketEvent('settings:updated', function() { fetchSettings(); });
-        onSocketEvent('client:created', function() { fetchClients(); });
-        onSocketEvent('client:updated', function() { fetchClients(); });
-        onSocketEvent('appointment:created', function() { fetchServiceLines(); });
-        onSocketEvent('appointment:updated', function() { fetchServiceLines(); });
-        onSocketEvent('appointment:deleted', function() { fetchServiceLines(); });
-        onSocketEvent('ticket:created', function() { fetchTickets(); });
-        onSocketEvent('ticket:updated', function() { fetchTickets(); });
-        onSocketEvent('ticket:closed', function() { fetchTickets(); });
-        onSocketEvent('ticket:voided', function() { fetchTickets(); });
-        onSocketEvent('ticket:refunded', function() { fetchTickets(); });
-        onSocketEvent('ticket:payment', function() { fetchTickets(); });
-        onSocketEvent('ticket:tip_updated', function() { fetchTickets(); });
-        onSocketEvent('giftcard:created', function() { fetchGiftCards(); });
-        onSocketEvent('giftcard:updated', function() { fetchGiftCards(); });
-        onSocketEvent('giftcard:redeemed', function() { fetchGiftCards(); });
-        onSocketEvent('giftcard:reloaded', function() { fetchGiftCards(); });
-        onSocketEvent('giftcard:restored', function() { fetchGiftCards(); });
-        onSocketEvent('inventory:updated', function() { fetchProducts(); });
-        onSocketEvent('loyalty:updated', function() { fetchLoyaltyProgram(); });
-        onSocketEvent('membership:updated', function() { fetchMembershipPlans(); });
-        onSocketEvent('messaging:updated', function() { fetchTemplates(); });
-        onSocketEvent('payroll:updated', function() { fetchPayrollRuns(); });
-        onSocketEvent('package:updated', function() { fetchPackages(); });
-        onSocketEvent('commission:updated', function() { fetchCommission(); });
+    // When another station makes changes, refresh the affected store
+    onSocketEvent('staff:created', function() { fetchStaff(); });
+    onSocketEvent('staff:updated', function() { fetchStaff(); });
+    onSocketEvent('staff:deleted', function() { fetchStaff(); });
+    onSocketEvent('service:created', function() { fetchServices(); });
+    onSocketEvent('service:updated', function() { fetchServices(); });
+    onSocketEvent('service:deleted', function() { fetchServices(); });
+    onSocketEvent('category:created', function() { fetchServices(); });
+    onSocketEvent('category:updated', function() { fetchServices(); });
+    onSocketEvent('category:deleted', function() { fetchServices(); });
+    onSocketEvent('settings:updated', function() { fetchSettings(); });
+    onSocketEvent('client:created', function() { fetchClients(); });
+    onSocketEvent('client:updated', function() { fetchClients(); });
+    onSocketEvent('appointment:created', function() { fetchServiceLines(); });
+    onSocketEvent('appointment:updated', function() { fetchServiceLines(); });
+    onSocketEvent('appointment:deleted', function() { fetchServiceLines(); });
+    onSocketEvent('ticket:created', function() { fetchTickets(); });
+    onSocketEvent('ticket:updated', function() { fetchTickets(); });
+    onSocketEvent('ticket:closed', function() { fetchTickets(); });
+    onSocketEvent('ticket:voided', function() { fetchTickets(); });
+    onSocketEvent('ticket:refunded', function() { fetchTickets(); });
+    onSocketEvent('ticket:payment', function() { fetchTickets(); });
+    onSocketEvent('ticket:tip_updated', function() { fetchTickets(); });
+    onSocketEvent('giftcard:created', function() { fetchGiftCards(); });
+    onSocketEvent('giftcard:updated', function() { fetchGiftCards(); });
+    onSocketEvent('giftcard:redeemed', function() { fetchGiftCards(); });
+    onSocketEvent('giftcard:reloaded', function() { fetchGiftCards(); });
+    onSocketEvent('giftcard:restored', function() { fetchGiftCards(); });
+    onSocketEvent('inventory:updated', function() { fetchProducts(); });
+    onSocketEvent('loyalty:updated', function() { fetchLoyaltyProgram(); });
+    onSocketEvent('membership:updated', function() { fetchMembershipPlans(); });
+    onSocketEvent('messaging:updated', function() { fetchTemplates(); });
+    onSocketEvent('payroll:updated', function() { fetchPayrollRuns(); });
+    onSocketEvent('package:updated', function() { fetchPackages(); });
+    onSocketEvent('commission:updated', function() { fetchCommission(); });
 
-        // ── Print relay: tablet → PC with QZ Tray ──
-        onSocketEvent('print:request', function(data) {
-          // Only handle if this station has QZ Tray running
-          if (!isQzReady()) return;
-          console.log('[App] Print relay received:', data.type);
-          if (data.type === 'receipt') {
-            printReceipt(data.opts || {});
-          } else if (data.type === 'tech_slip') {
-            printTechSlip(data.opts || {});
-          } else if (data.type === 'drawer_summary') {
-            printDrawerSummary(data.opts || {});
-          }
-        });
+    // ── Print relay: tablet → PC with QZ Tray ──
+    onSocketEvent('print:request', function(data) {
+      // Only handle if this station has QZ Tray running
+      if (!isQzReady()) return;
+      console.log('[App] Print relay received:', data.type);
+      if (data.type === 'receipt') {
+        printReceipt(data.opts || {});
+      } else if (data.type === 'tech_slip') {
+        printTechSlip(data.opts || {});
+      } else if (data.type === 'drawer_summary') {
+        printDrawerSummary(data.opts || {});
       }
     });
 

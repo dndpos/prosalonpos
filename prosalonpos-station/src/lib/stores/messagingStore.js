@@ -12,9 +12,7 @@ var useMessagingStore = create(function(set, get) {
     loading: false, error: null, source: 'pending', initialized: false,
 
     fetchTemplates: async function() {
-      var available = isBackendAvailable();
-      if (available === null) available = await checkBackend();
-      if (!available) { set({ initialized: true, source: 'error', error: 'Server not available' }); return; }
+      if (isBackendAvailable() === false) { set({ initialized: true, source: 'error', error: 'Server not available' }); return; }
       set({ loading: true, error: null });
       try {
         var data = await api.get('/messaging/templates');

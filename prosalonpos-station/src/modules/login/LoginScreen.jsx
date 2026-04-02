@@ -15,7 +15,7 @@
  *   - OK button triggers the check — nothing else does
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { login, getPairedSalonId, getPairedSalonName, isBackendAvailable, checkBackend, unpairStation } from '../../lib/apiClient';
+import { login, getPairedSalonId, getPairedSalonName, isBackendAvailable, checkBackend, markBackendAvailable, unpairStation } from '../../lib/apiClient';
 import { debugLog } from '../../lib/debugLog';
 import DebugLabel from '../../components/debug/DebugLabel';
 
@@ -84,6 +84,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
           // Fetch JWT in background
           login(digits).then(function(data) {
             if (data.token && data.staff) {
+              markBackendAvailable();
               onLogin(data);
             } else {
               loggedIn.current = false;
@@ -115,6 +116,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
         loggedIn.current = true;
         setMatched(true);
         setChecking(false);
+        markBackendAvailable();
         debugLog('AUTH', 'Login success: ' + data.staff.display_name);
         onLogin(data);
       } else {

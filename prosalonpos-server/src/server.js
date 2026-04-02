@@ -8,6 +8,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { existsSync } from 'fs';
@@ -42,6 +43,7 @@ import payrollRoutes from './routes/payroll.js';
 import reportsRoutes from './routes/reports.js';
 import providerRoutes from './routes/provider.js';
 import packageRoutes from './routes/packages.js';
+import bootstrapRoutes from './routes/bootstrap.js';
 
 var PORT = process.env.PORT || 3001;
 
@@ -50,6 +52,9 @@ var PORT = process.env.PORT || 3001;
 // ════════════════════════════════════════════
 
 var app = express();
+
+// Gzip compression — reduces response sizes by 60-80% over the wire
+app.use(compression());
 
 // Parse JSON bodies
 app.use(express.json({ limit: '10mb' }));
@@ -95,6 +100,7 @@ app.use('/api/v1/messaging', authenticate, messagingRoutes);
 app.use('/api/v1/payroll', authenticate, payrollRoutes);
 app.use('/api/v1/reports', authenticate, reportsRoutes);
 app.use('/api/v1/packages', authenticate, packageRoutes);
+app.use('/api/v1/bootstrap', authenticate, bootstrapRoutes);
 app.use('/api/v1/provider', providerRoutes); // Provider auth handled internally (login is public)
 
 // ── Global error handler (must be last middleware) ──

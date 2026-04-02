@@ -75,9 +75,7 @@ var useAppointmentStore = create(function(set, get) {
     // ─── Actions ───
 
     fetchServiceLines: async function(dateStr) {
-      var available = isBackendAvailable();
-      if (available === null) available = await checkBackend();
-      if (!available) {
+      if (isBackendAvailable() === false) {
         set({ initialized: true, source: 'error', error: 'Server not available', loadedDate: dateStr || 'today' });
         return;
       }
@@ -190,4 +188,4 @@ var useAppointmentStore = create(function(set, get) {
   };
 });
 
-export { useAppointmentStore, normalizeServiceLine };
+export { useAppointmentStore, normalizeServiceLine, normalizeAll };

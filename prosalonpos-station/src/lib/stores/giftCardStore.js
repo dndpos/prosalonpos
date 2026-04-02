@@ -16,9 +16,7 @@ var useGiftCardStore = create(function(set, get) {
     initialized: false,
 
     fetchGiftCards: async function() {
-      var available = isBackendAvailable();
-      if (available === null) available = await checkBackend();
-      if (!available) {
+      if (isBackendAvailable() === false) {
         set({ initialized: true, source: 'error', error: 'Server not available' });
         return;
       }

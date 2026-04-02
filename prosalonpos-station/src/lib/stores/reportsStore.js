@@ -11,9 +11,7 @@ var useReportsStore = create(function(set, get) {
     loading: false, error: null, source: 'pending', initialized: false,
 
     _init: async function() {
-      var available = isBackendAvailable();
-      if (available === null) available = await checkBackend();
-      if (!available) { set({ initialized: true, source: 'error', error: 'Server not available' }); return null; }
+      if (isBackendAvailable() === false) { set({ initialized: true, source: 'error', error: 'Server not available' }); return null; }
       set({ source: 'api', initialized: true });
       return true;
     },

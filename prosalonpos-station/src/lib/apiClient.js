@@ -113,6 +113,10 @@ async function checkBackend() {
 
 function isBackendAvailable() { return _backendAvailable; }
 
+// Called after successful login — marks backend as confirmed alive
+// so stores skip redundant health checks on initial data load
+function markBackendAvailable() { _backendAvailable = true; }
+
 // Production mode detection — true when backend is available (real data) or running as .exe
 // In dev (port 5173), starts false but flips to true once backend is detected.
 // This means dev mode uses real API data when the server is running.
@@ -237,6 +241,7 @@ export {
   isLoggedIn,
   checkBackend,
   isBackendAvailable,
+  markBackendAvailable,
   isProduction,
   onAuthExpired,
   // Station pairing
