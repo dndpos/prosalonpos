@@ -13,6 +13,7 @@ import { markAvailable as turnMarkAvailable } from '../techTurnBus';
 export default function useTicketHandlers() {
   var closedTickets = useTicketStore(function(s) { return s.closedTickets; });
   var storeAddClosedTicket = useTicketStore(function(s) { return s.addClosedTicket; });
+  var storeCreateTicket = useTicketStore(function(s) { return s.createTicket; });
   var storeCloseTicket = useTicketStore(function(s) { return s.closeTicket; });
   var storeAddPayment = useTicketStore(function(s) { return s.addPayment; });
   var storeSource = useTicketStore(function(s) { return s.source; });
@@ -36,42 +37,80 @@ export default function useTicketHandlers() {
       });
     }
 
-    // In API mode: record payments then close ticket in the database
-    if (storeSource === 'api' && ticket.id && !ticket.id.startsWith('tkt-')) {
-      // Step 1: Record each payment on the open ticket
-      var paymentPromises = (ticket.payments || []).map(function(p) {
-        return storeAddPayment(ticket.id, {
-          method: p.method || 'credit',
-          amount_cents: p.amount_cents || p.amountCents || 0,
-          gc_id: p.gc_id || null,
-          gc_code: p.gc_code || null,
-        });
-      });
+    // In API mode: save ticket to database
+    if (storeSource === 'api') {
+      var needsCreate = !ticket.id || ticket.id.startsWith('tkt-');
 
-      // Step 2: After payments are recorded, close the ticket
-      Promise.all(paymentPromises).then(function() {
-        var closeData = {
-          subtotal_cents: ticket.subtotalCents || 0,
-          tax_cents: ticket.taxCents || 0,
-          discount_cents: ticket.discountCents || 0,
-          tip_cents: ticket.tipCents || 0,
-          surcharge_cents: ticket.surchargeCents || 0,
+      function addPaymentsAndClose(dbTicketId) {
+        // Step 1: Record each payment on the open ticket
+        var paymentPromises = (ticket.payments || []).map(function(p) {
+          return storeAddPayment(dbTicketId, {
+            method: p.method || 'credit',
+            amount_cents: p.amount_cents || p.amountCents || 0,
+            gc_id: p.gc_id || null,
+            gc_code: p.gc_code || null,
+          });
+        });
+
+        // Step 2: After payments are recorded, close the ticket
+        Promise.all(paymentPromises).then(function() {
+          var closeData = {
+            subtotal_cents: ticket.subtotalCents || 0,
+            tax_cents: ticket.taxCents || 0,
+            discount_cents: ticket.discountCents || 0,
+            tip_cents: ticket.tipCents || 0,
+            surcharge_cents: ticket.surchargeCents || 0,
+            deposit_cents: ticket.depositCents || 0,
+            total_cents: ticket.totalCents || 0,
+            payment_method: (ticket.payments && ticket.payments[0]) ? ticket.payments[0].method : null,
+            cashier_id: ticket.closedBy || null,
+            tip_distributions: ticket.tipDistributions || null,
+          };
+          return storeCloseTicket(dbTicketId, closeData);
+        }).then(function() {
+          console.log('[handleCloseTicket] Ticket closed in database:', dbTicketId);
+        }).catch(function(err) {
+          console.warn('[handleCloseTicket] API close failed, ticket saved locally:', err.message);
+          storeAddClosedTicket(ticket);
+        });
+      }
+
+      if (needsCreate) {
+        // Ticket was created from Checkout directly (not from calendar appointment)
+        // Create it in the database first, then add payments and close
+        var createData = {
+          client_id: ticket.client ? ticket.client.id : null,
+          client_name: ticket.clientName || null,
+          appointment_id: ticket.appointmentId || null,
           deposit_cents: ticket.depositCents || 0,
-          total_cents: ticket.totalCents || 0,
-          payment_method: (ticket.payments && ticket.payments[0]) ? ticket.payments[0].method : null,
           cashier_id: ticket.closedBy || null,
-          tip_distributions: ticket.tipDistributions || null,
+          items: (ticket.items || []).map(function(it) {
+            return {
+              type: it.type || 'service',
+              name: it.name || 'Service',
+              price_cents: it.price_cents || 0,
+              original_price_cents: it.original_price_cents || it.price_cents || 0,
+              tech_id: it.techId || null,
+              tech_name: it.tech || null,
+              service_id: it.service_id || null,
+              product_id: it.product_id || null,
+              color: it.color || null,
+            };
+          }),
         };
-        return storeCloseTicket(ticket.id, closeData);
-      }).then(function() {
-        console.log('[handleCloseTicket] Ticket closed in database:', ticket.id);
-      }).catch(function(err) {
-        console.warn('[handleCloseTicket] API close failed, ticket saved locally:', err.message);
-        // Fallback: at least keep it in local state so UI still works
-        storeAddClosedTicket(ticket);
-      });
+        storeCreateTicket(createData).then(function(dbTicket) {
+          console.log('[handleCloseTicket] Ticket created in database:', dbTicket.id);
+          addPaymentsAndClose(dbTicket.id);
+        }).catch(function(err) {
+          console.warn('[handleCloseTicket] API create failed, ticket saved locally:', err.message);
+          storeAddClosedTicket(ticket);
+        });
+      } else {
+        // Ticket already exists in DB (came from calendar appointment)
+        addPaymentsAndClose(ticket.id);
+      }
     } else {
-      // Mock mode or fallback: just add to local closed list
+      // Mock mode: just add to local closed list
       storeAddClosedTicket(ticket);
     }
   }
