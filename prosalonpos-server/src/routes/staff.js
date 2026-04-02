@@ -74,18 +74,20 @@ router.post('/', async function(req, res, next) {
     var data = req.body;
     var newPin = data.pin || '0000';
 
-    // ── Duplicate PIN check ──
-    var newPinHash = pinSha256(newPin);
-    var existingStaff = await prisma.staff.findMany({
-      where: { salon_id: req.salon_id, active: true }
-    });
-    var dupStaff = existingStaff.find(function(s) { return s.pin_sha256 === newPinHash; });
+    // ── Run duplicate check + bcrypt hash in PARALLEL ──
+    var newPinSha = pinSha256(newPin);
+    var [existingStaff, salon, pinHashResult] = await Promise.all([
+      prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true }, select: { pin_sha256: true, display_name: true } }),
+      prisma.salon.findUnique({ where: { id: req.salon_id }, select: { owner_pin_sha256: true } }),
+      hashPinAsync(newPin)
+    ]);
+
+    // Check duplicates
+    var dupStaff = existingStaff.find(function(s) { return s.pin_sha256 === newPinSha; });
     if (dupStaff) {
       return res.status(409).json({ error: 'PIN already in use by ' + dupStaff.display_name });
     }
-    // Also check owner PIN
-    var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
-    if (salon && salon.owner_pin_sha256 && salon.owner_pin_sha256 === newPinHash) {
+    if (salon && salon.owner_pin_sha256 && salon.owner_pin_sha256 === newPinSha) {
       return res.status(409).json({ error: 'PIN already in use by Owner' });
     }
 
@@ -97,8 +99,8 @@ router.post('/', async function(req, res, next) {
         photo_url: data.photo_url || null,
         role: data.role || 'technician',
         rbac_role: data.rbac_role || 'tech',
-        pin_hash: hashPin(data.pin || '0000'),
-        pin_sha256: pinSha256(data.pin || '0000'),
+        pin_hash: pinHashResult,
+        pin_sha256: newPinSha,
         badge_id: data.badge_id || null,
         active: data.active !== false,
         tech_turn_eligible: data.tech_turn_eligible !== false,
@@ -163,22 +165,22 @@ router.put('/:id', async function(req, res, next) {
 
     // Handle PIN change separately (needs hashing + duplicate check)
     if (data.pin) {
-      var newPinHash = pinSha256(data.pin);
-      // Check all other active staff for duplicate PIN
-      var otherStaff = await prisma.staff.findMany({
-        where: { salon_id: req.salon_id, active: true, id: { not: req.params.id } }
-      });
-      var dupStaff = otherStaff.find(function(s) { return s.pin_sha256 === newPinHash; });
+      var newPinSha = pinSha256(data.pin);
+      // Run duplicate check + bcrypt hash in PARALLEL
+      var [otherStaff, salon2, pinHashResult] = await Promise.all([
+        prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true, id: { not: req.params.id } }, select: { pin_sha256: true, display_name: true } }),
+        prisma.salon.findUnique({ where: { id: req.salon_id }, select: { owner_pin_sha256: true } }),
+        hashPinAsync(data.pin)
+      ]);
+      var dupStaff = otherStaff.find(function(s) { return s.pin_sha256 === newPinSha; });
       if (dupStaff) {
         return res.status(409).json({ error: 'PIN already in use by ' + dupStaff.display_name });
       }
-      // Also check owner PIN
-      var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
-      if (salon && salon.owner_pin_sha256 && salon.owner_pin_sha256 === newPinHash) {
+      if (salon2 && salon2.owner_pin_sha256 && salon2.owner_pin_sha256 === newPinSha) {
         return res.status(409).json({ error: 'PIN already in use by Owner' });
       }
-      updateData.pin_hash = hashPin(data.pin);
-      updateData.pin_sha256 = pinSha256(data.pin);
+      updateData.pin_hash = pinHashResult;
+      updateData.pin_sha256 = newPinSha;
     }
 
     updateData.version = { increment: 1 };

@@ -149,9 +149,10 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
   // Schedule
   var [schedule, setSchedule] = useState(isEdit && employee.schedule ? { ...employee.schedule } : { ...DEFAULT_SCHEDULE });
 
-  // Services
+  // Services — empty array means "all allowed" (default, no exclusions configured yet)
+  var _editIds = isEdit ? (employee.assigned_service_ids || []) : [];
   var [assignedServiceIds, setAssignedServiceIds] = useState(
-    isEdit ? (employee.assigned_service_ids || []) : [].concat(allActiveServiceIds)
+    isEdit ? (_editIds.length > 0 ? _editIds : [].concat(allActiveServiceIds)) : [].concat(allActiveServiceIds)
   );
   var [showServicePicker, setShowServicePicker] = useState(false);
   var [svcActiveCat, setSvcActiveCat] = useState(null);
