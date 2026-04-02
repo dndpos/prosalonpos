@@ -72,12 +72,72 @@ router.get('/:id', async function(req, res, next) {
 router.post('/', async function(req, res, next) {
   try {
     var data = req.body;
+
+    // Owner role staff uses salon owner PIN — no separate PIN needed
+    if (data.role === 'owner') {
+      var salon = await prisma.salon.findUnique({
+        where: { id: req.salon_id },
+        select: { owner_pin_hash: true, owner_pin_sha256: true }
+      });
+      if (!salon || !salon.owner_pin_hash) {
+        return res.status(400).json({ error: 'Owner PIN not set in Salon Information. Set it first.' });
+      }
+
+      // Check only one owner staff record at a time
+      var existingOwner = await prisma.staff.findFirst({
+        where: { salon_id: req.salon_id, role: 'owner', active: true }
+      });
+      if (existingOwner) {
+        return res.status(409).json({ error: 'An active Owner staff member already exists: ' + existingOwner.display_name });
+      }
+
+      var s = await prisma.staff.create({
+        data: {
+          salon_id: req.salon_id,
+          display_name: data.display_name,
+          legal_name: data.legal_name || null,
+          photo_url: data.photo_url || null,
+          role: 'owner',
+          rbac_role: 'owner',
+          pin_hash: salon.owner_pin_hash,
+          pin_sha256: salon.owner_pin_sha256,
+          badge_id: data.badge_id || null,
+          active: data.active !== false,
+          tech_turn_eligible: data.tech_turn_eligible !== false,
+          pay_type: data.pay_type || 'commission',
+          commission_pct: data.commission_pct || 0,
+          daily_guarantee_cents: data.daily_guarantee_cents || 0,
+          hourly_rate_cents: data.hourly_rate_cents || null,
+          salary_amount_cents: data.salary_amount_cents || null,
+          salary_period: data.salary_period || null,
+          commission_bonus_enabled: data.commission_bonus_enabled || false,
+          payout_check_pct: data.payout_check_pct != null ? data.payout_check_pct : 100,
+          payout_bonus_pct: data.payout_bonus_pct || 0,
+          category_commission_rates: toDb(data.category_commission_rates || {}),
+          permission_overrides: toDb(data.permission_overrides || {}),
+          permissions: toDb(data.permissions || {}),
+          schedule: toDb(data.schedule || null),
+          position: data.position || 0,
+          status: 'active',
+        },
+        include: { service_staff: true }
+      });
+
+      var copy = Object.assign({}, s);
+      delete copy.pin_hash;
+      JSON_FIELDS.forEach(function(f) { if (copy[f] !== undefined) copy[f] = fromDb(copy[f]); });
+      copy.assigned_service_ids = [];
+      delete copy.service_staff;
+      emit(req, 'staff:updated');
+      return res.status(201).json({ staff: copy });
+    }
+
     var newPin = data.pin || '0000';
 
     // ── Run duplicate check + bcrypt hash in PARALLEL ──
     var newPinSha = pinSha256(newPin);
     var [existingStaff, salon, pinHashResult] = await Promise.all([
-      prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true }, select: { pin_sha256: true, display_name: true } }),
+      prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true, role: { not: 'owner' } }, select: { pin_sha256: true, display_name: true } }),
       prisma.salon.findUnique({ where: { id: req.salon_id }, select: { owner_pin_sha256: true } }),
       hashPinAsync(newPin)
     ]);
@@ -164,11 +224,23 @@ router.put('/:id', async function(req, res, next) {
     });
 
     // Handle PIN change separately (needs hashing + duplicate check)
-    if (data.pin) {
+    // Owner role staff always uses salon owner PIN — never a separate PIN
+    var effectiveRole = data.role || existing.role;
+    if (effectiveRole === 'owner') {
+      // Sync owner PIN from salon record
+      var salonForOwner = await prisma.salon.findUnique({
+        where: { id: req.salon_id },
+        select: { owner_pin_hash: true, owner_pin_sha256: true }
+      });
+      if (salonForOwner && salonForOwner.owner_pin_hash) {
+        updateData.pin_hash = salonForOwner.owner_pin_hash;
+        updateData.pin_sha256 = salonForOwner.owner_pin_sha256;
+      }
+    } else if (data.pin) {
       var newPinSha = pinSha256(data.pin);
       // Run duplicate check + bcrypt hash in PARALLEL
       var [otherStaff, salon2, pinHashResult] = await Promise.all([
-        prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true, id: { not: req.params.id } }, select: { pin_sha256: true, display_name: true } }),
+        prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true, id: { not: req.params.id }, role: { not: 'owner' } }, select: { pin_sha256: true, display_name: true } }),
         prisma.salon.findUnique({ where: { id: req.salon_id }, select: { owner_pin_sha256: true } }),
         hashPinAsync(data.pin)
       ]);

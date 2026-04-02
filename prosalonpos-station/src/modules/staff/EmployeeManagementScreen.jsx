@@ -17,8 +17,8 @@ import EmployeeGrid from '../../components/domain/EmployeeGrid';
 import EmployeeModal from './EmployeeModal';
 import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 
-var ROLE_LABELS = { technician: 'Technician', manager: 'Manager', owner: 'Owner' };
-var ROLE_COLORS = { technician: '#3B82F6', manager: '#F59E0B', owner: '#8B5CF6' };
+var ROLE_LABELS = { technician: 'Technician', manager: 'Manager', receptionist: 'Receptionist', owner: 'Owner' };
+var ROLE_COLORS = { technician: '#3B82F6', manager: '#F59E0B', receptionist: '#10B981', owner: '#8B5CF6' };
 
 export default function EmployeeManagementScreen({
   employees, setEmployees,
@@ -274,7 +274,7 @@ export default function EmployeeManagementScreen({
                 </div>
               )}
               {filteredActive.map(function(emp) {
-                var canDeactivate = emp.role !== 'owner';
+                var canDeactivate = true; // all staff can be deactivated
                 return renderEmpRow(emp, canDeactivate
                   ? actionBtn('Deactivate', '#F59E0B', function() { handleDeactivate(emp.id); })
                   : null

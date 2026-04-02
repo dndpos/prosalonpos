@@ -223,7 +223,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
     if (!canSave) return;
     onSave({
       display_name: displayName.trim(), legal_name: legalName.trim(), role: role,
-      pin: pin || undefined, badge_id: badgeId || undefined, pay_type: payType,
+      pin: role === 'owner' ? undefined : (pin || undefined), badge_id: badgeId || undefined, pay_type: payType,
       hourly_rate_cents: payType === 'hourly' ? (parseInt(hourlyRate, 10) || 0) : undefined,
       salary_amount_cents: payType === 'salary' ? (parseInt(salaryAmount, 10) || 0) : undefined,
       salary_period: payType === 'salary' ? salaryPeriod : undefined,
@@ -411,7 +411,8 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
               </select>
             </div>
 
-            {/* PIN — collapsible dark numpad */}
+            {/* PIN — collapsible dark numpad (hidden for owner role — uses salon owner PIN) */}
+            {role !== 'owner' ? (
             <div style={{ marginBottom: 14 }}>
               <label style={LBL}>{isEdit ? 'Change PIN' : 'PIN'} <span style={{ color: T.textMuted, fontWeight: 400 }}>(4 digits)</span></label>
               <div onClick={function() { setShowPinPad(!showPinPad); }}
@@ -446,6 +447,14 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
                 </div>
               )}
             </div>
+            ) : (
+            <div style={{ marginBottom: 14 }}>
+              <label style={LBL}>PIN</label>
+              <div style={{ padding: '8px 12px', background: T.raised, border: '1px solid ' + T.border, borderRadius: 6, fontSize: 12, color: T.textMuted }}>
+                Uses Owner PIN from Salon Information
+              </div>
+            </div>
+            )}
 
             {/* Badge ID */}
             <div style={{ marginBottom: 14 }}>

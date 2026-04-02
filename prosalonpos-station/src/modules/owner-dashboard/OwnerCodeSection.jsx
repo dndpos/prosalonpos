@@ -1,14 +1,14 @@
 /**
- * OwnerCodeSection.jsx — Owner Code Change UI
- * Session 86
+ * OwnerCodeSection.jsx — Owner PIN Display & Change UI
+ * Session 98
  *
- * Simple flow: tap Change → numpad → Save
- * No old password required (user is already authenticated as owner).
+ * View mode: Spaced digit boxes showing masked dots.
+ * Edit mode: Digit boxes + numpad → Save.
  * Calls PUT /auth/owner-pin to update.
  */
 import { useState } from 'react';
 import { useTheme } from '../../lib/ThemeContext';
-import { api, isProduction, getPairedSalonId } from '../../lib/apiClient';
+import { api, getPairedSalonId } from '../../lib/apiClient';
 
 export default function OwnerCodeSection() {
   var T = useTheme();
@@ -30,7 +30,7 @@ export default function OwnerCodeSection() {
     api.put('/auth/owner-pin', { new_pin: pin, salon_id: getPairedSalonId() })
       .then(function(res) {
         if (res && res.success) {
-          setMsg('Owner code updated!');
+          setMsg('Owner PIN updated!');
           setMode('view');
           setPin('');
         } else {
@@ -44,54 +44,112 @@ export default function OwnerCodeSection() {
       .finally(function() { setSaving(false); });
   }
 
-  var btnStyle = { width: 64, height: 52, borderRadius: 8, border: '1px solid ' + T.border, background: T.grid, color: T.text, fontSize: 20, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Inter',sans-serif" };
+  // ── Shared styles ──
+  var digitBox = {
+    width: 36, height: 42, borderRadius: 6,
+    border: '1px solid ' + T.border, background: T.raised,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 18, fontWeight: 700, color: T.text,
+  };
+  var emptyBox = Object.assign({}, digitBox, {
+    border: '1px dashed ' + T.border, background: 'transparent', color: T.textMuted,
+  });
+  var numBtn = {
+    width: 52, height: 42, borderRadius: 6,
+    border: '1px solid ' + T.border, background: T.grid, color: T.text,
+    fontSize: 18, fontWeight: 600, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: "'Inter',sans-serif",
+  };
 
+  // ── VIEW MODE ──
   if (mode === 'view') {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
-        <span style={{ fontSize: 13, color: T.textSecondary }}>Owner PIN:</span>
-        <span style={{ fontSize: 13, color: T.text, letterSpacing: 4 }}>••••</span>
-        <div onClick={function() { setMode('edit'); setPin(''); setMsg(''); }}
-          style={{ fontSize: 12, color: T.accent, cursor: 'pointer', fontWeight: 500 }}
-          onMouseEnter={function(e) { e.currentTarget.style.textDecoration = 'underline'; }}
-          onMouseLeave={function(e) { e.currentTarget.style.textDecoration = 'none'; }}
-        >Change</div>
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 13, color: T.textSecondary, marginBottom: 8 }}>Owner PIN</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[0, 1, 2, 3].map(function(i) {
+              return <div key={i} style={digitBox}>•</div>;
+            })}
+          </div>
+          <div onClick={function() { setMode('edit'); setPin(''); setMsg(''); }}
+            style={{
+              height: 36, padding: '0 14px', borderRadius: 6, marginLeft: 4,
+              background: '#0D3B2E', color: '#34D399', border: '1px solid #065F46',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center',
+            }}
+            onMouseEnter={function(e) { e.currentTarget.style.background = '#134D3A'; }}
+            onMouseLeave={function(e) { e.currentTarget.style.background = '#0D3B2E'; }}
+          >Change</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── EDIT MODE ──
+  var maxShow = Math.max(pin.length, 4);
+  var boxes = [];
+  for (var i = 0; i < maxShow; i++) {
+    boxes.push(
+      <div key={i} style={i < pin.length ? digitBox : emptyBox}>
+        {i < pin.length ? '•' : ''}
       </div>
     );
   }
 
   return (
-    <div style={{ marginTop: 8, padding: 16, background: T.bg, borderRadius: 10, border: '1px solid ' + T.border }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 12 }}>Set New Owner PIN</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, minHeight: 32 }}>
-        {pin.length === 0
-          ? <span style={{ fontSize: 13, color: T.textMuted }}>Enter 2–8 digits</span>
-          : <span style={{ fontSize: 20, color: T.text, letterSpacing: 6 }}>{pin.split('').map(function() { return '•'; }).join('')}</span>
-        }
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 13, color: T.textSecondary, marginBottom: 8 }}>Set New Owner PIN</div>
+
+      {/* Digit boxes */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, minHeight: 42 }}>
+        {boxes}
+        {pin.length > 0 && pin.length < 2 && (
+          <span style={{ fontSize: 11, color: T.textMuted, alignSelf: 'center', marginLeft: 6 }}>min 2</span>
+        )}
+        {pin.length >= 2 && (
+          <span style={{ fontSize: 11, color: T.success, alignSelf: 'center', marginLeft: 6 }}>✓</span>
+        )}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 64px)', gap: 6, marginBottom: 12 }}>
+
+      {/* Numpad */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 52px)', gap: 4, marginBottom: 10 }}>
         {[7,8,9,4,5,6,1,2,3].map(function(d) {
-          return <div key={d} onClick={function() { handleDigit(String(d)); }} style={btnStyle}
-            onMouseEnter={function(e) { e.currentTarget.style.background = T.gridHover; }}
-            onMouseLeave={function(e) { e.currentTarget.style.background = T.grid; }}
-          >{d}</div>;
+          return (
+            <div key={d} onClick={function() { handleDigit(String(d)); }} style={numBtn}
+              onMouseEnter={function(e) { e.currentTarget.style.background = T.gridHover; }}
+              onMouseLeave={function(e) { e.currentTarget.style.background = T.grid; }}
+            >{d}</div>
+          );
         })}
-        <div onClick={handleClear} style={Object.assign({}, btnStyle, { fontSize: 12, color: T.danger })}>CLR</div>
-        <div onClick={function() { handleDigit('0'); }} style={btnStyle}
+        <div onClick={handleClear} style={Object.assign({}, numBtn, { fontSize: 11, color: T.danger })}>CLR</div>
+        <div onClick={function() { handleDigit('0'); }} style={numBtn}
           onMouseEnter={function(e) { e.currentTarget.style.background = T.gridHover; }}
           onMouseLeave={function(e) { e.currentTarget.style.background = T.grid; }}
         >0</div>
-        <div onClick={handleBack} style={Object.assign({}, btnStyle, { fontSize: 14 })}>⌫</div>
+        <div onClick={handleBack} style={Object.assign({}, numBtn, { fontSize: 13 })}>⌫</div>
       </div>
+
+      {/* Action buttons */}
       <div style={{ display: 'flex', gap: 8 }}>
         <div onClick={function() { setMode('view'); setPin(''); setMsg(''); }}
-          style={{ height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid ' + T.border, color: T.textSecondary, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>Cancel</div>
+          style={{ height: 32, padding: '0 14px', borderRadius: 6, border: '1px solid ' + T.border, color: T.textSecondary, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>Cancel</div>
         <div onClick={handleSave}
-          style={{ height: 36, padding: '0 16px', borderRadius: 8, background: pin.length >= 2 ? T.primary : T.grid, color: pin.length >= 2 ? '#fff' : T.textMuted, fontSize: 13, fontWeight: 600, cursor: pin.length >= 2 ? 'pointer' : 'default', display: 'flex', alignItems: 'center' }}>
+          style={{
+            height: 32, padding: '0 14px', borderRadius: 6,
+            background: pin.length >= 2 ? '#0D3B2E' : T.grid,
+            color: pin.length >= 2 ? '#34D399' : T.textMuted,
+            border: '1px solid ' + (pin.length >= 2 ? '#065F46' : T.border),
+            fontSize: 12, fontWeight: 600,
+            cursor: pin.length >= 2 ? 'pointer' : 'default',
+            display: 'flex', alignItems: 'center',
+          }}>
           {saving ? 'Saving...' : 'Save'}
         </div>
       </div>
-      {msg ? <div style={{ fontSize: 12, color: msg.indexOf('updated') !== -1 ? T.success : T.danger, marginTop: 8 }}>{msg}</div> : null}
+      {msg ? <div style={{ fontSize: 11, color: msg.indexOf('updated') !== -1 ? T.success : T.danger, marginTop: 6 }}>{msg}</div> : null}
     </div>
   );
 }
