@@ -46,7 +46,7 @@ async function bootstrapSalon(salonName, licenseKey) {
   var existing = await prisma.salon.findFirst();
 
   if (existing) {
-    // Ensure owner_pin_hash exists AND is valid (migration from old model)
+    // Ensure owner_pin_hash exists
     if (!existing.owner_pin_hash) {
       console.log('[Bootstrap] Salon exists but no owner PIN — setting default (0000)...');
       await prisma.salon.update({
@@ -55,30 +55,19 @@ async function bootstrapSalon(salonName, licenseKey) {
       });
       console.log('[Bootstrap] Default owner PIN set on salon record');
     } else {
-      // Verify the stored hash actually works — rehash if corrupt
-      var ownerPinValid = comparePin('0000', existing.owner_pin_hash);
-      console.log('[Bootstrap] Owner PIN hash check (0000):', ownerPinValid ? 'VALID' : 'FAILED');
-      if (!ownerPinValid) {
-        console.log('[Bootstrap] Owner PIN hash appears corrupt — rehashing default (0000)...');
-        var freshHash = hashPin('0000');
-        console.log('[Bootstrap] New hash generated, length:', freshHash.length);
-        await prisma.salon.update({
-          where: { id: existing.id },
-          data: { owner_pin_hash: freshHash, owner_pin_sha256: pinSha256('0000') }
-        });
-        console.log('[Bootstrap] ✅ Owner PIN rehashed successfully');
-      } else {
-        // Check if hash uses old slow rounds — upgrade to fast rounds
+      // Check if hash uses old slow rounds AND default PIN still matches — upgrade rounds only
+      var ownerStillDefault = comparePin('0000', existing.owner_pin_hash);
+      if (ownerStillDefault) {
         var ownerRoundsMatch = existing.owner_pin_hash.match(/^\$2[ab]\$(\d+)\$/);
         if (ownerRoundsMatch && parseInt(ownerRoundsMatch[1], 10) > 6) {
-          console.log('[Bootstrap] Owner PIN hash uses old rounds (' + ownerRoundsMatch[1] + ') — upgrading to 6...');
+          console.log('[Bootstrap] Owner PIN uses old rounds (' + ownerRoundsMatch[1] + ') — upgrading to 6...');
           await prisma.salon.update({
             where: { id: existing.id },
             data: { owner_pin_hash: hashPin('0000'), owner_pin_sha256: pinSha256('0000') }
           });
           console.log('[Bootstrap] ✅ Owner PIN rehashed with fast rounds');
         }
-        // Always ensure sha256 exists
+        // Ensure sha256 exists
         if (!existing.owner_pin_sha256) {
           await prisma.salon.update({
             where: { id: existing.id },
@@ -86,6 +75,9 @@ async function bootstrapSalon(salonName, licenseKey) {
           });
           console.log('[Bootstrap] ✅ Owner PIN sha256 backfilled');
         }
+      } else {
+        console.log('[Bootstrap] Owner PIN changed from default — leaving it as-is');
+        // Still ensure sha256 exists (can't backfill without knowing the PIN — set on next PIN change)
       }
     }
 
