@@ -137,7 +137,7 @@ export default function EmployeeGrid({
               color: '#E2E8F0', fontSize: 15, fontWeight: 500,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               maxWidth: '100%', textAlign: 'center',
-            }}>{emp.display_name}</div>
+            }}>{emp.display_name || 'Unknown'}</div>
             {/* Role badge */}
             <div style={{
               marginTop: 6,

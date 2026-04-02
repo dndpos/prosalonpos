@@ -147,7 +147,7 @@ export default function TimeClockPopup({ show, clockPunches, onPunch, onDismiss 
   };
 
   var AVATAR_COLORS = ['#1E3A5F', '#064E3B', '#7C2D12', '#4C1D95', '#831843', '#1F2937', '#0E4429', '#6B21A8'];
-  function getInitials(n) { return n.split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 2); }
+  function getInitials(n) { return (n || '').split(' ').filter(function(w) { return w; }).map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 2); }
 
   // ── NOT HOURLY ──
   if (phase === 'not_hourly') {

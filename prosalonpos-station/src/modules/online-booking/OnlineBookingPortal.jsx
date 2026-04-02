@@ -35,7 +35,7 @@ function formatPhone(d) {
   return '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6, 10);
 }
 function getInitials(name) {
-  return name.split(' ').map(function (w) { return w[0]; }).join('').toUpperCase().slice(0, 2);
+  return (name || '').split(' ').filter(function (w) { return w; }).map(function (w) { return w[0]; }).join('').toUpperCase().slice(0, 2);
 }
 
 

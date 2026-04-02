@@ -39,7 +39,7 @@ import { reshapeTicketForPayroll, calculateHoursFromPunches, calculateTipsFromTi
 function fmtShort(cents) { return '$' + Math.round(cents / 100).toLocaleString(); }
 
 var AVATAR_COLORS = ['#1E3A5F', '#064E3B', '#7C2D12', '#4C1D95', '#831843'];
-function getInitials(n) { return n.split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 2); }
+function getInitials(n) { return (n || '').split(' ').filter(function(w) { return w; }).map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 2); }
 function Avatar({ name, size, index }) {
   var T = useTheme();
   size = size || 36; index = index || 0;

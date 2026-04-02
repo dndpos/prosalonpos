@@ -319,9 +319,9 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
                 borderRadius: 10, fontSize: 18, fontWeight: 700,
                 cursor: digits.length === 0 || checking ? 'not-allowed' : 'pointer',
                 userSelect: 'none',
-                background: digits.length === 0 || checking ? '#1E293B' : '#2563EB',
-                color: digits.length === 0 || checking ? '#475569' : '#FFFFFF',
-                border: '1px solid ' + (digits.length === 0 || checking ? '#2A3A50' : '#3B82F6'),
+                background: digits.length === 0 || checking ? '#1E293B' : '#0D3B2E',
+                color: digits.length === 0 || checking ? '#475569' : '#34D399',
+                border: '1px solid ' + (digits.length === 0 || checking ? '#2A3A50' : '#065F46'),
                 transition: 'background 150ms, color 150ms',
                 letterSpacing: 1,
               }}

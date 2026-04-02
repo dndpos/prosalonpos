@@ -107,7 +107,7 @@ function LockIcon({size=12,color='#FBBF24'}){
 
 // Avatar matching calendar column headers
 const AVATAR_COLORS=['#1E3A5F','#064E3B','#7C2D12','#4C1D95','#831843'];
-function getInitials(n){return n.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);}
+function getInitials(n){return(n||'').split(' ').filter(w=>w).map(w=>w[0]).join('').toUpperCase().slice(0,2);}
 function TechAvatar({name,size=22,staffIndex=0,photo=null}){
   if(photo) return(<img src={photo} alt={name} style={{width:size,height:size,borderRadius:'50%',objectFit:'cover',flexShrink:0}}/>);
   return(
@@ -776,7 +776,7 @@ export default function AppointmentDetailPopup({sl, allServiceLines, staff, onCl
                     : (function() {
                         var nm = storeClients.find(function(c) { return (c.first_name + ' ' + c.last_name) === sl.client; });
                         return nm ? { id: nm.id, first_name: nm.first_name, last_name: nm.last_name, phone: (nm.phone || '').replace(/\D/g,'') }
-                          : { first_name: sl.client.split(' ')[0], last_name: sl.client.split(' ').slice(1).join(' '), phone: '' };
+                          : { first_name: (sl.client || '').split(' ')[0] || '', last_name: (sl.client || '').split(' ').slice(1).join(' ') || '', phone: '' };
                       })();
                   onCheckout({client:checkoutClient,services:checkoutLines,serviceLineIds:allLines.map(function(l){return l.id;})});
                 }

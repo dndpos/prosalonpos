@@ -21,7 +21,7 @@ export function formatHour(h){return`${h>12?h-12:h===0?12:h}:00 ${h>=12?'PM':'AM
 export function formatMinLabel(m){return`${m}`;}
 export function formatTimeShort(h,m){return`${h>12?h-12:h===0?12:h}:${String(m).padStart(2,'0')}`;}
 export function formatTimeFull(d){const h=d.getHours(),m=d.getMinutes();return`${h>12?h-12:h===0?12:h}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`;}
-export function getInitials(n){return n.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);}
+export function getInitials(n){return(n||'').split(' ').filter(w=>w).map(w=>w[0]).join('').toUpperCase().slice(0,2);}
 export function snapTo15(min){return Math.round(min/15)*15;}
 export const t=(h,m=0)=>new Date(Y,M,D,h,m);
 
