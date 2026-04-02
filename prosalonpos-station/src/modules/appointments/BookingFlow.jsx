@@ -62,7 +62,9 @@ export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initial
   const[showBlockTime,setShowBlockTime]=useState(false);
   const[blockFrom,setBlockFrom]=useState('');
   const[blockTo,setBlockTo]=useState('');
-  const[activeCat,setActiveCat]=useState(activeCategories.length > 0 ? activeCategories[0].id : null);
+  // Default to the category in slot 0 (first visual position), not array[0]
+  var _firstSlotCatId = catSlots[0] || (activeCategories.length > 0 ? activeCategories[0].id : null);
+  const[activeCat,setActiveCat]=useState(_firstSlotCatId);
   // For "Add Technician" flow — stores the picked tech before timing popup
   const[pendingTech,setPendingTech]=useState(null);
   // For "Add Client" flow — which picker mode

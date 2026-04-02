@@ -83,7 +83,21 @@ export default function CategoryGrid({
   var displayCats = showInactive ? categories : activeCategories;
   var maxSlot = 0;
   Object.keys(slots).forEach(function(k) { var n = parseInt(k); if (n > maxSlot) maxSlot = n; });
-  var totalSlots = Math.max(maxSlot + 1, displayCats.length) + (isEdit ? cols * 2 : 0);
+  // View mode: only show slots that have categories (no empty padding)
+  // Edit mode: show extra empty slots for adding new categories
+  var totalSlots;
+  if (isEdit) {
+    totalSlots = Math.max(maxSlot + 1, displayCats.length) + cols * 2;
+  } else {
+    // Count only slots that actually map to an active category
+    var filledCount = 0;
+    Object.keys(slots).forEach(function(k) {
+      var cid = slots[k];
+      var c = cid ? categories.find(function(cat) { return cat.id === cid && cat.active; }) : null;
+      if (c) filledCount++;
+    });
+    totalSlots = Math.max(filledCount, maxSlot + 1);
+  }
 
   // Drag handlers (edit mode only)
   function handleDragStart(catId, e) { setDraggingId(catId); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', catId); }

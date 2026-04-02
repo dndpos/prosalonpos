@@ -380,10 +380,18 @@ export default function App() {
 
   useEffect(function() {
     setSvcCatCategories(storeCategories);
-    // Also rebuild category slots when categories change from API
-    var slots = {};
-    [].concat(storeCategories).sort(function(a, b) { return (a.position || 0) - (b.position || 0); }).forEach(function(cat, i) { slots[i] = cat.id; });
-    setSvcCatSlots(slots);
+    // Build catSlots — keep saved layout if it exists, just append new categories
+    setSvcCatSlots(function(prev) {
+      var keys = Object.keys(prev);
+      if (keys.length > 0) {
+        var ids = {}; keys.forEach(function(k) { ids[prev[k]] = true; });
+        var mx = 0; keys.forEach(function(k) { var n = parseInt(k); if (n > mx) mx = n; });
+        var next = Object.assign({}, prev); var ch = false;
+        storeCategories.forEach(function(c) { if (!ids[c.id]) { mx++; next[mx] = c.id; ch = true; } });
+        return ch ? next : prev;
+      }
+      var s = {}; [].concat(storeCategories).sort(function(a, b) { return (a.position||0) - (b.position||0); }).forEach(function(c, i) { s[i] = c.id; }); return s;
+    });
   }, [storeCategories]);
 
   // Rebuild svcSlots when services or categories change — fills in any categories that have no slot assignments

@@ -33,7 +33,8 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
   var activeCategories = categories.filter(function(c){ return c.active; });
 
   var [activeTab, setActiveTab] = useState('services');
-  var [activeSvcCat, setActiveSvcCat] = useState(activeCategories.length > 0 ? activeCategories[0].id : null);
+  var _firstSlotCatId = catSlots[0] || (activeCategories.length > 0 ? activeCategories[0].id : null);
+  var [activeSvcCat, setActiveSvcCat] = useState(_firstSlotCatId);
   // Map retail categories + products into shapes for shared CategoryGrid + ServiceGrid
   var retailCatObjects = RETAIL_CATEGORIES.map(function(name, i) {
     var catId = 'rcat-' + name.toLowerCase().replace(/\s+/g, '-');

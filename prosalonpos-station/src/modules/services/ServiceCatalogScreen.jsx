@@ -19,7 +19,7 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
   var C = useTheme();
   var toast = useToast();
   var svcStore = useServiceStore();
-  var [activeCat, setActiveCat] = useState(categories.length > 0 ? categories[0].id : null);
+  var [activeCat, setActiveCat] = useState(catSlots && catSlots[0] ? catSlots[0] : (categories.length > 0 ? categories[0].id : null));
   var [showInactive, setShowInactive] = useState(false);
   var [editingService, setEditingService] = useState(null);
   var [showAddCatModal, setShowAddCatModal] = useState(false);
