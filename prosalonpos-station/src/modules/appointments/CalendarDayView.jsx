@@ -29,6 +29,7 @@ import { useRBAC } from '../../lib/RBACContext';
 import { useToast } from '../../lib/ToastContext';
 import { ACTIONS } from '../../lib/rbac';
 import useCalendarDrag from './useCalendarDrag';
+import useCalendarPersist from './useCalendarPersist';
 import CalendarOverlays from './CalendarOverlays';
 import DebugLabel from '../../components/debug/DebugLabel';
 
@@ -89,6 +90,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   var storeLoading = useAppointmentStore(function(s){ return s.loading; });
   var storeSource = useAppointmentStore(function(s){ return s.source; });
   var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; });
+  var persist = useCalendarPersist();
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
   // Sync from store → local state whenever store data changes (fetch completes, socket refetch, etc.)
   useEffect(function(){ setServiceLines(storeServiceLines); },[storeServiceLines]);
@@ -216,7 +218,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     setSelectedAppt, setActivityLog,
     blockedTimes, isBlockedSlot,
     setBookingCtx,
-    STAFF,
+    STAFF, persist,
   });
   var dragging=drag.dragging;
   var dragPreview=drag.dragPreview;
@@ -258,6 +260,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     const oldLabel=STATUS_CONFIG[sl.status]?.label||sl.status,newLabel=STATUS_CONFIG[newStatus]?.label||newStatus;
     setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'status_change',client:sl.client,service:sl.service,techName:(STAFF.find(function(s){return s.id===sl.staff_id;})||{}).display_name||'—',description:`Status changed: ${oldLabel} → ${newLabel}`,requested:sl.requested,changedTech:false},...prev]);
     setServiceLines(prev=>prev.map(s=>s.id!==sl.id?s:{...s,status:newStatus}));
+    persist.saveStatus(sl, newStatus);
     setSelectedAppt(prev=>prev&&prev.id===sl.id?{...prev,status:newStatus}:prev);
     if(newStatus==='completed'||newStatus==='cancelled'||newStatus==='no_show'){
       setTurnState(prev=>TurnEngine.markAvailable(prev,sl.staff_id,_settings).state);
@@ -315,11 +318,14 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         return updated;
       });
       setSelectedAppt(prev=>{if(!prev||!serviceLineIds.includes(prev.id))return prev;return{...prev,staff_id:newStaffId};});
+      // Persist each moved line to server
+      serviceLineIds.forEach(function(slId){persist.saveMove(slId,{staff_id:newStaffId});});
     });
   }
   function handleAddTime(sl,extraMinutes){
     setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'add_time',client:sl.client,service:sl.service,techName:(STAFF.find(function(s){return s.id===sl.staff_id;})||{}).display_name||'—',description:`Added ${extraMinutes} min extra time (${sl.dur} → ${sl.dur+extraMinutes} min)`,requested:sl.requested,changedTech:false},...prev]);
     setServiceLines(prev=>prev.map(s=>s.id!==sl.id?s:{...s,dur:s.dur+extraMinutes}));
+    persist.saveAddTime(sl, sl.dur+extraMinutes);
     setSelectedAppt(prev=>prev&&prev.id===sl.id?{...prev,dur:prev.dur+extraMinutes}:prev);
   }
   function handleAddService(sl,svc){
@@ -329,6 +335,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     const newId='sl-new-'+Date.now();
     const newLine={id:newId,staff_id:sl.staff_id,starts_at:newStart,dur:svc.dur,color:svc.color,client:sl.client,service:svc.name,status:sl.status,requested:sl.requested,price_cents:svc.price,open_price:!!svc.open_price};
     setServiceLines(prev=>[...prev,newLine]);
+    persist.saveBooking([newLine], sl.client, sl.client_id);
     setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'add_service',client:sl.client,service:svc.name,techName:(STAFF.find(function(s){return s.id===sl.staff_id;})||{}).display_name||'—',description:`Added ${svc.name} (${svc.dur} min) at ${formatTimeFull(newStart)}`,requested:sl.requested,changedTech:false},...prev]);
   }
 
@@ -374,6 +381,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     });
     if(blocked){setBookingCtx(null);toast.show('This time slot is blocked. Choose a different time.', 'error');return;}
     setServiceLines(prev=>[...prev,...newLines]);
+    persist.saveBooking(newLines);
     const clients=[...new Set(services.map(s=>s.clientName))];
     const anyRequested=services.some(s=>s.requested);
     // Build detailed breakdown: client → tech → services
@@ -460,6 +468,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
       open_price:copiedAppt.open_price,
     };
     setServiceLines(function(prev){return prev.concat([newLine]);});
+    persist.saveBooking([newLine], copiedAppt.client, copiedAppt.client_id);
     var tech=visibleStaff.find(function(s){return s.id===staffId;});
     setActivityLog(function(prev){return[{id:Date.now(),timestamp:new Date(),action:'booked',client:copiedAppt.client,service:copiedAppt.service,description:'Copied appointment pasted for '+copiedAppt.client+' at '+formatTimeFull(minutesToTime(startMin)),requested:copiedAppt.requested,changedTech:false},...prev];});
     setCtxMenu(null);
@@ -473,12 +482,15 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     const existing=serviceLines.find(sl=>sl.client===entry.client&&sl.service===entry.service&&(sl.status==='pending'||sl.status==='confirmed'||sl.status==='checked_in'));
     if(existing){
       setServiceLines(prev=>prev.map(sl=>{if(sl.id!==existing.id)return sl;return{...sl,staff_id:tech.id,status:'in_progress',starts_at:snappedTime};}));
+      persist.saveMove(existing.id, {staff_id:tech.id, starts_at:snappedTime});
+      persist.saveStatus(existing, 'in_progress');
       setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'start_working',client:entry.client,service:entry.service,description:`Started working with ${tech.display_name} (updated existing appointment)`,requested:!!entry.requested,changedTech:existing.staff_id!==tech.id},...prev]);
     }else{
       const color={'Blowout':'#EC4899',"Women's Cut":'#EF4444','Beard Trim':'#78716C','Full Color':'#8B5CF6','Manicure':'#06B6D4','Facial':'#10B981'}[entry.service]||'#3B82F6';
       const dur={Blowout:30,"Women's Cut":45,'Beard Trim':15,'Full Color':90,'Manicure':30,'Facial':60}[entry.service]||30;
       const newSl={id:`sl-wl-${Date.now()}`,staff_id:tech.id,starts_at:snappedTime,dur,color,client:entry.client,service:entry.service,status:'in_progress',requested:!!entry.requested,price_cents:SERVICE_PRICES[entry.service]||0,is_vip:!!entry.is_vip};
       setServiceLines(prev=>[...prev,newSl]);
+      persist.saveBooking([newSl], entry.client);
       setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'start_working',client:entry.client,service:entry.service,description:`Started working with ${tech.display_name} (walk-in)`,requested:!!entry.requested,changedTech:false},...prev]);
     }
     setWaitlist(prev=>prev.filter(w=>w.id!==entry.id));

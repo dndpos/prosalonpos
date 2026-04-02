@@ -27,6 +27,7 @@ export default function useCalendarDrag({
   blockedTimes, isBlockedSlot,
   setBookingCtx,
   STAFF,
+  persist,
 }) {
   var rbac = useRBAC();
   var toast = useToast();
@@ -183,6 +184,8 @@ export default function useCalendarDrag({
         const oldMin = timeToMinutes(s.starts_at);
         return { ...s, staff_id: newStaffId, starts_at: minutesToTime(oldMin + delta) };
       }));
+      // Persist each moved line to server
+      if (persist) groupIds.forEach(function(id) { persist.saveMove(id, { staff_id: newStaffId }); });
       setPendingMove(null);
     });
   }
@@ -222,6 +225,8 @@ export default function useCalendarDrag({
         }
         return { ...s, starts_at: minutesToTime(newTimes[s.id]) };
       }));
+      // Persist all moved lines to server
+      if (persist) Object.keys(newTimes).forEach(function(id) { persist.saveMove(id, { staff_id: dragGroupIds.has(id) ? newStaffId : undefined }); });
       const clients = [...new Set(allGroupLines.map(s => s.client))];
       setActivityLog(prev => [{ id: Date.now(), timestamp: new Date(), action: 'moved', client: clients.join(', '), service: 'Group booking', description: `Group booking rescheduled (${clients.length} clients, ${allGroupLines.length} services)`, requested: sl.requested, changedTech: newStaffId !== sl.staff_id }, ...prev]);
       setPendingGroupMove(null);
