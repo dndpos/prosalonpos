@@ -115,7 +115,7 @@ async function bootstrapStores() {
 
     // Packages
     usePackageStore.setState({
-      packages: data.packages || [], loading: false, source: 'api', initialized: true, error: null
+      packages: data.packages || [], packageItems: data.packageItems || [], loading: false, source: 'api', initialized: true, error: null
     });
 
     return true;

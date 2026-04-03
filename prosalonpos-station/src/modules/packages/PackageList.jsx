@@ -129,6 +129,8 @@ export default function PackageList({ services: propServices, categories: propCa
   var storePackages = usePackageStore(function(s) { return s.packages; });
   var storePackageItems = usePackageStore(function(s) { return s.packageItems; });
   var fetchPackages = usePackageStore(function(s) { return s.fetchPackages; });
+  var createPackageApi = usePackageStore(function(s) { return s.createPackage; });
+  var updatePackageApi = usePackageStore(function(s) { return s.updatePackage; });
 
   var [packages, setPackages] = useState(_isProd ? [] : MOCK_SERVICE_PACKAGES);
   var [packageItems, setPackageItems] = useState(_isProd ? [] : MOCK_SERVICE_PACKAGE_ITEMS);
@@ -177,36 +179,37 @@ export default function PackageList({ services: propServices, categories: propCa
     setShowNumpad(null);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!editing.name.trim()) { toast.show('Package name is required.', 'error'); return; }
     if (editItems.length === 0) { toast.show('Add at least one service to the package.', 'error'); return; }
     if (!editing.price_cents || editing.price_cents <= 0) { toast.show('Package price must be greater than $0.', 'error'); return; }
 
-    if (editing.id) {
-      // Update existing
-      setPackages(packages.map(function(p) { return p.id === editing.id ? { ...editing, location_id: 'loc-01' } : p; }));
-      // Update items
-      var kept = packageItems.filter(function(i) { return i.package_id !== editing.id; });
-      var updated = editItems.map(function(item, idx) {
-        return { ...item, id: item.id || ('pki-new-' + Date.now() + '-' + idx), package_id: editing.id };
-      });
-      setPackageItems(kept.concat(updated));
-    } else {
-      // Create new
-      var newId = 'pkg-' + Date.now();
-      var newPkg = { ...editing, id: newId, location_id: 'loc-01', created_at: new Date().toISOString() };
-      setPackages(packages.concat([newPkg]));
-      var newItems = editItems.map(function(item, idx) {
-        return { ...item, id: 'pki-' + Date.now() + '-' + idx, package_id: newId };
-      });
-      setPackageItems(packageItems.concat(newItems));
+    var apiItems = editItems.map(function(item) {
+      return { service_id: item.service_id, service_name: item.service_name, quantity: item.quantity || 1 };
+    });
+
+    try {
+      if (editing.id) {
+        // Update existing
+        await updatePackageApi(editing.id, editing, apiItems);
+      } else {
+        // Create new
+        await createPackageApi(editing, apiItems);
+      }
+      toast.show('Package saved.', 'success');
+    } catch (err) {
+      toast.show('Failed to save package: ' + (err.message || 'Unknown error'), 'error');
     }
     setEditing(null);
     setEditItems([]);
   }
 
-  function handleToggleActive(pkg) {
-    setPackages(packages.map(function(p) { return p.id === pkg.id ? { ...p, active: !p.active } : p; }));
+  async function handleToggleActive(pkg) {
+    try {
+      await updatePackageApi(pkg.id, { active: !pkg.active });
+    } catch (err) {
+      toast.show('Failed to update package.', 'error');
+    }
   }
 
   // ═══════════════════════════════════

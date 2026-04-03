@@ -16,7 +16,7 @@ import PayrollCheckConfirmModal from './PayrollCheckConfirmModal';
 import PayPeriodPopup from './PayPeriodPopup';
 import TimeClockTimesheets from '../time-clock/TimeClockTimesheets';
 import { fmt } from '../../lib/formatUtils';
-import { reshapeTicketForPayroll, calculateHoursFromPunches, calculateTipsFromTickets, reshapePayrollHistory } from './payrollDataHelpers';
+import { reshapeTicketForPayroll, calculateHoursFromPunches, calculateTipsFromTickets, reshapePayrollHistory, getCurrentPayPeriod } from './payrollDataHelpers';
 
 /**
  * Payroll Module — Module 11
@@ -243,9 +243,7 @@ function calculatePaycheck(staff, tickets, hours, cardTips, MOCK_SALON_SETTINGS,
 
 
 
-// ═══════════════════════════════════════════
 // COMPONENT
-// ═══════════════════════════════════════════
 export default function PayrollModule({ salonSettings, onNavigate, clockPunches, onAddPunch, onDeletePunch }) {
   var T = useTheme();
   var MOCK_STAFF = useStaffStore(function(s) { return s.staff; });
@@ -272,17 +270,23 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
   var payPeriodStartDay = MOCK_SALON_SETTINGS.pay_period_start_day || 'monday';
   var updateSettings = useSettingsStore(function(s) { return s.updateSetting; });
 
-  // Default period: current biweekly (last 14 days ending yesterday)
-  var _defaultPeriod = useMemo(function() {
-    var today = new Date();
-    var end = new Date(today); end.setDate(end.getDate() - 1);
-    var start = new Date(end); start.setDate(start.getDate() - 13);
-    function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-    return { start: ymd(start), end: ymd(end) };
-  }, []);
+  // ── Calculate current pay period from settings ──
+  var _defaultPeriod = getCurrentPayPeriod(payFrequency, payPeriodStartDay);
 
   var [periodStart, setPeriodStart] = useState(_defaultPeriod.start);
   var [periodEnd, setPeriodEnd] = useState(_defaultPeriod.end);
+
+  // When pay period settings change (frequency or start day), recalculate the period
+  var _settingsKey = payFrequency + '|' + payPeriodStartDay;
+  var [_lastSettingsKey, _setLastSettingsKey] = useState(_settingsKey);
+  useEffect(function() {
+    if (_settingsKey !== _lastSettingsKey) {
+      var newPeriod = getCurrentPayPeriod(payFrequency, payPeriodStartDay);
+      setPeriodStart(newPeriod.start);
+      setPeriodEnd(newPeriod.end);
+      _setLastSettingsKey(_settingsKey);
+    }
+  }, [_settingsKey]);
   var [showDatePicker, setShowDatePicker] = useState(false);
   var [pickStart, setPickStart] = useState(null);
   var [pickEnd, setPickEnd] = useState(null);
@@ -301,8 +305,15 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
   }, [periodStart, periodEnd]);
 
   // ── Build payroll tickets from ticketStore ──
+  // reshapeTicketForPayroll returns an ARRAY per ticket (multi-tech split),
+  // so we flatMap to get one flat list of payroll entries.
   var payrollTickets = useMemo(function() {
-    return closedTickets.map(reshapeTicketForPayroll);
+    var result = [];
+    closedTickets.forEach(function(t) {
+      var entries = reshapeTicketForPayroll(t);
+      entries.forEach(function(e) { result.push(e); });
+    });
+    return result;
   }, [closedTickets]);
 
   // ── Calculate hours worked from clockPunches for each tech ──
@@ -345,8 +356,10 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
 
   // Calculate all paychecks
   var paychecks = useMemo(function() {
-    var techs = MOCK_STAFF.filter(function(s) { return s.role === 'technician' && s.active; });
-    return techs.map(function(staff) {
+    // Include any active staff who earns pay (technicians, managers with commission, etc.)
+    // Exclude owner role only — everyone else with a pay_type should appear in payroll
+    var payableStaff = MOCK_STAFF.filter(function(s) { return s.active && s.role !== 'owner'; });
+    return payableStaff.map(function(staff) {
       return calculatePaycheck(staff, payrollTickets, hoursWorked[staff.id] || 0, cardTips[staff.id] || 0, MOCK_SALON_SETTINGS, MOCK_COMMISSION_RULES, MOCK_COMMISSION_TIERS, MOCK_SERVICES);
     });
   }, [payrollTickets, hoursWorked, cardTips, MOCK_STAFF, MOCK_SALON_SETTINGS, MOCK_COMMISSION_RULES, MOCK_COMMISSION_TIERS, MOCK_SERVICES]);
@@ -365,9 +378,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
 
   var selectedPaycheck = selectedId ? paychecks.find(function(p) { return p.staff_id === selectedId; }) : null;
 
-  // ══════════════════════════════════
   // PAYCHECK DETAIL
-  // ══════════════════════════════════
   var [expandedDay, setExpandedDay] = useState(null);
 
   if (selectedPaycheck) {
@@ -531,9 +542,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
     );
   }
 
-  // ══════════════════════════════════
   // MAIN SCREEN
-  // ══════════════════════════════════
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: T.chrome, fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
         <AreaTag id="PR" />
@@ -604,13 +613,9 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
             {/* Period header — Today + date + action, centered */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 20 }}>
               <div onClick={function() {
-                  var today = new Date();
-                  var y = today.getFullYear();
-                  var m = String(today.getMonth() + 1).padStart(2, '0');
-                  var d = String(today.getDate()).padStart(2, '0');
-                  var todayStr = y + '-' + m + '-' + d;
-                  setPeriodStart(todayStr);
-                  setPeriodEnd(todayStr);
+                  var currentPeriod = getCurrentPayPeriod(payFrequency, payPeriodStartDay);
+                  setPeriodStart(currentPeriod.start);
+                  setPeriodEnd(currentPeriod.end);
                 }}
                 style={{ padding: '10px 24px', background: '#0E3D3D', color: '#5EEAD4', border: '1px solid #1A5C5C', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit', userSelect: 'none' }}
                 onMouseEnter={function(e) { e.currentTarget.style.borderWidth = '2px'; e.currentTarget.style.padding = '9px 23px'; }}

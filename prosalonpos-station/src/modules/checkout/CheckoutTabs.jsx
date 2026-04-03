@@ -8,7 +8,7 @@ import { useTheme } from '../../lib/ThemeContext';
 import { useState, useEffect } from 'react';
 import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 import { RETAIL_CATEGORIES, MOCK_RETAIL, CHECKOUT_STAFF, CHECKOUT_SETTINGS } from './checkoutBridge';
-import { MOCK_SERVICE_PACKAGES, MOCK_SERVICE_PACKAGE_ITEMS } from '../packages/packageBridge';
+import { usePackageStore } from '../../lib/stores/packageStore';
 import CategoryGrid from '../../components/domain/CategoryGrid';
 import ServiceGrid from '../../components/domain/ServiceGrid';
 import { fmt } from '../../lib/formatUtils';
@@ -21,6 +21,8 @@ function Av({name,size=28,index=0,photo=null}){
 
 export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSellGiftCard, onSellPackage, client, openTickets, onCombineTicket, catalogLayout, salonSettings }){
   var C = useTheme();
+  var MOCK_SERVICE_PACKAGES = usePackageStore(function(s) { return s.packages; });
+  var MOCK_SERVICE_PACKAGE_ITEMS = usePackageStore(function(s) { return s.packageItems; });
   var cl = catalogLayout || {};
   var categories = cl.categories || [];
   var services = cl.services || [];
@@ -91,6 +93,7 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
   var [showCombine, setShowCombine] = useState(false);
   var [combineSelected, setCombineSelected] = useState([]);
   var [showPackagePicker, setShowPackagePicker] = useState(false);
+  var [showMembershipPicker, setShowMembershipPicker] = useState(false);
   var hasClient = !!client;
 
   // Numpad helpers
@@ -146,6 +149,9 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
         <button onClick={function(){if(hasClient)setShowPackagePicker(true);}} style={{padding:'7px 14px',background:'#0E2E1E',border:'1px solid #1A4A30',borderRadius:6,color:hasClient?'#6EE7B7':'#3D6B50',fontSize:13,fontWeight:500,cursor:hasClient?'pointer':'default',fontFamily:'inherit',opacity:hasClient?1:0.5}}
           onMouseEnter={function(e){if(hasClient){e.currentTarget.style.borderWidth='2px';e.currentTarget.style.padding='6px 13px';}}}
           onMouseLeave={function(e){e.currentTarget.style.background='#0E2E1E';e.currentTarget.style.color=hasClient?'#6EE7B7':'#3D6B50';e.currentTarget.style.borderColor='#1A4A30';e.currentTarget.style.borderWidth='1px';e.currentTarget.style.padding='7px 14px';}}>Sell Package</button>
+        <button onClick={function(){if(hasClient)setShowMembershipPicker(true);}} style={{padding:'7px 14px',background:'#3B1228',border:'1px solid #5C1E3E',borderRadius:6,color:hasClient?'#F9A8D4':'#7A4060',fontSize:13,fontWeight:500,cursor:hasClient?'pointer':'default',fontFamily:'inherit',opacity:hasClient?1:0.5}}
+          onMouseEnter={function(e){if(hasClient){e.currentTarget.style.borderWidth='2px';e.currentTarget.style.padding='6px 13px';}}}
+          onMouseLeave={function(e){e.currentTarget.style.background='#3B1228';e.currentTarget.style.color=hasClient?'#F9A8D4':'#7A4060';e.currentTarget.style.borderColor='#5C1E3E';e.currentTarget.style.borderWidth='1px';e.currentTarget.style.padding='7px 14px';}}>Sell Membership</button>
         {activeTab==='products' && (
           <button onClick={function(){setShowProdSearch(!showProdSearch);if(showProdSearch)setProdSearch('');}} style={{padding:'7px 14px',background:showProdSearch?'#4A1A6A':'#2E1042',border:'1px solid '+(showProdSearch?'#6B2E8A':'#4A1A6A'),borderRadius:6,color:showProdSearch?'#E9D5FF':'#C4B5FD',fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}
             onMouseEnter={function(e){if(!showProdSearch){e.currentTarget.style.borderWidth='2px';e.currentTarget.style.padding='6px 13px';}}}
@@ -438,6 +444,24 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
             </div>
             <div style={{padding:'12px 20px',borderTop:'1px solid '+C.borderLight,flexShrink:0}}>
               <button onClick={function(){setShowPackagePicker(false);}} style={{width:'100%',height:38,background:'transparent',border:'1px solid '+C.borderMedium,borderRadius:6,color:C.textPrimary,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SELL MEMBERSHIP PICKER MODAL ── */}
+      {showMembershipPicker&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={function(){setShowMembershipPicker(false);}}>
+          <div onClick={function(e){e.stopPropagation();}} style={{background:C.chrome,border:'1px solid '+C.borderMedium,borderRadius:10,width:420,maxHeight:'70vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid '+C.borderLight,flexShrink:0}}>
+              <div style={{fontSize:15,fontWeight:600,color:'#F9A8D4'}}>Sell Membership</div>
+              <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>Select a membership plan for {client?client.name||client.display_name:'this client'}</div>
+            </div>
+            <div style={{flex:1,overflow:'auto',padding:'8px 12px'}}>
+              <div style={{padding:30,textAlign:'center',color:C.textMuted,fontSize:13}}>No membership plans available yet. Create plans in Owner Dashboard → Membership.</div>
+            </div>
+            <div style={{padding:'12px 20px',borderTop:'1px solid '+C.borderLight,flexShrink:0}}>
+              <button onClick={function(){setShowMembershipPicker(false);}} style={{width:'100%',height:38,background:'transparent',border:'1px solid '+C.borderMedium,borderRadius:6,color:C.textPrimary,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
             </div>
           </div>
         </div>

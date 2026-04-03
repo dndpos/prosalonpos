@@ -148,7 +148,8 @@ router.get('/', async function(req, res, next) {
 
       // Packages
       prisma.servicePackage.findMany({
-        where: { salon_id: salonId, active: true },
+        where: { salon_id: salonId },
+        include: { items: true },
         orderBy: { name: 'asc' }
       }),
 
@@ -210,7 +211,10 @@ router.get('/', async function(req, res, next) {
       loyaltyProgram: loyaltyProgram,
       membershipPlans: membershipPlans || [],
       templates: templates,
-      packages: packages,
+      packages: (packages || []).map(function(pkg) {
+        return { id: pkg.id, salon_id: pkg.salon_id, location_id: pkg.location_id, name: pkg.name, description: pkg.description, price_cents: pkg.price_cents, expiration_enabled: pkg.expiration_enabled, expiration_days: pkg.expiration_days, transferable: pkg.transferable, refundable: pkg.refundable, active: pkg.active, created_at: pkg.created_at, updated_at: pkg.updated_at };
+      }),
+      packageItems: (function() { var items = []; (packages || []).forEach(function(pkg) { (pkg.items || []).forEach(function(item) { items.push({ id: item.id, package_id: item.package_id, service_id: item.service_id, service_name: item.service_name, quantity: item.quantity }); }); }); return items; })(),
       clients: clients,
       today: today,
     });
