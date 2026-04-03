@@ -114,9 +114,11 @@ function ModalButtons({ onClose, onSave, canSave, saveLabel }) {
 export function AddCategoryModal({ onSave, onClose }) {
   var [name, setName] = useState('');
   var [selectedColor, setSelectedColor] = useState(null);
+  var [saving, setSaving] = useState(false);
 
   function handleSave() {
-    if (!name.trim()) return;
+    if (!name.trim() || saving) return;
+    setSaving(true);
     onSave(name, selectedColor);
   }
 

@@ -10,7 +10,6 @@
 
 import { create } from 'zustand';
 import { api, isBackendAvailable, checkBackend } from '../apiClient';
-import { debugLog } from '../debugLog';
 
 var useClientStore = create(function(set, get) {
   return {
@@ -38,9 +37,7 @@ var useClientStore = create(function(set, get) {
           source: 'api',
           initialized: true,
         });
-        debugLog('STORE', 'clientStore loaded ' + (data.clients ? data.clients.length : 0) + ' clients from API');
       } catch (err) {
-        debugLog('ERROR', 'clientStore fetch failed: ' + err.message);
         set({ loading: false, error: err.message, initialized: true, source: 'error' });
       }
     },

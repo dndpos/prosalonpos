@@ -31,7 +31,7 @@ import { ACTIONS } from '../../lib/rbac';
 import useCalendarDrag from './useCalendarDrag';
 import useCalendarPersist from './useCalendarPersist';
 import CalendarOverlays from './CalendarOverlays';
-import DebugLabel from '../../components/debug/DebugLabel';
+import AreaTag from '../../components/ui/AreaTag';
 
 export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout, catalogLayout, salonSettings, onNavClick, onOwnerClick, unviewedCount, openTicketCount, drawerSession, onCashierClick, hasHourlyStaff, onTimeClockClick }){
   var C = useTheme();
@@ -525,7 +525,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     <div style={{width:'100%',height:'100%',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif",display:'flex',flexDirection:'column',overflow:'hidden',userSelect:dragging?'none':'auto'}}>
       {/* TOP BAR — Nav + Date Controls */}
       <div style={{height:52,background:C.chromeDark,display:'flex',alignItems:'center',padding:0,gap:6,borderBottom:`1px solid ${C.borderLight}`,flexShrink:0,overflowX:'auto',overflowY:'hidden',position:'relative'}}>
-        <DebugLabel id="BAR-TOPNAV" />
+        <AreaTag id="CAL-TOP" />
         {/* Logo — fixed width matching left panel */}
         <div style={{width:LEFT_PANEL_W,minWidth:LEFT_PANEL_W,display:'flex',alignItems:'center',gap:8,padding:'0 16px',cursor:'default',userSelect:'none',borderRight:`1px solid ${C.borderLight}`,height:'100%',boxSizing:'border-box'}}>
           <div style={{width:28,height:28,borderRadius:6,background:C.blue,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:12,fontWeight:700,flexShrink:0}}>PS</div>
@@ -618,7 +618,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
       <div style={{flex:1,display:'flex',overflow:'hidden'}}>
         {/* LEFT PANEL */}
         <div style={{width:LEFT_PANEL_W,background:C.chrome,borderRight:`1px solid ${C.borderLight}`,display:'flex',flexDirection:'column',flexShrink:0,position:'relative'}}>
-          <DebugLabel id="PANEL-LEFT" />
+          <AreaTag id="CAL-LEFT" />
           <div style={{display:'flex',borderBottom:`1px solid ${C.borderLight}`,gap:4,padding:'6px 8px'}}>
             {[{key:'calendar',label:'Cal'},{key:'turn',label:'Turn'},{key:'waitlist',label:'Wait'}].map(tab=>(
               <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{flex:1,padding:'7px 0',background:activeTab===tab.key?C.blue:C.gridHover,border:activeTab===tab.key?`1px solid ${C.blue}`:`1px solid ${C.borderMedium}`,borderRadius:5,color:activeTab===tab.key?'#fff':C.text,fontSize:12,fontWeight:600,cursor:'pointer'}}>{tab.label}</button>
@@ -632,7 +632,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         </div>
         {/* CALENDAR GRID */}
         <div ref={gridContainerRef} style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
-          <DebugLabel id="GRID-CALENDAR" pos="tr" />
+          <AreaTag id="CAL-GRID" pos="tr" />
           {/* Tech headers row */}
           <div style={{display:'flex',flexShrink:0,borderBottom:`1px solid ${C.borderMedium}`}}>
             <div style={{width:TIME_COL_W,minWidth:TIME_COL_W,flexShrink:0,background:C.chrome,borderRight:`1px solid ${C.borderLight}`}}/>

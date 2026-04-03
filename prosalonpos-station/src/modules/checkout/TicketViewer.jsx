@@ -1,5 +1,5 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
-import DebugLabel from '../../components/debug/DebugLabel';
 /**
  * Pro Salon POS — Ticket Viewer
  * Open tickets (checkboxes, "Go to Checkout") + Closed tickets (view-only, detail, reopen).
@@ -552,7 +552,7 @@ export default function TicketViewer({ openTickets, closedTickets, onBack, onReo
 
   return(
     <div style={{width:'100%',height:'100%',display:'flex',flexDirection:'column',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif",overflow:'hidden',alignItems:'center',position:'relative'}}>
-      <DebugLabel id="PAGE-TICKETS" />
+      <AreaTag id="TK" />
       <div style={{width:'100%',maxWidth:800,display:'flex',flexDirection:'column',height:'100%'}}>
       {/* Header */}
       <div style={{padding:'12px 16px',borderBottom:`1px solid ${C.borderLight}`,flexShrink:0,display:'flex',alignItems:'center',gap:12}}>

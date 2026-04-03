@@ -10,7 +10,6 @@
 
 import { create } from 'zustand';
 import { api, isBackendAvailable, checkBackend } from '../apiClient';
-import { debugLog } from '../debugLog';
 
 // Safe defaults so the app doesn't crash before API data arrives
 var _DEFAULT_SETTINGS = {
@@ -58,9 +57,7 @@ var useSettingsStore = create(function(set, get) {
           source: 'api',
           initialized: true,
         });
-        debugLog('STORE', 'settingsStore loaded from API', { salon_name: merged.salon_name || '(empty)', keys: Object.keys(data.settings || {}).length });
       } catch (err) {
-        debugLog('ERROR', 'settingsStore fetch failed: ' + err.message);
         set({ loading: false, error: err.message, initialized: true, source: 'error' });
       }
     },

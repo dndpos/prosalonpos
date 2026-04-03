@@ -1,3 +1,4 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/ToastContext';
 import { useStaffStore } from '../../lib/stores/staffStore';
@@ -218,7 +219,8 @@ export default function EmployeeManagementScreen({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', background: T.bg, fontFamily: "'Inter', sans-serif" }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', background: T.bg, fontFamily: "'Inter', sans-serif", position: 'relative' }}>
+      <AreaTag id="EMP" />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', padding: '16px 16px 16px 24px', gap: 16 }}>
 
         {/* ═══ Left panel — tabs + lists ═══ */}

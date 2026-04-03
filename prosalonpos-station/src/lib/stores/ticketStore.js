@@ -13,7 +13,6 @@
 
 import { create } from 'zustand';
 import { api, isBackendAvailable, checkBackend } from '../apiClient';
-import { debugLog } from '../debugLog';
 
 var useTicketStore = create(function(set, get) {
   return {
@@ -55,9 +54,7 @@ var useTicketStore = create(function(set, get) {
           source: 'api',
           initialized: true,
         });
-        debugLog('STORE', 'ticketStore loaded ' + tickets.length + ' tickets (' + open.length + ' open, ' + closed.length + ' closed)');
       } catch (err) {
-        debugLog('ERROR', 'ticketStore fetch failed: ' + err.message);
         set({ loading: false, error: err.message, initialized: true, source: 'error' });
       }
     },

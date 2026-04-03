@@ -1,3 +1,4 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
 import { useState, useMemo, useEffect } from 'react';
 import { useCommissionStore } from '../../lib/stores/commissionStore';
@@ -9,7 +10,6 @@ import { usePayrollStore } from '../../lib/stores/payrollStore';
 import { calculateCommission, calculateSimpleCommission } from '../../lib/commissionEngine';
 import { amountToWords, formatCheckDate, printChecks, printTickets } from '../../lib/checkUtils';
 import { FEATURES, isFeatureEnabled } from '../../lib/features';
-import DebugLabel from '../../components/debug/DebugLabel';
 import DateRangePicker from './PayrollDatePicker';
 import CheckOverrideModal from './CheckOverrideModal';
 import PayrollCheckConfirmModal from './PayrollCheckConfirmModal';
@@ -536,7 +536,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
   // ══════════════════════════════════
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: T.chrome, fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
-      <DebugLabel id="PAGE-PAYROLL" pos="tr" />
+        <AreaTag id="PR" />
       {/* Tab bar */}
       <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid ' + T.borderLight, background: T.chromeDark, flexShrink: 0, padding: '8px 20px', gap: 6 }}>
         {[{ key: 'current', label: 'Current Run', bg:'#0E3D3D', text:'#5EEAD4', border:'#1A5C5C' }, { key: 'history', label: 'Payroll History', bg:'#1E2554', text:'#A5B4FC', border:'#2E3A7A' }].concat(

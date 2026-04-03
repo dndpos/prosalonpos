@@ -15,7 +15,6 @@
  */
 
 import { api } from '../../lib/apiClient';
-import { debugLog } from '../../lib/debugLog';
 
 function useCalendarPersist() {
 
@@ -58,7 +57,6 @@ function useCalendarPersist() {
       };
 
       api.post('/appointments', payload).then(function() {
-        debugLog('PERSIST', 'Booking saved: ' + group.clientName + ' (' + group.lines.length + ' services)');
       }).catch(function(err) {
         console.error('[CalendarPersist] Failed to save booking:', err.message);
       });
@@ -70,11 +68,9 @@ function useCalendarPersist() {
    */
   function saveStatus(sl, newStatus) {
     if (!sl || !sl.appointment_id) {
-      debugLog('PERSIST', 'Status change on unsaved line — will sync on next refetch');
       return;
     }
     api.put('/appointments/' + sl.appointment_id, { status: newStatus }).then(function() {
-      debugLog('PERSIST', 'Status saved: ' + sl.client + ' → ' + newStatus);
     }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save status:', err.message);
     });
@@ -95,7 +91,6 @@ function useCalendarPersist() {
     if (updates.duration_minutes) payload.duration_minutes = updates.duration_minutes;
 
     api.put('/appointments/service-line/' + serviceLineId, payload).then(function() {
-      debugLog('PERSIST', 'Move saved: ' + serviceLineId);
     }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save move:', err.message);
     });

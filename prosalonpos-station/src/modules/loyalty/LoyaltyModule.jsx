@@ -1,3 +1,4 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
 /**
  * Pro Salon POS — Loyalty Module (Container)
@@ -11,7 +12,6 @@ import React, { useState, useEffect } from 'react';
 import { MOCK_LOYALTY_PROGRAM } from './loyaltyBridge';
 import { useLoyaltyStore } from '../../lib/stores/loyaltyStore';
 import { isProduction } from '../../lib/apiClient';
-import DebugLabel from '../../components/debug/DebugLabel';
 import LoyaltyMembers from './LoyaltyMembers';
 import LoyaltyRewards from './LoyaltyRewards';
 import LoyaltyTiers from './LoyaltyTiers';
@@ -50,7 +50,7 @@ export default function LoyaltyModule({ salonSettings, onSettingsUpdate, catalog
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
-      <DebugLabel id="PAGE-LOYALTY" pos="tr" />
+        <AreaTag id="LY" />
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px 0 20px' }}>
         <span style={{ fontSize: 16, fontWeight: 600, color: T.text }}>Loyalty Program</span>

@@ -16,7 +16,6 @@ export default function ServiceGrid({
   services, activeCat,
   svcSlots, svcColumns, svcRows,
   mode,  // 'edit' | 'select' | 'multi'
-  showInactive,
   // Display toggles (from salon settings)
   showTime,          // boolean — show duration on tiles (default true)
   showProductCost,   // boolean — show product cost deduction on tiles (default true)
@@ -68,9 +67,8 @@ export default function ServiceGrid({
       var svcId = currentSlots[slotIdx];
       var svc = svcId ? services.find(function(s) { return s.id === svcId; }) : null;
 
-      // Hide inactive in non-edit modes, or if showInactive is off
-      if (svc && !isEdit && !svc.active) { svc = null; }
-      if (svc && isEdit && !showInactive && !svc.active) { svc = null; }
+      // S104: Hide inactive in non-edit modes; edit mode always shows them dimmed
+      if (svc && !isEdit && svc.active === false) { svc = null; }
       // Only show if in this category
       if (svc && (!svc.category_ids || !svc.category_ids.includes(activeCat))) { svc = null; }
 

@@ -1,6 +1,7 @@
 import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/ToastContext';
 import { useServiceStore } from '../../lib/stores/serviceStore';
+import AreaTag from '../../components/ui/AreaTag';
 /**
  * ServiceCatalogScreen.jsx
  * Module 4 — Service Catalog Management (Owner-facing)
@@ -20,7 +21,6 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
   var toast = useToast();
   var svcStore = useServiceStore();
   var [activeCat, setActiveCat] = useState(catSlots && catSlots[0] ? catSlots[0] : (categories.length > 0 ? categories[0].id : null));
-  var [showInactive, setShowInactive] = useState(false);
   var [editingService, setEditingService] = useState(null);
   var [showAddCatModal, setShowAddCatModal] = useState(false);
   var [addSvcSlotIdx, setAddSvcSlotIdx] = useState(null);
@@ -93,16 +93,19 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
     setAddSvcSlotIdx(null);
   }
 
+  var [_catSaving, _setCatSaving] = useState(false);
   function handleAddCategory(name, color) {
-    if (!name || !name.trim()) return;
+    if (!name || !name.trim() || _catSaving) return;
+    _setCatSaving(true);
+    setShowAddCatModal(false);
     var catData = {
       name: name.trim(),
       position: categories.length + 1,
       calendar_color: color || null,
     };
     svcStore.createCategory(catData).then(function(created) {
+      _setCatSaving(false);
       if (created) {
-        // Place in first empty slot
         setCatSlots(function(prev) {
           var slots = { ...prev };
           for (var i = 0; i < 100; i++) {
@@ -110,12 +113,10 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
           }
           return slots;
         });
-        // Initialize empty svcSlots for this category
         setSvcSlots(function(prev) { return { ...prev, [created.id]: {} }; });
         setActiveCat(created.id);
       }
-    });
-    setShowAddCatModal(false);
+    }).catch(function() { _setCatSaving(false); });
   }
 
   function handleRenameCategory(catId, newName) {
@@ -162,8 +163,7 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
   }
 
   function handleDeleteService(svcId) {
-    setServices(function(prev) { return prev.filter(function(s) { return s.id !== svcId; }); });
-    // Clean up svc slots
+    svcStore.deleteService(svcId);
     setSvcSlots(function(prev) {
       var next = {};
       Object.keys(prev).forEach(function(catKey) {
@@ -179,21 +179,21 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
   }
 
   function handleToggleService(svcId) {
-    setServices(function(prev) {
-      return prev.map(function(s) { return s.id === svcId ? { ...s, active: !s.active } : s; });
-    });
+    var svc = services.find(function(s) { return s.id === svcId; });
+    if (!svc) return;
+    var newActive = !svc.active;
+    svcStore.updateService(svcId, { active: newActive });
     setEditingService(null);
   }
 
   function handleToggleCategory(catId) {
     var cat = categories.find(function(c) { return c.id === catId; });
-    setCategories(function(prev) {
-      return prev.map(function(c) { return c.id === catId ? { ...c, active: !c.active } : c; });
-    });
-    var activeCategories = categories.filter(function(c) { return c.active; });
-    if (cat && cat.active && activeCat === catId && activeCategories.length > 1) {
-      var next = activeCategories.find(function(c) { return c.id !== catId; });
-      if (next) setActiveCat(next.id);
+    if (!cat) return;
+    var newActive = !cat.active;
+    svcStore.updateCategory(catId, { active: newActive });
+    if (cat.active && activeCat === catId) {
+      var remaining = categories.filter(function(c) { return c.active && c.id !== catId; });
+      if (remaining.length > 0) setActiveCat(remaining[0].id);
     }
   }
 
@@ -210,6 +210,7 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
 
         {/* Left: Category panel */}
         <div style={{ width: 230, minWidth: 230, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid #475569', borderRadius: 8, background: '#1E293B', position: 'relative' }}>
+          <AreaTag id="SC-CAT" />
           <CategoryGrid
             categories={categories}
             activeCat={activeCat}
@@ -218,7 +219,6 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
             catColumns={catColumns}
             layout="grid"
             mode="edit"
-            showInactive={showInactive}
             onRename={handleRenameCategory}
             onToggleActive={handleToggleCategory}
             onEditColor={handleEditCategoryColor}
@@ -227,18 +227,11 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
             setCatSlots={setCatSlots}
             setCatColumns={setCatColumns}
           />
-          <div style={{ flex: 1 }} />
-          <div onClick={function() { setShowInactive(!showInactive); }}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px', cursor: 'pointer', userSelect: 'none' }}>
-            <div style={{ width: 16, height: 16, borderRadius: 3, border: '1px solid ' + (showInactive ? '#2563EB' : '#475569'), background: showInactive ? '#2563EB' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#fff', flexShrink: 0 }}>
-              {showInactive ? '✓' : ''}
-            </div>
-            <span style={{ fontSize: 12, color: '#94A3B8' }}>Show inactive</span>
-          </div>
         </div>
 
         {/* Right: Service card grid */}
         <div style={{ flex: 1, overflow: 'auto', padding: 16, border: '1px solid #475569', borderRadius: 8, background: '#1E293B', position: 'relative' }}>
+          <AreaTag id="SC-SVC" pos="tr" />
           <ServiceGrid
             services={services}
             activeCat={activeCat}
@@ -246,7 +239,6 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
             svcColumns={svcColumns}
             svcRows={svcRows}
             mode="edit"
-            showInactive={showInactive}
             onEdit={function(svc) { setEditingService(svc); }}
             onAdd={function(slotIdx) { setAddSvcSlotIdx(slotIdx); }}
             setSvcSlots={setSvcSlots}

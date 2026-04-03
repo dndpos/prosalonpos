@@ -26,7 +26,6 @@ export default function EmployeeGrid({
   employees,
   empSlots, empColumns, empRows,
   mode,  // 'edit' | 'view'
-  showInactive,
   // Callbacks
   onTap,           // (emp) => void — view mode
   onEdit,          // (emp) => void — edit mode: open edit form
@@ -73,7 +72,7 @@ export default function EmployeeGrid({
 
       // Hide inactive if not showing them
       if (emp && !isEdit && !emp.active) { emp = null; }
-      if (emp && isEdit && !showInactive && !emp.active) { emp = null; }
+      if (emp && !isEdit && !emp.active) { emp = null; }
 
       var isDragOver = dragOverSlot === slotIdx;
       var isDragging = draggingId && emp && emp.id === draggingId;

@@ -150,7 +150,6 @@ async function request(method, path, body) {
   // 401 handling — but NOT for login/auth routes (they return 401 for "wrong PIN")
   var isAuthRoute = path.indexOf('/auth/') === 0;
   if (res.status === 401 && !isAuthRoute) {
-    _debugApi(method, path, res.status, _elapsed, null, 'AUTH_EXPIRED');
     setToken(null);
     if (_onAuthExpired) _onAuthExpired();
     throw new Error('AUTH_EXPIRED');
@@ -159,47 +158,16 @@ async function request(method, path, body) {
   var data = await res.json();
 
   if (!res.ok) {
-    _debugApi(method, path, res.status, _elapsed, null, data.error);
     var err = new Error(data.error || 'API error ' + res.status);
     err.status = res.status;
     err.data = data;
     throw err;
   }
 
-  _debugApi(method, path, res.status, _elapsed, data);
   return data;
 }
 
-// Debug helper for API calls — only runs when debug is enabled
-function _debugApi(method, path, status, ms, data, errorMsg) {
-  try {
-    var store = _getDebugStore();
-    if (!store || !store.enabled) return;
-    var label = method + ' ' + path + ' → ' + status + ' (' + ms + 'ms)';
-    if (errorMsg) label += ' ✗ ' + errorMsg;
-    var meta = null;
-    if (data && !errorMsg) {
-      // Try to show item counts for common response shapes
-      var keys = Object.keys(data);
-      var counts = [];
-      keys.forEach(function(k) { if (Array.isArray(data[k])) counts.push(k + ':' + data[k].length); });
-      if (counts.length > 0) meta = { items: counts.join(', ') };
-    }
-    store.addLog(errorMsg ? 'ERROR' : 'API', label, meta);
-  } catch(e) { /* ignore debug errors */ }
-}
 
-var _debugStoreRef = null;
-function _getDebugStore() {
-  if (!_debugStoreRef) {
-    try {
-      // Lazy access — debugStore may not be loaded yet at module init time
-      var mod = window.__prosalonDebugStore;
-      if (mod) _debugStoreRef = mod;
-    } catch(e) { return null; }
-  }
-  return _debugStoreRef ? _debugStoreRef.getState() : null;
-}
 
 // ─── Convenience Methods ───
 var api = {

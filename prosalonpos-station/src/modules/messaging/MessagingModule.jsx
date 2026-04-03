@@ -1,5 +1,5 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
-import DebugLabel from '../../components/debug/DebugLabel';
 /**
  * Pro Salon POS — Messaging Module (Container)
  * Session 8: Text messaging module with 4 tabs.
@@ -29,7 +29,7 @@ export default function MessagingModule({ salonSettings, onSettingsUpdate }) {
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
-      <DebugLabel id="PAGE-MESSAGING" pos="tr" />
+        <AreaTag id="MSG" />
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px 0 20px' }}>
         <span style={{ fontSize: 18, fontWeight: 600, color: T.text }}>Text messaging</span>

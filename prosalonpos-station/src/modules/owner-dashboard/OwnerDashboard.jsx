@@ -1,7 +1,7 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
 import React, { useState, useEffect, useRef } from 'react';
 import { useRBAC } from '../../lib/RBACContext.jsx';
-import DebugLabel from '../../components/debug/DebugLabel';
 import { ACTIONS, ACTION_META, hasPermission } from '../../lib/rbac';
 import EmployeeManagementScreen from '../staff/EmployeeManagementScreen';
 import ServiceCatalogScreen from '../services/ServiceCatalogScreen';
@@ -305,7 +305,7 @@ export default function OwnerDashboard({ salonSettings, onSettingsUpdate, onBack
     <div style={{ display: 'flex', height: '100vh', background: T.chrome, fontFamily: "'Inter',system-ui,sans-serif", color: T.text }}>
       {/* Left nav */}
       <div style={{ width: 220, background: '#162032', borderRight: `1px solid ${T.borderLight}`, display: 'flex', flexDirection: 'column', overflow: 'auto', position: 'relative' }}>
-        <DebugLabel id="NAV-SIDEBAR" />
+        <AreaTag id="OW-SIDE" />
         <div style={{ padding: '20px 16px 12px', borderBottom: `1px solid ${T.borderLight}`, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 500, color: T.text }}>Pro Salon POS</div>
           <div style={{ fontSize: 12, color: T.text }}>Owner Dashboard</div>
@@ -330,7 +330,6 @@ export default function OwnerDashboard({ salonSettings, onSettingsUpdate, onBack
                   userSelect: 'none',
                   opacity: isLocked ? 0.6 : 1,
                 }}>
-                <DebugLabel id={'NAV-' + s.id.toUpperCase()} pos="tr" />
                 <span style={{ fontSize: 14 }}>{s.icon}</span>
                 <span style={{ flex: 1 }}>{s.label}</span>
                 {isLocked && <span style={{ fontSize: 11 }}>🔒</span>}
@@ -357,7 +356,7 @@ export default function OwnerDashboard({ salonSettings, onSettingsUpdate, onBack
 
       {/* Main content */}
       <div style={{ flex: 1, overflow: 'auto', padding: (!section || section === 'staff' || section === 'services' || section === 'messaging' || section === 'giftcards' || section === 'loyalty' || section === 'membership' || section === 'packages' || section === 'inventory' || section === 'payroll' || section === 'billpay' || section === 'reports' || section === 'kiosk' || section === 'custdisplay' || (section === 'online' && showPortalPreview)) ? 0 : '24px 32px', position: 'relative' }}>
-        <DebugLabel id={'PAGE-' + (section || 'DASHBOARD-HOME').toUpperCase()} pos="tr" />
+        <AreaTag id="OW-PAGE" pos="tr" />
         <div style={{ maxWidth: (!section || section === 'salon' || section === 'staff' || section === 'services' || section === 'messaging' || section === 'giftcards' || section === 'loyalty' || section === 'membership' || section === 'packages' || section === 'inventory' || section === 'payroll' || section === 'billpay' || section === 'reports' || section === 'kiosk' || section === 'custdisplay' || (section === 'online' && showPortalPreview)) ? 'none' : 800, height: (!section || section === 'staff' || section === 'services' || section === 'messaging' || section === 'giftcards' || section === 'loyalty' || section === 'membership' || section === 'packages' || section === 'inventory' || section === 'payroll' || section === 'billpay' || section === 'reports' || section === 'kiosk' || section === 'custdisplay' || (section === 'online' && showPortalPreview)) ? '100%' : 'auto' }}>
           {section && renderers[section] ? renderers[section]() : (function(){
             var sName=(salonSettings||{}).salon_name||'Your Salon';

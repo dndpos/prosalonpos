@@ -10,7 +10,6 @@ import { useStaffStore } from '../../lib/stores/staffStore';
 import { useServiceStore } from '../../lib/stores/serviceStore';
 import { useAppointmentStore } from '../../lib/stores/appointmentStore';
 import { isProduction, getPairedSalonName } from '../../lib/apiClient';
-import DebugLabel from '../../components/debug/DebugLabel';
 
 /**
  * Kiosk — Client Self-Check-In
@@ -218,7 +217,6 @@ export default function KioskApp() {
   if (step === 'welcome') {
     return (
       <div style={Object.assign({}, pageStyle, { position: 'relative' })}>
-        <DebugLabel id="SCREEN-KIOSK" />
         <div style={{ textAlign: 'center' }}>
           <div style={{ width: 80, height: 80, borderRadius: '50%', background: S.brand, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: 32, color: '#fff' }}>✦</div>
           <div style={{ fontSize: 28, fontWeight: 600, color: S.textPrimary, marginBottom: 8 }}>{salonName}</div>

@@ -1,5 +1,5 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
-import DebugLabel from '../../components/debug/DebugLabel';
 /**
  * Pro Salon POS — Gift Card Module (Container)
  * Session 10: Gift card management with 2 tabs.
@@ -25,7 +25,7 @@ export default function GiftCardModule({ salonSettings, onSettingsUpdate }) {
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
-      <DebugLabel id="PAGE-GIFTCARDS" pos="tr" />
+        <AreaTag id="GC" />
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px 0 20px' }}>
         <span style={{ fontSize: 16, fontWeight: 600, color: T.text }}>Gift Cards</span>

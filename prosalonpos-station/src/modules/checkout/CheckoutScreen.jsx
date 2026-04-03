@@ -1,8 +1,8 @@
 import { useTheme } from '../../lib/ThemeContext';
+import AreaTag from '../../components/ui/AreaTag';
 /** Pro Salon POS — Checkout Screen. Module 2. Payment inline on receipt panel. Session 35: RBAC wiring. */
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
-import DebugLabel from '../../components/debug/DebugLabel';
 import CheckoutTabs from './CheckoutTabs';
 import PaidScreen from './PaidScreen';
 import TipDistribution from './TipDistribution';
@@ -483,7 +483,7 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     <div style={{width:'100%',height:'100%',display:'flex',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif",overflow:'hidden'}}>
       {/* ═══ LEFT: TICKET ═══ */}
       <div style={{width:TICKET_W,minWidth:TICKET_W,background:C.chromeDark,borderRight:`1px solid ${C.borderLight}`,display:'flex',flexDirection:'column',flexShrink:0,position:'relative'}}>
-        <DebugLabel id="PANEL-TICKET" />
+        <AreaTag id="CO-TICKET" />
         {/* Client */}
         <div style={{padding:'10px 12px',borderBottom:`1px solid ${C.borderLight}`,flexShrink:0}}>
           <div style={{fontSize:10,color:C.textMuted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:5}}>Checkout</div>
@@ -738,7 +738,7 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
       </div>
       {/* ═══ RIGHT: SELECTOR ═══ */}
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
-        <DebugLabel id="PANEL-CHECKOUT-TABS" pos="tr" />
+        <AreaTag id="CO-TABS" pos="tr" />
         <CheckoutTabs activeTechId={activeTechId} onAddItem={handleAddItem} onAddTech={handleAddTech} onSellGiftCard={handleAddGiftCard} onSellPackage={handleSellPackage} client={client} openTickets={openTickets} onCombineTicket={handleCombine} catalogLayout={catalogLayout} salonSettings={salonSettings}/>
       </div>
       <CheckoutModals ctx={{

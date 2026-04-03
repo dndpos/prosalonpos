@@ -37,7 +37,6 @@ export default function CategoryGrid({
   categories, activeCat, onSelect,
   // Layout
   catSlots, catColumns, layout,  // layout: 'grid' | 'tabs'
-  showInactive,
   // Edit mode callbacks (optional)
   mode,  // 'edit' | 'view' | 'tabs'
   onRename, onToggleActive, onAdd, onEditColor, onDelete,
@@ -51,7 +50,9 @@ export default function CategoryGrid({
   var [renameValue, setRenameValue] = useState('');
 
   var isEdit = mode === 'edit';
-  var activeCategories = categories.filter(function(c) { return c.active; });
+  var activeCategories = categories.filter(function(c) { return c.active !== false; });
+  // S104: Edit mode always shows inactive (dimmed). View/tabs mode hides them.
+  var showAll = isEdit;
 
   // ── TABS MODE (horizontal bar for BookingFlow) ──
   if (layout === 'tabs' || mode === 'tabs') {
@@ -79,24 +80,26 @@ export default function CategoryGrid({
 
   // ── GRID MODE (slot-based panel) ──
   var slots = catSlots || {};
-  var cols = catColumns || 2;
-  var displayCats = showInactive ? categories : activeCategories;
+  var cols = catColumns || 1;
+  var displayCats = showAll ? categories : activeCategories;
   var maxSlot = 0;
   Object.keys(slots).forEach(function(k) { var n = parseInt(k); if (n > maxSlot) maxSlot = n; });
   // View mode: only show slots that have categories (no empty padding)
   // Edit mode: show extra empty slots for adding new categories
   var totalSlots;
+  // For view mode, collect ordered list of slot indices that have active categories
+  var activeSlotKeys = [];
+  if (!isEdit) {
+    Object.keys(slots).sort(function(a,b){ return parseInt(a)-parseInt(b); }).forEach(function(k) {
+      var cid = slots[k];
+      var c = cid ? categories.find(function(cat) { return cat.id === cid && cat.active; }) : null;
+      if (c) activeSlotKeys.push(parseInt(k));
+    });
+  }
   if (isEdit) {
     totalSlots = Math.max(maxSlot + 1, displayCats.length) + cols * 2;
   } else {
-    // Count only slots that actually map to an active category
-    var filledCount = 0;
-    Object.keys(slots).forEach(function(k) {
-      var cid = slots[k];
-      var c = cid ? categories.find(function(cat) { return cat.id === cid && cat.active; }) : null;
-      if (c) filledCount++;
-    });
-    totalSlots = Math.max(filledCount, maxSlot + 1);
+    totalSlots = activeSlotKeys.length;
   }
 
   // Drag handlers (edit mode only)
@@ -133,9 +136,11 @@ export default function CategoryGrid({
   var gridItems = [];
   for (var i = 0; i < totalSlots; i++) {
     (function(slotIdx) {
-      var catId = slots[slotIdx];
+      // In view mode, slotIdx maps through activeSlotKeys to skip empty/inactive slots
+      var actualSlot = isEdit ? slotIdx : activeSlotKeys[slotIdx];
+      var catId = slots[actualSlot];
       var cat = catId ? categories.find(function(c) { return c.id === catId; }) : null;
-      if (cat && !showInactive && !cat.active) { cat = null; }
+      if (cat && !showAll && !cat.active) { cat = null; }
 
       var isDragOver = dragOverSlot === slotIdx;
       var isDragging = draggingId && cat && cat.id === draggingId;
@@ -235,9 +240,9 @@ export default function CategoryGrid({
             )}
           </div>
         );
-      } else {
-        // Empty slot
-        if (isEdit) {
+        } else {
+          // Empty slot — only show in edit mode
+          if (isEdit) {
           gridItems.push(
             <button key={'cs-' + slotIdx}
               onClick={function() { if (onAdd) onAdd(); setMenuId(null); }}
@@ -256,9 +261,8 @@ export default function CategoryGrid({
               onMouseLeave={function(e) { if (!isDragOver) { e.currentTarget.style.borderColor = '#475569'; e.currentTarget.style.color = '#475569'; e.currentTarget.style.background = 'transparent'; } }}
             >+</button>
           );
-        } else {
-          gridItems.push(<div key={'cs-' + slotIdx} style={{ borderRadius: 6, border: '1px dashed #475569' }} />);
         }
+        // View mode: skip empty slots entirely — no rendering
       }
     })(i);
   }

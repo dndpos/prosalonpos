@@ -22,7 +22,6 @@
 
 import { create } from 'zustand';
 import { api, isBackendAvailable, checkBackend } from '../apiClient';
-import { debugLog } from '../debugLog';
 
 function normalizeServiceLine(sl) {
   if (sl._normalized) return sl;
@@ -97,9 +96,7 @@ var useAppointmentStore = create(function(set, get) {
           initialized: true,
           loadedDate: dateStr,
         });
-        debugLog('STORE', 'appointmentStore loaded ' + (data.serviceLines ? data.serviceLines.length : 0) + ' service lines for ' + dateStr);
       } catch (err) {
-        debugLog('ERROR', 'appointmentStore fetch failed: ' + err.message);
         set({ loading: false, error: err.message, initialized: true, source: 'error' });
       }
     },

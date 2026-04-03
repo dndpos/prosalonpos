@@ -1,5 +1,5 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
-import DebugLabel from '../../components/debug/DebugLabel';
 /**
  * Pro Salon POS — Inventory Module (Container)
  * Session 13: Inventory with 3 tabs.
@@ -27,7 +27,7 @@ export default function InventoryModule({ salonSettings, onSettingsUpdate }) {
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
-      <DebugLabel id="PAGE-INVENTORY" pos="tr" />
+        <AreaTag id="INV" />
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px 0 20px' }}>
         <span style={{ fontSize: 16, fontWeight: 600, color: T.text }}>Inventory</span>

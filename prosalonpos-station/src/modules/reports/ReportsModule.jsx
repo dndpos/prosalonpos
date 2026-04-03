@@ -1,10 +1,10 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
 import { useState, useMemo, useEffect } from 'react';
 import { getStaffName, PAYMENT_LABELS, PAYMENT_COLORS } from './reportsUtils';
 
 import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { useTicketStore } from '../../lib/stores/ticketStore';
-import DebugLabel from '../../components/debug/DebugLabel';
 import { fmt } from '../../lib/formatUtils';
 
 /**
@@ -301,7 +301,7 @@ export default function ReportsModule() {
   // ══════════════════════════════════
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: T.chrome, fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
-      <DebugLabel id="PAGE-REPORTS" pos="tr" />
+        <AreaTag id="RP" />
       {/* Top bar: date picker centered */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '14px 20px', borderBottom: '1px solid ' + T.borderLight, background: T.chromeDark, flexShrink: 0, position: 'relative' }}>
         {/* Tab buttons — top left */}

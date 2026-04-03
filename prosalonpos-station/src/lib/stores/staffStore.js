@@ -13,7 +13,6 @@
 
 import { create } from 'zustand';
 import { api, isBackendAvailable, checkBackend } from '../apiClient';
-import { debugLog } from '../debugLog';
 
 var useStaffStore = create(function(set, get) {
   return {
@@ -41,9 +40,7 @@ var useStaffStore = create(function(set, get) {
           source: 'api',
           initialized: true,
         });
-        debugLog('STORE', 'staffStore loaded ' + (data.staff ? data.staff.length : 0) + ' staff from API');
       } catch (err) {
-        debugLog('ERROR', 'staffStore fetch failed: ' + err.message);
         set({ loading: false, error: err.message, initialized: true, source: 'error' });
       }
     },

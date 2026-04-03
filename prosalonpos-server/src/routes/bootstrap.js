@@ -76,9 +76,10 @@ router.get('/', async function(req, res, next) {
         orderBy: { display_name: 'asc' }
       }),
 
-      // Services
+      // Services (with category junction links)
       prisma.serviceCatalog.findMany({
         where: { salon_id: salonId },
+        include: { category_links: true },
         orderBy: { name: 'asc' }
       }),
 
@@ -177,6 +178,14 @@ router.get('/', async function(req, res, next) {
     }
     // Include owner_pin_sha256 for local PIN check (same as settings route)
     if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
+
+    // Map service category_links to category_ids array (same as /services route)
+    services = services.map(function(s) {
+      var obj = Object.assign({}, s);
+      obj.category_ids = s.category_links ? s.category_links.map(function(l) { return l.category_id; }) : [];
+      delete obj.category_links;
+      return obj;
+    });
 
     // Clean staff data — add pin_display for non-owners
     staff = staff.map(function(s) {

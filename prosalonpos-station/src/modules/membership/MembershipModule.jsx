@@ -1,5 +1,5 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
-import DebugLabel from '../../components/debug/DebugLabel';
 /**
  * Pro Salon POS — Membership Module (Container)
  * Session 12: Membership plans with 3 tabs.
@@ -26,7 +26,7 @@ export default function MembershipModule({ salonSettings, onSettingsUpdate, cata
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
-      <DebugLabel id="PAGE-MEMBERSHIP" pos="tr" />
+        <AreaTag id="MB" />
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px 0 20px' }}>
         <span style={{ fontSize: 16, fontWeight: 600, color: T.text }}>Memberships</span>

@@ -1,5 +1,5 @@
+import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
-import DebugLabel from '../../components/debug/DebugLabel';
 /**
  * Pro Salon POS — Client List
  * Entry screen for the Clients nav tab.
@@ -135,7 +135,7 @@ export default function ClientList({ onBack }) {
   // ── Client Search Screen (matches BookingFlow layout) ──
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: C.chrome, fontFamily: F, overflow: 'hidden', position: 'relative' }}>
-      <DebugLabel id="PAGE-CLIENTS" />
+        <AreaTag id="CL" />
 
       {/* ── Top Bar ── */}
       <div style={{ height: 52, background: C.chromeDark, display: 'flex', alignItems: 'center', padding: '0 20px', gap: 12, borderBottom: '1px solid ' + C.borderLight, flexShrink: 0 }}>

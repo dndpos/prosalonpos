@@ -30,7 +30,6 @@ import { ToastProvider } from './lib/ToastContext.jsx';
 import StationSetup from './modules/setup/StationSetup';
 import LicenseActivationScreen from './modules/setup/LicenseActivationScreen';
 import LoginScreen from './modules/login/LoginScreen';
-
 import CalendarDayView from './modules/appointments/CalendarDayView';
 import CheckoutScreen from './modules/checkout/CheckoutScreen';
 import TicketViewer from './modules/checkout/TicketViewer';
@@ -53,8 +52,7 @@ import EmployeeManagementScreen from './modules/staff/EmployeeManagementScreen';
 import CashierModule from './modules/cashier/CashierModule';
 import TimeClockPopup from './modules/time-clock/TimeClockPopup';
 import ProviderAdminPanel from './modules/provider-admin/ProviderAdminPanel';
-import DebugPanel from './components/debug/DebugPanel';
-import { debugLog } from './lib/debugLog';
+import AreaTag from './components/ui/AreaTag';
 import { phoneToDigits } from './lib/formatUtils';
 function enrichClientBalance(client) {
   if (!client) return client;
@@ -97,9 +95,6 @@ export default function App() {
   // MUST be before any conditional returns to satisfy React hooks ordering rules
   var _staffSource = useStaffStore(function(s) { return s.source; });
   var _staffError = useStaffStore(function(s) { return s.error; });
-
-  // ── Debug: log page navigation ──
-  useEffect(function() { debugLog('NAV', 'Page → ' + activePage); }, [activePage]);
 
   // ── License check on startup ──
   // In .exe mode (SQLite): call license status API. If valid, skip license screen.
@@ -376,17 +371,19 @@ export default function App() {
 
   useEffect(function() {
     setSvcCatCategories(storeCategories);
-    // Build catSlots — keep saved layout if it exists, just append new categories
+    // S105: Cleanup ONLY — remove hard-deleted IDs. NEVER auto-append.
+    if (storeCategories.length === 0) return;
+    var knownIdSet = {}; storeCategories.forEach(function(c) { knownIdSet[c.id] = true; });
     setSvcCatSlots(function(prev) {
       var keys = Object.keys(prev);
-      if (keys.length > 0) {
-        var ids = {}; keys.forEach(function(k) { ids[prev[k]] = true; });
-        var mx = 0; keys.forEach(function(k) { var n = parseInt(k); if (n > mx) mx = n; });
-        var next = Object.assign({}, prev); var ch = false;
-        storeCategories.forEach(function(c) { if (!ids[c.id]) { mx++; next[mx] = c.id; ch = true; } });
-        return ch ? next : prev;
+      if (keys.length === 0) {
+        var s = {}; storeCategories.filter(function(c) { return c.active !== false; }).sort(function(a, b) { return (a.position||0) - (b.position||0); }).forEach(function(c, i) { s[i] = c.id; }); return s;
       }
-      var s = {}; [].concat(storeCategories).sort(function(a, b) { return (a.position||0) - (b.position||0); }).forEach(function(c, i) { s[i] = c.id; }); return s;
+      var cleaned = {}; var changed = false;
+      keys.forEach(function(k) {
+        if (knownIdSet[prev[k]]) { cleaned[k] = prev[k]; } else { changed = true; }
+      });
+      return changed ? cleaned : prev;
     });
   }, [storeCategories]);
 
@@ -407,8 +404,8 @@ export default function App() {
           var existing = next[cat.id] || {}; var cleaned = {};
           Object.keys(existing).forEach(function(k) { if (svcIdSet[existing[k]]) cleaned[k] = existing[k]; });
           if (Object.keys(cleaned).length !== Object.keys(existing).length) { next[cat.id] = cleaned; changed = true; }
-          // S101: if all saved slots were stale, re-populate from actual services
-          if (Object.keys(existing).length > 0 && Object.keys(cleaned).length === 0) {
+          // If slots ended up empty (stale or never populated), re-populate from actual services
+          if (Object.keys(cleaned).length === 0) {
             var fresh = autoAssign(cat.id);
             if (fresh) { next[cat.id] = fresh; changed = true; }
           }
@@ -424,6 +421,7 @@ export default function App() {
   // ── TD-102: Grid layout persistence refs (must be before effects that use them) ──
   var gridInitialized = useRef(false);
   var _restoringGrid = useRef(false);
+  var _gridLayoutRestored = useRef(false); // S105: prevent settings from overwriting catSlots after initial load
 
   useEffect(function() {
     setSalonSettings(function(prev) { return Object.assign({}, prev, storeSettings); });
@@ -439,12 +437,21 @@ export default function App() {
       });
     }
     // ── TD-102: Restore grid layout from saved settings ──
-    if (storeSettings && storeSettings.grid_layout) {
+    // S105: Restore grid layout ONCE on initial load only
+    if (storeSettings && storeSettings.grid_layout && !_gridLayoutRestored.current) {
+      _gridLayoutRestored.current = true;
       var gl = storeSettings.grid_layout;
-      _restoringGrid.current = true; // guard: prevent save-loop
-      if (gl.catSlots) setSvcCatSlots(gl.catSlots);
+      _restoringGrid.current = true;
+      if (gl.catSlots) {
+        if (storeCategories.length > 0) {
+          var knownCatIds = {}; storeCategories.forEach(function(c) { knownCatIds[c.id] = true; });
+          var validCatSlots = {}; Object.keys(gl.catSlots).forEach(function(k) { if (knownCatIds[gl.catSlots[k]]) validCatSlots[k] = gl.catSlots[k]; });
+          setSvcCatSlots(validCatSlots);
+        } else {
+          setSvcCatSlots(gl.catSlots);
+        }
+      }
       if (gl.svcSlots) {
-        // S101: Validate saved svcSlots — skip stale service IDs, skip if services not loaded
         if (storeServices.length > 0) {
           var validIds = {}; storeServices.forEach(function(s) { validIds[s.id] = true; });
           var validated = {};
@@ -462,7 +469,6 @@ export default function App() {
       if (gl.svcGridRows !== undefined) setSvcGridRows(gl.svcGridRows);
       if (gl.empColumns !== undefined) setEmpColumns(gl.empColumns);
       if (gl.empRows !== undefined) setEmpRows(gl.empRows);
-      console.log('[App] Grid layout restored (svcSlots validated)');
       setTimeout(function() { _restoringGrid.current = false; }, 500);
     }
   }, [storeSettings]);
@@ -477,14 +483,9 @@ export default function App() {
     // Skip if we're in the middle of a restore (prevents infinite loop)
     if (_restoringGrid.current) return;
     gridPersist.save({
-      catSlots: svcCatSlots,
-      svcSlots: svcSlots,
-      empSlots: empSlots,
-      svcCatColumns: svcCatColumns,
-      svcGridColumns: svcGridColumns,
-      svcGridRows: svcGridRows,
-      empColumns: empColumns,
-      empRows: empRows,
+      catSlots: svcCatSlots, svcSlots: svcSlots, empSlots: empSlots,
+      svcCatColumns: svcCatColumns, svcGridColumns: svcGridColumns, svcGridRows: svcGridRows,
+      empColumns: empColumns, empRows: empRows,
     });
   }, [svcCatSlots, svcSlots, empSlots, svcCatColumns, svcGridColumns, svcGridRows, empColumns, empRows]);
 
@@ -685,7 +686,6 @@ export default function App() {
   }
 
   var catalogLayout = {categories:svcCatCategories,services:svcCatServices,catColumns:svcCatColumns,svcColumns:svcGridColumns,svcRows:svcGridRows,catSlots:svcCatSlots,svcSlots:svcSlots};
-
   function renderPage() {
     switch (activePage) {
       case 'calendar':       return <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawerSession} onCashierClick={function(rbacStaff){ setCashierStaff(rbacStaff || null); setShowCashierModal(true); }} hasHourlyStaff={hasHourlyStaff} onTimeClockClick={function(){ setShowTimeClockModal(true); }} />;
@@ -791,7 +791,7 @@ export default function App() {
         />
       )}
       <VirtualKeyboard />
-      <DebugPanel />
+      <div style={{ position: 'fixed', bottom: 4, right: 8, fontSize: 10, fontWeight: 600, color: 'rgba(148,163,184,0.4)', fontFamily: "'JetBrains Mono', monospace", pointerEvents: 'none', zIndex: 99999 }}>S105</div>
     </div>
     </ToastProvider>
     </RBACProvider>

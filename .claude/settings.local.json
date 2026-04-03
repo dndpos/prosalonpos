@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=\"yes\" npx prisma migrate reset --force)",
+      "Bash(npx prisma:*)",
+      "Bash(npm run:*)",
+      "Bash(taskkill /PID 6296 /F)",
+      "Bash(cmd /c \"taskkill /PID 6296 /F\")",
+      "Bash(powershell -Command \"Stop-Process -Id 6296 -Force\")",
+      "Bash(node -e ':*)"
+    ]
+  }
+}

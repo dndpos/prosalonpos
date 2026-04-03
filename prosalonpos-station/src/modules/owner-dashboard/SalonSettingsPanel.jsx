@@ -5,23 +5,20 @@ import { useToast } from '../../lib/ToastContext';
 import { ACTIONS, ACTION_META } from '../../lib/rbac';
 import { getPairedSalonCode, getPairedSalonName, unpairStation } from '../../lib/apiClient';
 import { getPrinterList, isQzReady, printTestPage } from '../../lib/printService';
-import DebugToggleSection from '../../components/debug/DebugToggleSection';
+import { useAreaCodeStore } from '../../lib/stores/areaCodeStore';
 import RolesAccordion from './RolesAccordion';
 import DataImportExport from './DataImportExport';
 import OwnerCodeSection from './OwnerCodeSection';
-
 /**
  * SalonSettingsPanel — All salon settings accordion sections
  * Extracted from OwnerDashboard.jsx (Session 37, TD-061)
  */
-
 const ROTATION_OPTS = [
   { value: 'round_robin', label: 'Round Robin', desc: 'After qualifying service, tech moves to bottom.' },
   { value: 'fewest_clients', label: 'Fewest Clients', desc: 'Lowest daily count is up next.' },
   { value: 'fixed_order', label: 'Fixed Order', desc: 'Owner sets static priority.' },
   { value: 'first_available', label: 'First Available', desc: 'Longest free is up next.' },
 ];
-
 // ═══════════════════════════════════════
 // SHARED FORM COMPONENTS
 // ═══════════════════════════════════════
@@ -776,9 +773,26 @@ export default function SalonSettingsPanel({ salonSettings, onSettingsUpdate }) 
           <AccSection id="importexport" title="Import / Export Salon Data" {...accProps}>
             <DataImportExport />
           </AccSection>
-          <AccSection id="debug" title="Debug Tools" {...accProps}>
-            <DebugToggleSection T={T} />
+          <AccSection id="devtools" title="Dev Tools" {...accProps}>
+            <DevToolsSection T={T} />
           </AccSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+function DevToolsSection({ T }) {
+  var areaEnabled = useAreaCodeStore(function(s) { return s.enabled; });
+  var toggleArea = useAreaCodeStore(function(s) { return s.toggle; });
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>Area Code Tags</div>
+          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>Shows section IDs on panels (SC-CAT, CAL, CO-TIP, etc.)</div>
+        </div>
+        <div onClick={toggleArea} style={{ width: 44, height: 24, borderRadius: 12, cursor: 'pointer', position: 'relative', transition: 'background-color 150ms', flexShrink: 0, backgroundColor: areaEnabled ? '#10B981' : T.grid, border: '1px solid ' + (areaEnabled ? '#10B981' : T.border) }}>
+          <div style={{ position: 'absolute', top: 2, left: areaEnabled ? 22 : 2, width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff', transition: 'left 150ms' }} />
         </div>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import AreaTag from '../../components/ui/AreaTag';
 /**
  * LoginScreen.jsx — Staff Login (PIN Entry)
  * Session 94 | Simple: type PIN → hit OK → instant result
@@ -16,8 +17,6 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { login, getPairedSalonId, getPairedSalonName, isBackendAvailable, checkBackend, markBackendAvailable, unpairStation } from '../../lib/apiClient';
-import { debugLog } from '../../lib/debugLog';
-import DebugLabel from '../../components/debug/DebugLabel';
 
 var MAX_PIN = 8;
 
@@ -79,7 +78,6 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
           loggedIn.current = true;
           setMatched(true);
           setChecking(false);
-          debugLog('AUTH', 'Local PIN match: ' + entry.display_name);
 
           // Fetch JWT in background
           login(digits).then(function(data) {
@@ -117,7 +115,6 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
         setMatched(true);
         setChecking(false);
         markBackendAvailable();
-        debugLog('AUTH', 'Login success: ' + data.staff.display_name);
         onLogin(data);
       } else {
         showDenied();
@@ -215,7 +212,7 @@ export default function LoginScreen({ onLogin, onStaleStation }) {
         border: '1px solid #2A3A50', boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
         width: 320, textAlign: 'center', position: 'relative',
       }}>
-        <DebugLabel id="SCREEN-LOGIN" />
+        <AreaTag id="LOGIN" />
         <div style={{ fontSize: 15, fontWeight: 500, color: '#CBD5E1', marginBottom: 24 }}>
           Enter your PIN to sign in
         </div>

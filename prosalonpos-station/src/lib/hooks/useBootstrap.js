@@ -23,7 +23,6 @@ import { useLoyaltyStore } from '../stores/loyaltyStore';
 import { useMembershipStore } from '../stores/membershipStore';
 import { useMessagingStore } from '../stores/messagingStore';
 import { usePackageStore } from '../stores/packageStore';
-import { debugLog } from '../debugLog';
 
 // Settings defaults (must match settingsStore._DEFAULT_SETTINGS)
 var SETTINGS_DEFAULTS = {
@@ -50,7 +49,6 @@ var SETTINGS_DEFAULTS = {
 async function bootstrapStores() {
   try {
     var data = await api.get('/bootstrap');
-    debugLog('PERF', 'Bootstrap loaded — hydrating all stores from single response');
 
     // Staff
     useStaffStore.setState({
@@ -122,7 +120,6 @@ async function bootstrapStores() {
 
     return true;
   } catch (err) {
-    debugLog('PERF', 'Bootstrap failed (' + err.message + ') — caller should fall back');
     return false;
   }
 }

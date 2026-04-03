@@ -6,7 +6,6 @@ var _MOCK_TIP_PRESETS = [18, 20, 25];
 var _MOCK_RECEIPT_OPTIONS = { email: true, text: true, print: true };
 import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { isProduction, getPairedSalonName } from '../../lib/apiClient';
-import DebugLabel from '../../components/debug/DebugLabel';
 
 /**
  * Customer-Facing Display — Micro-frontend #2
@@ -152,7 +151,6 @@ var STEP_LABELS = { idle: 'Idle', review: 'Order Review', tip: 'Tip', signature:
   /* ─── RENDER ─── */
   return (
     <div style={{ background: S.bg, minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-      <DebugLabel id="SCREEN-CUSTDISPLAY" />
       {/* Demo nav strip */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: S.white, borderBottom: '1px solid ' + S.border, flexShrink: 0 }}>
         <div onClick={goBack} style={{ padding: '6px 14px', borderRadius: 6, background: stepIdx > 0 ? S.brand : S.border, color: stepIdx > 0 ? '#fff' : S.textMuted, fontSize: 13, fontWeight: 600, cursor: stepIdx > 0 ? 'pointer' : 'default', opacity: stepIdx > 0 ? 1 : 0.5, userSelect: 'none' }}>

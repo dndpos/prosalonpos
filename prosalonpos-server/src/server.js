@@ -234,6 +234,78 @@ httpServer.listen(PORT, async function() {
       });
       console.log('[Bootstrap] ✅ Removed ' + oldOwners.length + ' old owner staff record(s)');
     }
+
+    // ── Self-heal: populate ServiceCatalogCategory if empty ──
+    // Fixes salons bootstrapped before junction table existed.
+    // Idempotent — skips if any links already exist for this salon.
+    try {
+      var salonId = result.salon.id;
+      var allServices = await prisma.serviceCatalog.findMany({
+        where: { salon_id: salonId, active: true },
+        include: { category_links: true }
+      });
+      var allCategories = await prisma.serviceCategory.findMany({
+        where: { salon_id: salonId }
+      });
+
+      // Only run if we have services AND categories but zero junction records
+      var unlinkedServices = allServices.filter(function(s) {
+        return !s.category_links || s.category_links.length === 0;
+      });
+
+      if (unlinkedServices.length > 0 && allCategories.length > 0) {
+        console.log('[Bootstrap] 🔧 Found ' + unlinkedServices.length + ' services with no category links — auto-linking...');
+
+        // Build category lookup by lowercase name
+        var catByName = {};
+        allCategories.forEach(function(c) {
+          catByName[c.name.toLowerCase().trim()] = c.id;
+        });
+
+        // Name-based heuristic matching
+        var hairKeywords = ['haircut', 'blowout', 'updo', 'trim', 'shampoo', 'style', 'extension', 'perm', 'keratin', 'straighten'];
+        var colorKeywords = ['color', 'highlight', 'balayage', 'ombre', 'toner', 'gloss', 'bleach', 'dye'];
+        var nailKeywords = ['manicure', 'pedicure', 'gel', 'acrylic', 'nail', 'shellac', 'dip powder', 'polish'];
+        var skinKeywords = ['facial', 'wax', 'microderm', 'peel', 'mask', 'dermaplaning', 'lash', 'brow', 'threading', 'tint'];
+        var menKeywords = ["men's", 'beard', 'shave', 'fade', 'lineup', 'taper'];
+
+        function matchCategory(svcName) {
+          var lower = svcName.toLowerCase();
+          if (catByName['men'] && menKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['men'];
+          if (catByName['color'] && colorKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['color'];
+          if (catByName['nails'] && nailKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['nails'];
+          if (catByName['skin'] && skinKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['skin'];
+          if (catByName['hair'] && hairKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['hair'];
+          // Fallback: put in first category so it's visible somewhere
+          return allCategories[0].id;
+        }
+
+        var linked = 0;
+        for (var ui = 0; ui < unlinkedServices.length; ui++) {
+          var svc = unlinkedServices[ui];
+          var catId = matchCategory(svc.name);
+          try {
+            await prisma.serviceCatalogCategory.create({
+              data: {
+                service_catalog_id: svc.id,
+                category_id: catId,
+                position: ui,
+              }
+            });
+            linked++;
+          } catch (linkErr) {
+            // Skip duplicates (unique constraint)
+            if (linkErr.code !== 'P2002') {
+              console.error('[Bootstrap] ⚠️  Link failed for "' + svc.name + '":', linkErr.message);
+            }
+          }
+        }
+        console.log('[Bootstrap] ✅ Auto-linked ' + linked + ' services to categories');
+      }
+    } catch (healErr) {
+      console.error('[Bootstrap] ⚠️  Category link self-heal failed:', healErr.message);
+    }
+
   } catch (err) {
     console.error('[Bootstrap] ❌ Auto-bootstrap failed:', err.message);
     console.error(err.stack);
