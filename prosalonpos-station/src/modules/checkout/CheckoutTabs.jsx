@@ -25,6 +25,7 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
   var categories = cl.categories || [];
   var services = cl.services || [];
   var catColumns = cl.catColumns || 2;
+  var catRows = cl.catRows || 9;
   var svcColumns = cl.svcColumns || 4;
   var svcRows = cl.svcRows || 3;
   var catSlots = cl.catSlots || {};
@@ -198,6 +199,7 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
               onSelect={function(id){ setActiveSvcCat(id); }}
               catSlots={catSlots}
               catColumns={catColumns}
+              catRows={catRows}
               layout="grid"
               mode="view"
             />
@@ -208,6 +210,7 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
               onSelect={function(id){ setActiveProdCat(id); }}
               catSlots={retailCatSlots}
               catColumns={catColumns}
+              catRows={catRows}
               layout="grid"
               mode="view"
             />

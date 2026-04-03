@@ -199,6 +199,7 @@ export default function App() {
   var [svcCatCategories, setSvcCatCategories] = useState([]);
   var [svcCatServices, setSvcCatServices] = useState([]);
   var [svcCatColumns, setSvcCatColumns] = useState(1);
+  var [svcCatRows, setSvcCatRows] = useState(9);
   var [svcGridColumns, setSvcGridColumns] = useState(7);
   var [svcGridRows, setSvcGridRows] = useState(9);
   var [svcCatSlots, setSvcCatSlots] = useState({});
@@ -465,6 +466,7 @@ export default function App() {
       }
       if (gl.empSlots && Object.keys(gl.empSlots).length > 0) setEmpSlots(gl.empSlots);
       if (gl.svcCatColumns !== undefined) setSvcCatColumns(gl.svcCatColumns);
+      if (gl.svcCatRows !== undefined) setSvcCatRows(gl.svcCatRows);
       if (gl.svcGridColumns !== undefined) setSvcGridColumns(gl.svcGridColumns);
       if (gl.svcGridRows !== undefined) setSvcGridRows(gl.svcGridRows);
       if (gl.empColumns !== undefined) setEmpColumns(gl.empColumns);
@@ -484,10 +486,10 @@ export default function App() {
     if (_restoringGrid.current) return;
     gridPersist.save({
       catSlots: svcCatSlots, svcSlots: svcSlots, empSlots: empSlots,
-      svcCatColumns: svcCatColumns, svcGridColumns: svcGridColumns, svcGridRows: svcGridRows,
+      svcCatColumns: svcCatColumns, svcCatRows: svcCatRows, svcGridColumns: svcGridColumns, svcGridRows: svcGridRows,
       empColumns: empColumns, empRows: empRows,
     });
-  }, [svcCatSlots, svcSlots, empSlots, svcCatColumns, svcGridColumns, svcGridRows, empColumns, empRows]);
+  }, [svcCatSlots, svcSlots, empSlots, svcCatColumns, svcCatRows, svcGridColumns, svcGridRows, empColumns, empRows]);
 
   // Daily ticket numbering — starts at 1 each day, sequential
   function nextTicketNumber() {
@@ -685,7 +687,7 @@ export default function App() {
     setActivePage(method === 'pin' ? 'tech-pin' : 'tech-select');
   }
 
-  var catalogLayout = {categories:svcCatCategories,services:svcCatServices,catColumns:svcCatColumns,svcColumns:svcGridColumns,svcRows:svcGridRows,catSlots:svcCatSlots,svcSlots:svcSlots};
+  var catalogLayout = {categories:svcCatCategories,services:svcCatServices,catColumns:svcCatColumns,catRows:svcCatRows,svcColumns:svcGridColumns,svcRows:svcGridRows,catSlots:svcCatSlots,svcSlots:svcSlots};
   function renderPage() {
     switch (activePage) {
       case 'calendar':       return <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawerSession} onCashierClick={function(rbacStaff){ setCashierStaff(rbacStaff || null); setShowCashierModal(true); }} hasHourlyStaff={hasHourlyStaff} onTimeClockClick={function(){ setShowTimeClockModal(true); }} />;
@@ -703,7 +705,7 @@ export default function App() {
       case 'customer-display':  return <CustomerDisplayApp />;
       case 'tech-select':       return <TechSelectApp onTechSelected={handleTechSelected} onExit={function(){ setActiveTech(null); setActivePage('calendar'); }} stationMode={stationConfig.station_mode} canProcessPayments={stationConfig.can_process_payments} activeAppointments={(function(){ var m={}; storeServiceLines.filter(function(sl){ return sl.status==='in_progress'||sl.status==='checked_in'; }).forEach(function(sl){ if(!m[sl.staff_id]) m[sl.staff_id]={clientName:sl.client,services:[]}; m[sl.staff_id].services.push({name:sl.service,price_cents:sl.price_cents||0}); }); return m; })()} />;
       case 'tech-pin':          return <TechPinApp onTechSelected={handleTechSelected} onExit={function(){ setActiveTech(null); setActivePage('calendar'); }} stationMode={stationConfig.station_mode} activeAppointments={(function(){ var m={}; storeServiceLines.filter(function(sl){ return sl.status==='in_progress'||sl.status==='checked_in'; }).forEach(function(sl){ if(!m[sl.staff_id]) m[sl.staff_id]={clientName:sl.client,services:[]}; m[sl.staff_id].services.push({name:sl.service,price_cents:sl.price_cents||0}); }); return m; })()} />;
-      case 'dashboard':      return <OwnerDashboard salonSettings={salonSettings} onSettingsUpdate={handleSettingsUpdate} onBack={function(){ setShowOwner(false); setActivePage('calendar'); }} onLaunchStation={handleLaunchStation} onProviderAdmin={function(){ setActivePage('provider-admin'); }} employees={empStaff} setEmployees={setEmpStaff} empColumns={empColumns} setEmpColumns={setEmpColumns} empRows={empRows} setEmpRows={setEmpRows} empSlots={empSlots} setEmpSlots={setEmpSlots} catalogLayout={catalogLayout} categories={svcCatCategories} setCategories={setSvcCatCategories} services={svcCatServices} setServices={setSvcCatServices} catColumns={svcCatColumns} setCatColumns={setSvcCatColumns} svcColumns={svcGridColumns} setSvcColumns={setSvcGridColumns} svcRows={svcGridRows} setSvcRows={setSvcGridRows} catSlots={svcCatSlots} setCatSlots={setSvcCatSlots} svcSlots={svcSlots} setSvcSlots={setSvcSlots} />;
+      case 'dashboard':      return <OwnerDashboard salonSettings={salonSettings} onSettingsUpdate={handleSettingsUpdate} onBack={function(){ setShowOwner(false); setActivePage('calendar'); }} onLaunchStation={handleLaunchStation} onProviderAdmin={function(){ setActivePage('provider-admin'); }} employees={empStaff} setEmployees={setEmpStaff} empColumns={empColumns} setEmpColumns={setEmpColumns} empRows={empRows} setEmpRows={setEmpRows} empSlots={empSlots} setEmpSlots={setEmpSlots} catalogLayout={catalogLayout} categories={svcCatCategories} setCategories={setSvcCatCategories} services={svcCatServices} setServices={setSvcCatServices} catColumns={svcCatColumns} setCatColumns={setSvcCatColumns} catRows={svcCatRows} setCatRows={setSvcCatRows} svcColumns={svcGridColumns} setSvcColumns={setSvcGridColumns} svcRows={svcGridRows} setSvcRows={setSvcGridRows} catSlots={svcCatSlots} setCatSlots={setSvcCatSlots} svcSlots={svcSlots} setSvcSlots={setSvcSlots} />;
       case 'reports':        return <ReportsModule />;
       case 'provider-admin': return <ProviderAdminPanel onBack={function(){ setActivePage('dashboard'); }} />;
       default:               return <CalendarDayView />;

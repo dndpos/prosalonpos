@@ -36,11 +36,11 @@ function hoverOff(e, isActive, isInactive) {
 export default function CategoryGrid({
   categories, activeCat, onSelect,
   // Layout
-  catSlots, catColumns, layout,  // layout: 'grid' | 'tabs'
+  catSlots, catColumns, catRows, layout,  // layout: 'grid' | 'tabs'
   // Edit mode callbacks (optional)
   mode,  // 'edit' | 'view' | 'tabs'
   onRename, onToggleActive, onAdd, onEditColor, onDelete,
-  setCatSlots, setCatColumns,
+  setCatSlots, setCatColumns, setCatRows,
 }) {
   var [draggingId, setDraggingId] = useState(null);
   var [dragOverSlot, setDragOverSlot] = useState(null);
@@ -81,11 +81,12 @@ export default function CategoryGrid({
   // ── GRID MODE (slot-based panel) ──
   var slots = catSlots || {};
   var cols = catColumns || 1;
+  var rows = catRows || 9;
   var displayCats = showAll ? categories : activeCategories;
   var maxSlot = 0;
   Object.keys(slots).forEach(function(k) { var n = parseInt(k); if (n > maxSlot) maxSlot = n; });
   // View mode: only show slots that have categories (no empty padding)
-  // Edit mode: show extra empty slots for adding new categories
+  // Edit mode: show fixed grid based on cols × rows
   var totalSlots;
   // For view mode, collect ordered list of slot indices that have active categories
   var activeSlotKeys = [];
@@ -97,9 +98,10 @@ export default function CategoryGrid({
     });
   }
   if (isEdit) {
-    totalSlots = Math.max(maxSlot + 1, displayCats.length) + cols * 2;
+    totalSlots = cols * rows;
   } else {
-    totalSlots = activeSlotKeys.length;
+    // Use catRows so grid has consistent sizing even with fewer categories
+    totalSlots = rows ? Math.max(activeSlotKeys.length, cols * rows) : activeSlotKeys.length;
   }
 
   // Drag handlers (edit mode only)
@@ -241,7 +243,7 @@ export default function CategoryGrid({
           </div>
         );
         } else {
-          // Empty slot — only show in edit mode
+          // Empty slot
           if (isEdit) {
           gridItems.push(
             <button key={'cs-' + slotIdx}
@@ -261,8 +263,10 @@ export default function CategoryGrid({
               onMouseLeave={function(e) { if (!isDragOver) { e.currentTarget.style.borderColor = '#475569'; e.currentTarget.style.color = '#475569'; e.currentTarget.style.background = 'transparent'; } }}
             >+</button>
           );
+        } else {
+          // View mode: invisible placeholder to keep grid layout consistent
+          gridItems.push(<div key={'cs-' + slotIdx} />);
         }
-        // View mode: skip empty slots entirely — no rendering
       }
     })(i);
   }
@@ -271,7 +275,9 @@ export default function CategoryGrid({
   if (isEdit) {
     gridStyle.gridAutoRows = '90px';
   } else {
-    gridStyle.gridTemplateRows = 'repeat(' + totalSlots + ', 1fr)';
+    // Use catRows for consistent sizing — categories fill from top, empty rows stay blank
+    var viewRows = rows || totalSlots;
+    gridStyle.gridTemplateRows = 'repeat(' + viewRows + ', 1fr)';
     gridStyle.height = '100%';
   }
 
@@ -281,12 +287,22 @@ export default function CategoryGrid({
         {gridItems}
       </div>
 
-      {/* Edit mode: +/- column controls */}
+      {/* Edit mode: +/- column and row controls */}
       {isEdit && setCatColumns && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 8 }}>
+          <span style={{ color: '#64748B', fontSize: 12 }}>cols</span>
           <PmBtn enabled={cols > 1} label="−" onClick={function() { setCatColumns(cols - 1); }} />
-          <span style={{ color: '#94A3B8', fontSize: 13, fontWeight: 500, minWidth: 28, textAlign: 'center' }}>{cols}</span>
+          <span style={{ color: '#94A3B8', fontSize: 13, fontWeight: 500, minWidth: 22, textAlign: 'center' }}>{cols}</span>
           <PmBtn enabled={true} label="+" onClick={function() { setCatColumns(cols + 1); }} />
+          {setCatRows && (
+            <>
+              <span style={{ color: '#475569', fontSize: 14, margin: '0 2px' }}>×</span>
+              <span style={{ color: '#64748B', fontSize: 12 }}>rows</span>
+              <PmBtn enabled={rows > 1} label="−" onClick={function() { setCatRows(rows - 1); }} />
+              <span style={{ color: '#94A3B8', fontSize: 13, fontWeight: 500, minWidth: 22, textAlign: 'center' }}>{rows}</span>
+              <PmBtn enabled={true} label="+" onClick={function() { setCatRows(rows + 1); }} />
+            </>
+          )}
         </div>
       )}
     </div>

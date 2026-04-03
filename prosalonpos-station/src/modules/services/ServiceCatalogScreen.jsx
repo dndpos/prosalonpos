@@ -16,7 +16,7 @@ import { AddCategoryModal, AddServiceModal } from './ServiceModals';
 import CategoryGrid from '../../components/domain/CategoryGrid';
 import ServiceGrid from '../../components/domain/ServiceGrid';
 
-export default function ServiceCatalogScreen({ categories, setCategories, services, setServices, catColumns, setCatColumns, svcColumns, setSvcColumns, svcRows, setSvcRows, catSlots, setCatSlots, svcSlots, setSvcSlots }) {
+export default function ServiceCatalogScreen({ categories, setCategories, services, setServices, catColumns, setCatColumns, catRows, setCatRows, svcColumns, setSvcColumns, svcRows, setSvcRows, catSlots, setCatSlots, svcSlots, setSvcSlots }) {
   var C = useTheme();
   var toast = useToast();
   var svcStore = useServiceStore();
@@ -217,6 +217,7 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
             onSelect={setActiveCat}
             catSlots={catSlots}
             catColumns={catColumns}
+            catRows={catRows}
             layout="grid"
             mode="edit"
             onRename={handleRenameCategory}
@@ -226,6 +227,7 @@ export default function ServiceCatalogScreen({ categories, setCategories, servic
             onAdd={function() { setShowAddCatModal(true); }}
             setCatSlots={setCatSlots}
             setCatColumns={setCatColumns}
+            setCatRows={setCatRows}
           />
         </div>
 

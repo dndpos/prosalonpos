@@ -54,7 +54,7 @@ const SECTIONS = [
 // ═══════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════
-export default function OwnerDashboard({ salonSettings, onSettingsUpdate, onBack, onLaunchStation, onProviderAdmin, employees, setEmployees, empColumns, setEmpColumns, empRows, setEmpRows, empSlots, setEmpSlots, catalogLayout, categories, setCategories, services, setServices, catColumns, setCatColumns, svcColumns, setSvcColumns, svcRows, setSvcRows, catSlots, setCatSlots, svcSlots, setSvcSlots }) {
+export default function OwnerDashboard({ salonSettings, onSettingsUpdate, onBack, onLaunchStation, onProviderAdmin, employees, setEmployees, empColumns, setEmpColumns, empRows, setEmpRows, empSlots, setEmpSlots, catalogLayout, categories, setCategories, services, setServices, catColumns, setCatColumns, catRows, setCatRows, svcColumns, setSvcColumns, svcRows, setSvcRows, catSlots, setCatSlots, svcSlots, setSvcSlots }) {
   var T = useTheme();
   var rbac = useRBAC();
 
@@ -285,7 +285,7 @@ export default function OwnerDashboard({ salonSettings, onSettingsUpdate, onBack
 
   const renderServices = () => (
     <div style={{ margin: '-24px -32px -24px -16px', height: 'calc(100% + 48px)' }}>
-      <ServiceCatalogScreen categories={categories} setCategories={setCategories} services={services} setServices={setServices} catColumns={catColumns} setCatColumns={setCatColumns} svcColumns={svcColumns} setSvcColumns={setSvcColumns} svcRows={svcRows} setSvcRows={setSvcRows} catSlots={catSlots} setCatSlots={setCatSlots} svcSlots={svcSlots} setSvcSlots={setSvcSlots} />
+      <ServiceCatalogScreen categories={categories} setCategories={setCategories} services={services} setServices={setServices} catColumns={catColumns} setCatColumns={setCatColumns} catRows={catRows} setCatRows={setCatRows} svcColumns={svcColumns} setSvcColumns={setSvcColumns} svcRows={svcRows} setSvcRows={setSvcRows} catSlots={catSlots} setCatSlots={setCatSlots} svcSlots={svcSlots} setSvcSlots={setSvcSlots} />
     </div>
   );
 
