@@ -1,10 +1,10 @@
 /**
  * membershipStore.js — Zustand Store for Memberships
- * Session 88 | Mock data REMOVED — API only
+ * Session 96 | Plans include perks. Full CRUD wired to API.
  */
 
 import { create } from 'zustand';
-import { api, isBackendAvailable, checkBackend } from '../apiClient';
+import { api, isBackendAvailable } from '../apiClient';
 
 var useMembershipStore = create(function(set, get) {
   return {
@@ -20,30 +20,29 @@ var useMembershipStore = create(function(set, get) {
       } catch (err) { set({ loading: false, error: err.message, initialized: true, source: 'error' }); }
     },
 
-    fetchMembers: async function(status) {
-      try {
-        var path = '/memberships/members' + (status ? '?status=' + status : '');
-        var data = await api.get(path);
-        set({ members: data.members || [] });
-      } catch (err) { console.warn('[membershipStore] Members fetch failed:', err.message); }
-    },
-
     createPlan: async function(planData) {
       var data = await api.post('/memberships/plans', planData);
       set(function(s) { return { plans: s.plans.concat([data.plan]) }; });
       return data.plan;
     },
 
-    updatePlan: async function(id, updates) {
-      var data = await api.put('/memberships/plans/' + id, updates);
-      set(function(s) { return { plans: s.plans.map(function(p) { return p.id === id ? Object.assign({}, p, data.plan) : p; }) }; });
+    updatePlan: async function(id, planData) {
+      var data = await api.put('/memberships/plans/' + id, planData);
+      set(function(s) { return { plans: s.plans.map(function(p) { return p.id === id ? data.plan : p; }) }; });
       return data.plan;
     },
 
-    addPerk: async function(planId, perkData) {
-      var data = await api.post('/memberships/plans/' + planId + '/perks', perkData);
-      get().fetchPlans();
-      return data.perk;
+    deletePlan: async function(id) {
+      await api.del('/memberships/plans/' + id);
+      set(function(s) { return { plans: s.plans.filter(function(p) { return p.id !== id; }) }; });
+    },
+
+    fetchMembers: async function(status) {
+      try {
+        var path = '/memberships/members' + (status ? '?status=' + status : '');
+        var data = await api.get(path);
+        set({ members: data.members || [] });
+      } catch (err) { console.warn('[membershipStore] Members fetch failed:', err.message); }
     },
 
     enrollMember: async function(clientId, planId) {
@@ -54,7 +53,20 @@ var useMembershipStore = create(function(set, get) {
 
     updateMember: async function(id, updates) {
       var data = await api.put('/memberships/members/' + id, updates);
-      set(function(s) { return { members: s.members.map(function(m) { return m.id === id ? Object.assign({}, m, data.member) : m; }) }; });
+      set(function(s) { return { members: s.members.map(function(m) { return m.id === id ? data.member : m; }) }; });
+      return data.member;
+    },
+
+    fetchClientMembership: async function(clientId) {
+      try {
+        var data = await api.get('/memberships/members/client/' + clientId);
+        return data.membership || null;
+      } catch (err) { console.warn('[membershipStore] Client membership fetch failed:', err.message); return null; }
+    },
+
+    renewMember: async function(id) {
+      var data = await api.put('/memberships/members/' + id + '/renew');
+      set(function(s) { return { members: s.members.map(function(m) { return m.id === id ? data.member : m; }) }; });
       return data.member;
     },
   };

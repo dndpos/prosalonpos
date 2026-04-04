@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTheme } from '../../lib/ThemeContext';
 import PinPopup from '../../components/ui/PinPopup';
 import { useStaffStore } from '../../lib/stores/staffStore';
+import AreaTag from '../../components/ui/AreaTag';
 
 /**
  * TimeClockPopup — TD-056 Time Clock Module (Session 38)
@@ -265,9 +266,10 @@ export default function TimeClockPopup({ show, clockPunches, onPunch, onDismiss 
                 var statusLabel = status.isClockedIn ? 'Clocked In' : 'Clocked Out';
                 return (
                   <div key={tech.id} onClick={function() { handleManagerPickTech(tech); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid ' + T.border }}
+                    style={{position:'relative', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid ' + T.border }}
                     onMouseEnter={function(e) { e.currentTarget.style.background = T.raised || T.chrome; }}
                     onMouseLeave={function(e) { e.currentTarget.style.background = 'transparent'; }}>
+        <AreaTag id="CLOCK" />
                     {/* Avatar */}
                     <div style={{ width: 38, height: 38, borderRadius: '50%', background: AVATAR_COLORS[idx % AVATAR_COLORS.length], display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>
                       {getInitials(tech.display_name)}

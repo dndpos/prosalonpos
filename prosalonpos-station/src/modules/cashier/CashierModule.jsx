@@ -16,6 +16,7 @@ import { numpadDisplay, numpadTap, numpadToCents, numpadKeys } from '../checkout
 import { fmt } from '../../lib/formatUtils';
 import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 import { relayPrint } from '../../lib/printRelay';
+import AreaTag from '../../components/ui/AreaTag';
 
 var NUM_MODE = 'cash_register';
 var KEYS = numpadKeys(NUM_MODE);
@@ -277,8 +278,9 @@ export default function CashierModule({ drawerSession, onOpen, onClose, onDismis
     var statusColor = isShort ? C.danger : isOver ? C.warning : C.success;
 
     return (
-      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         onClick={handleDone}>
+        <AreaTag id="CASHIER" />
         <div style={{ backgroundColor: C.surface, border: '1px solid ' + C.border, borderRadius: 14, width: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', overflow: 'hidden' }}
           onClick={function(e) { e.stopPropagation(); }}>
           {/* Header */}

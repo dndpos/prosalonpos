@@ -1,5 +1,6 @@
 import { useTheme } from '../../lib/ThemeContext';
 import { ACTIONS, ACTION_META, ROLE_DEFAULTS } from '../../lib/rbac';
+import AreaTag from '../../components/ui/AreaTag';
 
 /**
  * EmployeePermissionsTab — Session 34
@@ -130,6 +131,7 @@ export default function EmployeePermissionsTab({ role, permissionOverrides, onOv
         }
         return (
           <div style={{ display: 'flex', gap: 16 }}>
+        <AreaTag id="EMP-PERM" />
             <div style={{ flex: 1, minWidth: 0 }}>{renderCats(leftCats)}</div>
             <div style={{ flex: 1, minWidth: 0 }}>{renderCats(rightCats)}</div>
           </div>

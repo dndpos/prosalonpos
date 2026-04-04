@@ -134,10 +134,11 @@ router.get('/', async function(req, res, next) {
         where: { salon_id: salonId }
       }),
 
-      // Membership plans
+      // Membership plans (include perks, all plans for Owner Dashboard)
       prisma.membershipPlan.findMany({
-        where: { salon_id: salonId, active: true },
-        orderBy: { name: 'asc' }
+        where: { salon_id: salonId },
+        include: { perks: { orderBy: { position: 'asc' } } },
+        orderBy: { position: 'asc' }
       }),
 
       // Messaging templates

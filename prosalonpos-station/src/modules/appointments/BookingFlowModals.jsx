@@ -1,4 +1,5 @@
 import { useTheme } from '../../lib/ThemeContext';
+import AreaTag from '../../components/ui/AreaTag';
 
 /**
  * BookingFlowModals — extracted from BookingFlow.jsx (Session 70 split)
@@ -59,7 +60,8 @@ export default function BookingFlowModals({
       {/* ═══════════ NOTE POPUP ═══════════ */}
       {showNotePopup !== null && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '18vh', zIndex: 300 }}>
-          <div style={{ background: C.chrome, borderRadius: 12, padding: 28, maxWidth: 420, width: '90%', border: `1px solid ${C.borderMedium}` }}>
+          <div style={{ background: C.chrome, borderRadius: 12, padding: 28, maxWidth: 420, width: '90%', border: `1px solid ${C.borderMedium}`, position: 'relative' }}>
+            <AreaTag id="BOOK-MOD" />
             <div style={{ color: C.textPrimary, fontSize: 16, fontWeight: 600, marginBottom: 6 }}>
               Booking Note{bookingClients.length > 1 ? ' — ' + clientLabel(bookingClients[showNotePopup], showNotePopup) : ''}
             </div>
@@ -185,7 +187,8 @@ export default function BookingFlowModals({
                       style={{ height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1A2340', border: '1px solid #1E2D45', borderRadius: 10, color: accent, fontSize: 14, fontWeight: 600, cursor: 'pointer', userSelect: 'none', transition: 'all 150ms' }}
                       onMouseEnter={function(e) { e.currentTarget.style.background = 'rgba(245,158,11,0.15)'; e.currentTarget.style.borderColor = accent; }}
                       onMouseLeave={function(e) { e.currentTarget.style.background = '#1A2340'; e.currentTarget.style.borderColor = '#1E2D45'; }}
-                    >{label}</div>
+                    >
+        {label}</div>
                   );
                 })}
               </div>

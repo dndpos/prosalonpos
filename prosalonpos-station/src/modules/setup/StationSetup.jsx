@@ -16,6 +16,7 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { verifySalonCode, pairStation, checkBackend } from '../../lib/apiClient';
+import AreaTag from '../../components/ui/AreaTag';
 
 export default function StationSetup({ onPaired }) {
   var [code, setCode] = useState('');
@@ -78,12 +79,13 @@ export default function StationSetup({ onPaired }) {
 
   // ─── Render ───
   return (
-    <div style={{
+    <div style={{position:'relative',
       display: 'flex', height: '100vh', width: '100vw',
       background: 'linear-gradient(135deg, #0B1220 0%, #162032 50%, #1A2736 100%)',
       fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
       color: '#E2E8F0', alignItems: 'center', justifyContent: 'center',
     }}>
+        <AreaTag id="SETUP" />
       <div style={{ textAlign: 'center', width: 400 }}>
         {/* Logo */}
         <div style={{ marginBottom: 40 }}>

@@ -14,6 +14,7 @@ import { useClientStore } from '../../lib/stores/clientStore';
 import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { buildDateList, getAvailableSlots } from './bookingAvailability';
 import BookingLaterSteps from './BookingLaterSteps';
+import AreaTag from '../../components/ui/AreaTag';
 
 var _SALON_DEFAULTS = { logo: '✦', brandColor: '#8B5CF6' };
 var BC = _SALON_DEFAULTS.brandColor;
@@ -539,7 +540,8 @@ export default function OnlineBookingPortal({ salonSettings: _ss }) {
               {isGroupBooking && groupMembers.map(function (m, idx) {
                 var mDur = (m.services || []).reduce(function (s, svc) { return s + svc.default_duration_minutes; }, 0);
                 return (
-                  <div key={idx} style={{ fontSize: 12, color: S.textSoft, marginTop: 4, paddingLeft: 4 }}>
+                  <div key={idx} style={{position:'relative', fontSize: 12, color: S.textSoft, marginTop: 4, paddingLeft: 4 }}>
+        <AreaTag id="ONLINE" />
                     {m.name}: {m.tech ? m.tech.display_name : 'Any tech'} · {m.services.length} svc · {mDur} min
                   </div>
                 );

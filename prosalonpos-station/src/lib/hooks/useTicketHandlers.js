@@ -8,6 +8,7 @@
 
 import { useTicketStore } from '../stores/ticketStore';
 import { useAppointmentStore } from '../stores/appointmentStore';
+import { useMembershipStore } from '../stores/membershipStore';
 import { markAvailable as turnMarkAvailable } from '../techTurnBus';
 
 export default function useTicketHandlers() {
@@ -22,7 +23,11 @@ export default function useTicketHandlers() {
   var storeUpdateClosedTicket = useTicketStore(function(s) { return s.updateClosedTicket; });
   var storeRemoveOpenTicket = useTicketStore(function(s) { return s.removeOpenTicket; });
   var storeAddOpenTicket = useTicketStore(function(s) { return s.addOpenTicket; });
+  var storeVoidTicket = useTicketStore(function(s) { return s.voidTicket; });
+  var storeRefundTicket = useTicketStore(function(s) { return s.refundTicket; });
   var storeUpdateServiceLine = useAppointmentStore(function(s) { return s.updateServiceLine; });
+  var enrollMember = useMembershipStore(function(s) { return s.enrollMember; });
+  var renewMember = useMembershipStore(function(s) { return s.renewMember; });
 
   function handleCloseTicket(ticket) {
     // Connection 1: mark each tech on this ticket as Available in the turn list
@@ -45,6 +50,22 @@ export default function useTicketHandlers() {
         storeUpdateServiceLine(slId, { status: 'completed', payment_method: (ticket.payments[0] || {}).method || null });
       });
     }
+
+    // Connection 4: Membership — enroll new or renew existing
+    var memItems = (ticket.items || []).filter(function(it) { return it.type === 'membership_sale'; });
+    memItems.forEach(function(memItem) {
+      if (memItem.isRenewal && memItem.membershipId) {
+        // Renewal — advance next_billing
+        renewMember(memItem.membershipId).catch(function(err) {
+          console.warn('[handleCloseTicket] Membership renewal failed:', err.message);
+        });
+      } else if (memItem.planId && ticket.client && ticket.client.id) {
+        // New enrollment
+        enrollMember(ticket.client.id, memItem.planId).catch(function(err) {
+          console.warn('[handleCloseTicket] Membership enrollment failed:', err.message);
+        });
+      }
+    });
 
     // In API mode: save ticket to database
     if (storeSource === 'api') {
@@ -140,18 +161,42 @@ export default function useTicketHandlers() {
   }
 
   function handlePrintHold(holdData) {
-    // Save ticket to open tickets store so it appears in the hold list
-    var ticket = {
-      id: holdData.id || ('hold-' + Date.now()),
-      ticketNumber: holdData.ticketNumber || 0,
-      client: holdData.client || null,
-      clientName: holdData.clientName || null,
-      items: holdData.items || [],
-      depositCents: holdData.depositCents || 0,
-      status: 'open',
-      createdAt: Date.now(),
+    // Save ticket to database so it persists across page navigations
+    var ticketData = {
+      client_id: holdData.client ? holdData.client.id : null,
+      client_name: holdData.clientName || null,
+      deposit_cents: holdData.depositCents || 0,
+      lineItems: (holdData.items || []).map(function(it) {
+        return {
+          type: it.type || 'service',
+          name: it.name || 'Service',
+          price_cents: it.price_cents || 0,
+          original_price_cents: it.original_price_cents || it.price_cents || 0,
+          tech_id: it.techId || null,
+          tech_name: it.tech || null,
+          service_id: it.service_id || null,
+          product_id: it.product_id || null,
+          color: it.color || null,
+        };
+      }),
     };
-    storeAddOpenTicket(ticket);
+    storeCreateTicket(ticketData).then(function(ticket) {
+      console.log('[handlePrintHold] Ticket saved to DB:', ticket.id);
+    }).catch(function(err) {
+      // Fallback: save locally if API fails
+      console.warn('[handlePrintHold] DB save failed, keeping local:', err.message);
+      var ticket = {
+        id: holdData.id || ('hold-' + Date.now()),
+        ticketNumber: holdData.ticketNumber || 0,
+        client: holdData.client || null,
+        clientName: holdData.clientName || null,
+        items: holdData.items || [],
+        depositCents: holdData.depositCents || 0,
+        status: 'open',
+        createdAt: Date.now(),
+      };
+      storeAddOpenTicket(ticket);
+    });
 
     // Connection 2: Print & Hold — tech is done with client, return to available queue
     var staffIds = [];
@@ -190,42 +235,30 @@ export default function useTicketHandlers() {
   }
 
   function handleVoidTicket(ticketId, data) {
-    var ticket = closedTickets.find(function(t) { return t.id === ticketId; });
-    var tipCents = data.reverseTip ? 0 : (ticket ? ticket.tipCents : 0);
-    storeUpdateClosedTicket(ticketId, {
-      voided: true,
-      voidedAt: Date.now(),
-      voidedBy: data.staffName || 'Manager',
-      voidReason: data.reasonText || data.reasonPreset,
-      voidReverseTip: data.reverseTip,
-      tipCents: tipCents,
+    storeVoidTicket(ticketId, {
+      void_reason: data.reasonText || data.reasonPreset || null,
+      void_by: data.staffName || 'Manager',
+      reverse_tip: !!data.reverseTip,
+    }).then(function(ticket) {
+      console.log('[handleVoidTicket] Voided in DB:', ticketId);
+    }).catch(function(err) {
+      console.warn('[handleVoidTicket] API void failed:', err.message);
     });
   }
 
   function handleRefundTicket(ticketId, data) {
-    var ticket = closedTickets.find(function(t) { return t.id === ticketId; });
-    var refundRecord = {
-      id: 'rf-' + Date.now(),
-      originalTicketId: ticketId,
-      items: data.items,
-      reasonPreset: data.reasonPreset,
-      reasonText: data.reasonText,
-      refundMethod: data.refundMethod,
-      refundTip: data.refundTip,
-      tipRefunded_cents: data.tipRefunded_cents || 0,
-      refundItemsTotal_cents: data.refundItemsTotal_cents || 0,
-      refundTax_cents: data.refundTax_cents || 0,
-      refundTotal_cents: data.refundTotal_cents,
-      processedBy: 'Manager',
-      processedAt: Date.now(),
-    };
-    var prevTip = ticket ? (ticket.tipCents || 0) : 0;
-    var newTip = data.tipRefunded_cents > 0 ? Math.max(0, prevTip - data.tipRefunded_cents) : prevTip;
-    var tipDiff = prevTip - newTip;
-    storeUpdateClosedTicket(ticketId, {
-      refunds: (ticket ? ticket.refunds || [] : []).concat([refundRecord]),
-      tipCents: newTip,
-      totalCents: (ticket ? ticket.totalCents || 0 : 0) - tipDiff,
+    storeRefundTicket(ticketId, {
+      refund_reason: data.reasonText || data.reasonPreset || null,
+      refund_by: data.staffName || 'Manager',
+      refund_method: data.refundMethod || null,
+      refund_cents: data.refundTotal_cents || 0,
+      refund_items: data.items || [],
+      refund_tip: !!data.refundTip,
+      tip_refunded_cents: data.tipRefunded_cents || 0,
+    }).then(function(refund) {
+      console.log('[handleRefundTicket] Refunded in DB:', ticketId);
+    }).catch(function(err) {
+      console.warn('[handleRefundTicket] API refund failed:', err.message);
     });
   }
 

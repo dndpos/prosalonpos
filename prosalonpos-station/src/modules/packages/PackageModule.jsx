@@ -9,6 +9,7 @@ import { useTheme } from '../../lib/ThemeContext';
 
 import React, { useState } from 'react';
 import PackageList from './PackageList';
+import AreaTag from '../../components/ui/AreaTag';
 
 var TABS = [
   { id: 'packages', label: 'Packages', bg:'#3D2608', text:'#FBB040', border:'#5C3A10' },
@@ -89,7 +90,8 @@ function PackageSettings({ settings, onUpdate }) {
   }
 
   return (
-    <div style={{ maxWidth: 600 }}>
+    <div style={{position:'relative', maxWidth: 600 }}>
+        <AreaTag id="PKG" />
       <div style={{ backgroundColor: T.chrome, border: '1px solid ' + T.border, borderRadius: 8, padding: '4px 16px' }}>
         <Row label="Packages enabled" desc="Master toggle — disabling hides packages from checkout">
           <Toggle value={s.packages_enabled !== false} onChange={function(v) { if (onUpdate) onUpdate('packages_enabled', v); }} />

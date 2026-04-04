@@ -9,9 +9,11 @@ import { useState, useEffect } from 'react';
 import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 import { RETAIL_CATEGORIES, MOCK_RETAIL, CHECKOUT_STAFF, CHECKOUT_SETTINGS } from './checkoutBridge';
 import { usePackageStore } from '../../lib/stores/packageStore';
+import { useMembershipStore } from '../../lib/stores/membershipStore';
 import CategoryGrid from '../../components/domain/CategoryGrid';
 import ServiceGrid from '../../components/domain/ServiceGrid';
 import { fmt } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 function Av({name,size=28,index=0,photo=null}){
   var C = useTheme();
@@ -19,10 +21,12 @@ function Av({name,size=28,index=0,photo=null}){
   return(<div style={{width:size,height:size,borderRadius:'50%',background:AVATAR_COLORS[index%AVATAR_COLORS.length],display:'flex',alignItems:'center',justifyContent:'center',color:C.textPrimary,fontSize:size<28?9:11,fontWeight:500,flexShrink:0}}>{getInitials(name)}</div>);
 }
 
-export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSellGiftCard, onSellPackage, client, openTickets, onCombineTicket, catalogLayout, salonSettings }){
+export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSellGiftCard, onSellPackage, onSellMembership, client, openTickets, onCombineTicket, catalogLayout, salonSettings }){
   var C = useTheme();
   var MOCK_SERVICE_PACKAGES = usePackageStore(function(s) { return s.packages; });
   var MOCK_SERVICE_PACKAGE_ITEMS = usePackageStore(function(s) { return s.packageItems; });
+  var membershipPlans = useMembershipStore(function(s) { return s.plans; });
+  var membershipPlans = useMembershipStore(function(s) { return s.plans; });
   var cl = catalogLayout || {};
   var categories = cl.categories || [];
   var services = cl.services || [];
@@ -129,8 +133,8 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
   function handleTechSelect(tech){ onAddTech(tech); setShowTechPicker(false); }
 
   return(
-    <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-      {/* ── TOP ACTION BAR ── */}
+    <div style={{display:'flex',flexDirection:'column',height:'100%',position:'relative'}}>
+      <AreaTag id="CO-TABS2" />
       <div style={{display:'flex',alignItems:'center',gap:6,padding:'8px 12px',borderBottom:'1px solid '+C.borderLight,flexShrink:0,flexWrap:'wrap'}}>
         <div style={{display:'flex',gap:2}}>
           <button onClick={function(){setActiveTab('services');}} style={{padding:'7px 16px',background:activeTab==='services'?C.blue:C.grid,border:activeTab==='services'?'1px solid '+C.blue:'1px solid '+C.borderMedium,borderRadius:'6px 0 0 6px',color:activeTab==='services'?'#fff':C.textMuted,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Services</button>
@@ -458,7 +462,47 @@ export default function CheckoutTabs({ activeTechId, onAddItem, onAddTech, onSel
               <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>Select a membership plan for {client?client.name||client.display_name:'this client'}</div>
             </div>
             <div style={{flex:1,overflow:'auto',padding:'8px 12px'}}>
-              <div style={{padding:30,textAlign:'center',color:C.textMuted,fontSize:13}}>No membership plans available yet. Create plans in Owner Dashboard → Membership.</div>
+              {membershipPlans.filter(function(p){return p.active;}).length===0&&(
+                <div style={{padding:30,textAlign:'center',color:C.textMuted,fontSize:13}}>No active membership plans available. Create plans in Owner Dashboard → Membership.</div>
+              )}
+              {membershipPlans.filter(function(p){return p.active;}).map(function(plan){
+                var perks=plan.perks||[];
+                var cycleDays=plan.billing_cycle_days||30;
+                var cycleLabel=cycleDays===30?'mo':cycleDays===90?'qtr':cycleDays===365?'yr':cycleDays+'d';
+                return(
+                  <div key={plan.id}
+                    onClick={function(){
+                      if(onSellMembership)onSellMembership(plan);
+                      setShowMembershipPicker(false);
+                    }}
+                    style={{padding:'12px 14px',marginBottom:6,borderRadius:6,border:'1px solid '+C.borderMedium,cursor:'pointer',background:C.chromeDark}}
+                    onMouseEnter={function(e){e.currentTarget.style.borderColor='#F9A8D4';e.currentTarget.style.background=C.grid;}}
+                    onMouseLeave={function(e){e.currentTarget.style.borderColor=C.borderMedium;e.currentTarget.style.background=C.chromeDark;}}
+                  >
+
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                      <span style={{fontSize:14,fontWeight:600,color:C.textPrimary}}>{plan.name}</span>
+                      <span style={{fontSize:14,fontWeight:700,color:'#F9A8D4'}}>{fmt(plan.price_cents)}<span style={{fontSize:11,fontWeight:400,color:C.textMuted}}>/{cycleLabel}</span></span>
+                    </div>
+                    {plan.description&&<div style={{fontSize:11,color:C.textMuted,marginBottom:6}}>{plan.description}</div>}
+                    <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                      {perks.map(function(pk){
+                        var label='';
+                        if(pk.type==='percentage_discount')label=(pk.discount_percentage||0)+'% off';
+                        else if(pk.type==='free_service')label=(pk.quantity_per_cycle||1)+'× free service';
+                        else if(pk.type==='service_credit')label=fmt(pk.credit_amount_cents||0)+' credit';
+                        if(!label)return null;
+                        return(<span key={pk.id} style={{fontSize:10,padding:'2px 8px',borderRadius:4,background:'rgba(249,168,212,0.15)',color:'#F9A8D4',fontWeight:500}}>{label}</span>);
+                      })}
+                    </div>
+                    <div style={{display:'flex',gap:8,marginTop:6,fontSize:10,color:C.textMuted}}>
+                      <span>{plan.payment_method==='upfront'?'Pay upfront':'Pay each cycle'}</span>
+                      {plan.freeze_allowed&&<span>Freeze allowed</span>}
+                      {plan.credit_rollover&&<span>Credits roll over</span>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <div style={{padding:'12px 20px',borderTop:'1px solid '+C.borderLight,flexShrink:0}}>
               <button onClick={function(){setShowMembershipPicker(false);}} style={{width:'100%',height:38,background:'transparent',border:'1px solid '+C.borderMedium,borderRadius:6,color:C.textPrimary,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>

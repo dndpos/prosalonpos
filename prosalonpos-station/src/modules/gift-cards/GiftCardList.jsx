@@ -14,6 +14,7 @@ import { MOCK_GIFT_CARDS, MOCK_GC_TRANSACTIONS } from './giftCardBridge';
 import { useGiftCardStore } from '../../lib/stores/giftCardStore';
 import { isProduction } from '../../lib/apiClient';
 import { fmt } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 
@@ -431,6 +432,7 @@ function GiftCardDetail({ card, transactions, onBack }) {
                 {txn.receipt.items.map(function(item, i) {
                   return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < txn.receipt.items.length - 1 ? '1px solid rgba(71,85,105,0.4)' : 'none' }}>
+        <AreaTag id="GC-LIST" />
                       <div>
                         <div style={{ fontSize: 13, color: T.text }}>{item.name}</div>
                         <div style={{ fontSize: 11, color: T.textMuted }}>Tech: {item.tech}</div>

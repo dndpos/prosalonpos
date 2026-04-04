@@ -89,6 +89,7 @@ model Staff {
   active                    Boolean  @default(true)
   status                    String   @default("active")     // active | deactivated | deleted
   tech_turn_eligible        Boolean  @default(true)
+  // show_on_calendar Boolean @default(true) — add column to DB first, then uncomment
   pay_type                  String   @default("commission") // commission | hourly | salary
   commission_pct            Int      @default(0)
   daily_guarantee_cents     Int      @default(0)
@@ -365,6 +366,7 @@ model TicketItem {
   service_id           String?
   product_id           String?
   color                String?                    // calendar color for service block
+  // package_id String? — DEFERRED: add via migration when package checkout is needed
 
   ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
 

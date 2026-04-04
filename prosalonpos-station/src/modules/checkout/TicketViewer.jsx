@@ -6,7 +6,7 @@ import { useTheme } from '../../lib/ThemeContext';
  * TD-017: Ticket close/recall. TD-019: Tip distribution. TD-020: Void/refund.
  * Session 35: Void/refund PIN gate replaced with RBAC requirePermission.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 import { CHECKOUT_SETTINGS, CHECKOUT_STAFF } from './checkoutBridge';
 import { useRBAC } from '../../lib/RBACContext';
@@ -16,9 +16,12 @@ import ReceiptPreview from './ReceiptPreview';
 import VoidFlow from './VoidFlow';
 import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 import RefundFlow from './RefundFlow';
+import DateRangePicker from './DateRangePicker';
 import { fmt, fp } from '../../lib/formatUtils';
+import { useTicketStore } from '../../lib/stores/ticketStore';
 
 function pad2(n){ return n<10?'0'+n:''+n; }
+function todayStr(){ var d=new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 function timeStr(ts){ if(!ts)return''; const d=new Date(ts); let h=d.getHours(),m=d.getMinutes(),ap=h>=12?'PM':'AM'; h=h%12||12; return `${h}:${pad2(m)} ${ap}`; }
 function agoStr(ts){ const m=Math.floor((Date.now()-ts)/60000); if(m<1)return'just now'; if(m<60)return m+'m ago'; return Math.floor(m/60)+'h ago'; }
 
@@ -28,9 +31,14 @@ function Av({name,size=28,index=0,photo=null}){
   return(<div style={{width:size,height:size,borderRadius:'50%',background:AVATAR_COLORS[index%AVATAR_COLORS.length],display:'flex',alignItems:'center',justifyContent:'center',color:C.textPrimary,fontSize:size<28?9:11,fontWeight:500,flexShrink:0}}>{getInitials(name)}</div>);
 }
 
-export default function TicketViewer({ openTickets, closedTickets, onBack, onReopen, onOpenTicketCheckout, onNewSale, onUpdateTicketTips, onAddTicketTip, onVoid, onRefund }){
+export default function TicketViewer({ openTickets: propOpen, closedTickets: propClosed, onBack, onReopen, onOpenTicketCheckout, onNewSale, onUpdateTicketTips, onAddTicketTip, onVoid, onRefund }){
   var C = useTheme();
   var rbac = useRBAC();
+  // Read from store directly — props may be stale during navigation
+  var storeOpen = useTicketStore(function(s) { return s.openTickets; });
+  var storeClosed = useTicketStore(function(s) { return s.closedTickets; });
+  var openTickets = storeOpen.length > 0 ? storeOpen : propOpen;
+  var closedTickets = storeClosed.length > 0 ? storeClosed : propClosed;
   const [selectedOpen, setSelectedOpen] = useState([]); // ids of selected open tickets
   const [selectedClosedId, setSelectedClosedId] = useState(null);
   const [showReopenPin, setShowReopenPin] = useState(false);
@@ -56,6 +64,21 @@ export default function TicketViewer({ openTickets, closedTickets, onBack, onReo
   // Closed ticket filter
   const [closedFilter, setClosedFilter] = useState('all'); // all | needs_tip | complete
   const [showReceipt, setShowReceipt] = useState(false);
+
+  // Date range — auto-fetches on mount and whenever dates change
+  var _today = todayStr();
+  const [fromDate, setFromDate] = useState(_today);
+  const [toDate, setToDate] = useState(_today);
+  var fetchTickets = useTicketStore(function(s) { return s.fetchTickets; });
+  var isToday = fromDate === _today && toDate === _today;
+
+  // Auto-fetch on mount + whenever date range changes
+  useEffect(function() {
+    fetchTickets(fromDate, toDate);
+  }, [fromDate, toDate]);
+
+  // Date range picker popup
+  var [showRangePicker, setShowRangePicker] = useState(false);
 
   const selectedClosed = closedTickets.find(t=>t.id===selectedClosedId);
   const tipPerm = CHECKOUT_SETTINGS.tip_edit_permission;
@@ -550,18 +573,56 @@ export default function TicketViewer({ openTickets, closedTickets, onBack, onReo
   const sortedOpen = [...openTickets].sort((a,b)=>a.ticketNumber-b.ticketNumber);
   const sortedClosed = [...closedTickets].sort((a,b)=>a.ticketNumber-b.ticketNumber);
 
+  function displayDateShort(str) {
+    var p = str.split('-');
+    return parseInt(p[1])+'-'+parseInt(p[2])+'-'+p[0];
+  }
+  function shiftDate(str, days) {
+    var d = new Date(str+'T12:00:00');
+    d.setDate(d.getDate()+days);
+    return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+  }
+  var isSingleDay = fromDate === toDate;
+  var dateLabel = isSingleDay ? displayDateShort(fromDate) : displayDateShort(fromDate)+' — '+displayDateShort(toDate);
+
   return(
     <div style={{width:'100%',height:'100%',display:'flex',flexDirection:'column',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif",overflow:'hidden',alignItems:'center',position:'relative'}}>
       <AreaTag id="TK" />
       <div style={{width:'100%',maxWidth:800,display:'flex',flexDirection:'column',height:'100%'}}>
       {/* Header */}
-      <div style={{padding:'12px 16px',borderBottom:`1px solid ${C.borderLight}`,flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
-        <div style={{flex:1}}>
-          <div style={{fontSize:16,fontWeight:600,color:C.textPrimary}}>Today's Tickets</div>
-          <div style={{fontSize:12,color:C.textPrimary}}>{openTickets.length} open · {closedTickets.length} closed</div>
+      <div style={{padding:'12px 16px',borderBottom:`1px solid ${C.borderLight}`,flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:12,color:C.textMuted}}>{openTickets.length} open · {closedTickets.length} closed</div>
+          </div>
+          <button onClick={onBack} style={{height:36,padding:'0 16px',background:C.blue,border:'none',borderRadius:7,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Back to Calendar</button>
         </div>
-        <button onClick={onBack} style={{height:36,padding:'0 16px',background:C.blue,border:'none',borderRadius:7,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Back to Calendar</button>
+        {/* Date navigator */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10}}>
+          <div onClick={function(){ var nf=shiftDate(fromDate,-1); var nt=shiftDate(toDate,-1); setFromDate(nf); setToDate(nt); }}
+            style={{width:40,height:40,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',background:C.chromeDark,border:'1px solid '+C.borderMedium,fontSize:18,color:C.textPrimary,fontWeight:700}}
+            onMouseEnter={function(e){e.currentTarget.style.background=C.gridHover;}}
+            onMouseLeave={function(e){e.currentTarget.style.background=C.chromeDark;}}>‹</div>
+          <div onClick={function(){ setShowRangePicker(true); }}
+            style={{padding:'8px 20px',borderRadius:8,cursor:'pointer',background:C.chromeDark,border:'2px solid '+C.borderMedium,textAlign:'center',minWidth:160}}
+            onMouseEnter={function(e){e.currentTarget.style.borderColor=C.blue;}}
+            onMouseLeave={function(e){e.currentTarget.style.borderColor=C.borderMedium;}}>
+            <div style={{fontSize:15,fontWeight:700,color:C.textPrimary}}>{dateLabel}</div>
+            <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>Tap to set range</div>
+          </div>
+          <div onClick={function(){ var nf=shiftDate(fromDate,1); var nt=shiftDate(toDate,1); setFromDate(nf); setToDate(nt); }}
+            style={{width:40,height:40,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',background:C.chromeDark,border:'1px solid '+C.borderMedium,fontSize:18,color:C.textPrimary,fontWeight:700}}
+            onMouseEnter={function(e){e.currentTarget.style.background=C.gridHover;}}
+            onMouseLeave={function(e){e.currentTarget.style.background=C.chromeDark;}}>›</div>
+          <div onClick={function(){ setFromDate(_today); setToDate(_today); }}
+            style={{padding:'8px 16px',borderRadius:8,fontSize:14,fontWeight:600,cursor:'pointer',background:isToday?C.blue:C.chromeDark,color:isToday?'#fff':C.blueLight,border:isToday?'none':'2px solid '+C.borderMedium}}
+            onMouseEnter={function(e){ if(!isToday) e.currentTarget.style.background=C.gridHover;}}
+            onMouseLeave={function(e){ if(!isToday) e.currentTarget.style.background=C.chromeDark;}}>Today</div>
+        </div>
       </div>
+
+      {/* Date range picker popup */}
+      {showRangePicker && <DateRangePicker fromDate={fromDate} toDate={toDate} onApply={function(f,t){ setFromDate(f); setToDate(t); setShowRangePicker(false); }} onCancel={function(){ setShowRangePicker(false); }} />}
 
       <div style={{flex:1,overflow:'auto',padding:'8px 16px'}}>
         {/* ── OPEN TICKETS ── */}

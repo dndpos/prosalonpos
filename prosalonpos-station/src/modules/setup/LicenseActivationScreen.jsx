@@ -12,6 +12,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useTheme } from '../../lib/ThemeContext';
+import AreaTag from '../../components/ui/AreaTag';
 
 var API_BASE = (function() {
   var loc = window.location;
@@ -176,7 +177,8 @@ export default function LicenseActivationScreen({ onActivated }) {
             var isActive = step === s;
             var isDone = step > s;
             return (
-              <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div key={s} style={{position:'relative', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <AreaTag id="LICENSE" />
                 <div style={{
                   width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 12, fontWeight: 600,

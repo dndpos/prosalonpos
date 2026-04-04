@@ -7,6 +7,7 @@ import { useTheme } from '../../lib/ThemeContext';
  */
 import { useState, useEffect } from 'react';
 import { getWaitColor, AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
+import AreaTag from '../../components/ui/AreaTag';
 
 const QUICK_SERVICES=["Women's Cut",'Blowout','Full Color','Highlights','Balayage','Updo','Deep Cond.',"Men's Cut",'Beard Trim','Manicure','Pedicure','Gel Mani','Facial','Waxing'];
 
@@ -77,8 +78,8 @@ export default function WaitlistPanel({waitlist, techTurn, onStartWorking, onRem
   const techNames=techTurn.map(t=>t.name).sort();
 
   return(
-    <div>
-      {/* CHECK IN BUTTON / FORM */}
+    <div style={{position:'relative'}}>
+      <AreaTag id="WAITLIST" />
       {!showForm?(
         <button onClick={()=>setShowForm(true)} style={{width:'100%',padding:'10px 0',marginBottom:12,background:C.blueTint,border:`1px dashed ${C.blue}`,borderRadius:8,color:C.blueLight,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}
           onMouseEnter={e=>e.currentTarget.style.background=C.accentBg}
@@ -126,6 +127,7 @@ export default function WaitlistPanel({waitlist, techTurn, onStartWorking, onRem
         const isExpanded=expandedId===w.id;
         return(
           <div key={w.id} style={{marginBottom:4,borderRadius:6,background:isExpanded?'#253344':C.chromeDark,border:isExpanded?`1px solid ${C.borderMedium}`:'1px solid transparent',overflow:'hidden'}}>
+
             <div onClick={()=>toggleExpand(w.id)} style={{display:'flex',gap:8,padding:'8px 6px',alignItems:'flex-start',cursor:'pointer'}}>
               <Av name={w.client} size={28} index={wi+10}/>
               <div style={{flex:1,minWidth:0}}>

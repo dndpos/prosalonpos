@@ -9,6 +9,7 @@ import { useTheme } from '../../lib/ThemeContext';
 
 import React, { useState } from 'react';
 import { fmt } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function Toggle({ value, onChange }) {
@@ -76,7 +77,8 @@ export default function GiftCardSettings({ settings, onUpdate }) {
   }
 
   return (
-    <div>
+    <div style={{position:'relative'}}>
+      <AreaTag id="GC-SET" />
       <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 12 }}>Gift card settings</div>
 
       <Card>
@@ -124,7 +126,8 @@ export default function GiftCardSettings({ settings, onUpdate }) {
                           fontSize: 13, fontWeight: 500, cursor: 'pointer', userSelect: 'none',
                           backgroundColor: k === '✓' ? T.primary : T.chrome, color: k === '✓' ? '#fff' : k === '⌫' ? T.danger : T.text,
                           border: '1px solid ' + T.border, ...span,
-                        }}>{k}</div>
+                        }}>
+        {k}</div>
                       );
                     })}
                   </div>

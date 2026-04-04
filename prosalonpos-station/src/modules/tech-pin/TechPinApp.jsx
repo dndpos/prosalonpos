@@ -24,6 +24,7 @@ import { useState, useCallback } from 'react';
  */
 
 import { useStaffStore } from '../../lib/stores/staffStore';
+import AreaTag from '../../components/ui/AreaTag';
 
 // Dark theme palette (staff-facing)
 var T = {
@@ -336,7 +337,8 @@ export default function TechPinApp({ onTechSelected, onExit, stationMode, active
                 <div style={{ marginTop: 14, textAlign: 'left', background: T.card, borderRadius: 10, padding: '12px 16px', border: '1px solid ' + T.border }}>
                   {appt.services.map(function(svc, i) {
                     return (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < appt.services.length - 1 ? '1px solid ' + T.border : 'none' }}>
+                      <div key={i} style={{position:'relative', display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < appt.services.length - 1 ? '1px solid ' + T.border : 'none' }}>
+        <AreaTag id="TECHPIN" />
                         <span style={{ fontSize: 13, color: T.text }}>{svc.name}</span>
                         <span style={{ fontSize: 13, color: T.textSoft, fontWeight: 500 }}>${(svc.price_cents / 100).toFixed(2)}</span>
                       </div>

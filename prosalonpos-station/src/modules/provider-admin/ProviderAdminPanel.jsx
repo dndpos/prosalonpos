@@ -29,6 +29,7 @@ import ProviderSalonDetail from './ProviderSalonDetail';
 import ProviderAgentDetail from './ProviderAgentDetail';
 import ProviderLicenseManager from './ProviderLicenseManager';
 import { providerApi, providerLogin, providerLogout, checkProviderBackend } from '../../lib/providerApiClient';
+import AreaTag from '../../components/ui/AreaTag';
 
 // ═══════════════════════════════════════
 // MAIN COMPONENT
@@ -574,13 +575,14 @@ export default function ProviderAdminPanel({ onBack }) {
               <div key={s.id} onClick={function() { setSection(s.id); setSelectedSalonId(null); setSelectedAgentId(null); }}
                 onMouseEnter={function(e) { if (!active) { e.currentTarget.style.backgroundColor = '#2A3A50'; e.currentTarget.style.borderColor = T.textMuted; } }}
                 onMouseLeave={function(e) { if (!active) { e.currentTarget.style.backgroundColor = T.chrome; e.currentTarget.style.borderColor = T.borderLight; } }}
-                style={{
+                style={{position:'relative',
                   display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', fontSize: 13,
                   borderRadius: 6, backgroundColor: active ? T.accentBg : T.chrome,
                   color: active ? T.accent : T.text, border: '1px solid ' + (active ? T.accent + '40' : T.borderLight),
                   transition: 'background-color 150ms, color 150ms, border-color 150ms', userSelect: 'none',
                 }}
               >
+        <AreaTag id="PROV" />
                 <span>{s.icon}</span>
                 <span>{s.label}</span>
               </div>

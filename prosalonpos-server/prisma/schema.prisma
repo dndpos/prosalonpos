@@ -89,6 +89,7 @@ model Staff {
   active                    Boolean  @default(true)
   status                    String   @default("active")     // active | deactivated | deleted
   tech_turn_eligible        Boolean  @default(true)
+  // show_on_calendar Boolean @default(true) — add column to DB first, then uncomment
   pay_type                  String   @default("commission") // commission | hourly | salary
   commission_pct            Int      @default(0)
   daily_guarantee_cents     Int      @default(0)
@@ -365,6 +366,7 @@ model TicketItem {
   service_id           String?
   product_id           String?
   color                String?                    // calendar color for service block
+  // package_id String? — DEFERRED: add via migration when package checkout is needed
 
   ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
 
@@ -530,18 +532,25 @@ model LoyaltyTransaction {
 // ════════════════════════════════════════════
 
 model MembershipPlan {
-  id               String  @id @default(uuid())
-  salon_id         String
-  name             String
-  description      String?
-  price_cents      Int
-  billing_interval String  @default("monthly") // monthly | yearly
-  included_services Json?  // array of { service_id, qty }
-  discount_pct     Int     @default(0)
-  active           Boolean @default(true)
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
-  version          Int      @default(1)
+  id                       String  @id @default(uuid())
+  salon_id                 String
+  name                     String
+  description              String?
+  price_cents              Int
+  billing_cycle_days       Int     @default(30)
+  payment_method           String  @default("in_person") // in_person | upfront
+  min_commitment_cycles    Int?
+  notice_period_days       Int?
+  missed_payment_action    String  @default("pause") // pause | cancel | grace_period
+  missed_payment_threshold Int?
+  credit_rollover          Boolean @default(false)
+  perk_apply_mode          String  @default("auto") // auto | manual
+  freeze_allowed           Boolean @default(true)
+  active                   Boolean @default(true)
+  position                 Int     @default(0)
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  version                  Int      @default(1)
 
   salon   Salon               @relation(fields: [salon_id], references: [id])
   members MembershipAccount[]
@@ -551,12 +560,15 @@ model MembershipPlan {
 }
 
 model MembershipPerk {
-  id       String @id @default(uuid())
-  plan_id  String
-  name     String
-  type     String @default("discount") // discount | freeService | credit
-  value    Int    @default(0)          // percentage or cents depending on type
-  position Int    @default(0)
+  id                   String  @id @default(uuid())
+  plan_id              String
+  type                 String  @default("percentage_discount") // percentage_discount | free_service | service_credit
+  discount_percentage  Int?
+  service_catalog_id   String?
+  category_id          String?
+  credit_amount_cents  Int?
+  quantity_per_cycle   Int?
+  position             Int     @default(0)
 
   plan MembershipPlan @relation(fields: [plan_id], references: [id], onDelete: Cascade)
 

@@ -7,20 +7,7 @@ import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { useTicketStore } from '../../lib/stores/ticketStore';
 import { fmt } from '../../lib/formatUtils';
 
-/**
- * Reports Module — Module 12
- * Daily closeout report — permanent log, never deleted.
- *
- * Session 85: Wired to ticketStore — reads real closed tickets in production.
- * In dev mode, falls back to static REPORT_TICKETS mock data.
- *
- * Layout (from Alex's sketch):
- *   Left panel: receipt-style printout (total sales, payment breakdown, service vs product)
- *   Right panel: tech breakdown table (sale amount, tips, total per tech)
- *   Top right: date range picker — one picker controls both panels
- */
-
-
+// Reports Module — Daily closeout report. S85: wired to ticketStore. S111: void/refund tracking.
 // Reshape a closed ticket from ticketStore into the report format
 function reshapeTicket(ticket) {
   var items = ticket.items || ticket.lineItems || [];
@@ -30,8 +17,16 @@ function reshapeTicket(ticket) {
   var products = items.filter(function(it) { return it.type === 'retail'; }).map(function(it) {
     return { name: it.name, price_cents: it.price_cents || 0 };
   });
+  var packageItems = items.filter(function(it) { return it.type === 'package_sale'; }).map(function(it) {
+    return { name: it.name, price_cents: it.price_cents || 0 };
+  });
+  var membershipItems = items.filter(function(it) { return it.type === 'membership_sale'; }).map(function(it) {
+    return { name: it.name, price_cents: it.price_cents || 0 };
+  });
   var svcTotal = services.reduce(function(s, v) { return s + v.price_cents; }, 0);
   var prodTotal = products.reduce(function(s, v) { return s + v.price_cents; }, 0);
+  var pkgTotal = packageItems.reduce(function(s, v) { return s + v.price_cents; }, 0);
+  var memTotal = membershipItems.reduce(function(s, v) { return s + v.price_cents; }, 0);
 
   // Determine primary payment method from payments array
   var payments = ticket.payments || [];
@@ -78,13 +73,20 @@ function reshapeTicket(ticket) {
     staff_id: staffId,
     date: dateStr,
     voided: ticket.status === 'voided',
+    refunded: ticket.status === 'refunded',
+    refundCents: ticket.refundCents || ticket.refund_cents || 0,
+    status: ticket.status,
     services: services,
     products: products,
+    packages: packageItems,
+    memberships: membershipItems,
     tip_cents: ticket.tipCents || ticket.tip_cents || 0,
     payment_method: payMethod,
     service_total: svcTotal,
     product_total: prodTotal,
-    subtotal: svcTotal + prodTotal,
+    package_total: pkgTotal,
+    membership_total: memTotal,
+    subtotal: svcTotal + prodTotal + pkgTotal + memTotal,
   };
 }
 
@@ -102,8 +104,10 @@ function reshapeTicketsByTech(ticket) {
   // If no tech grouping or single tech, just return the reshaped ticket
   if (techIds.length <= 1) return [reshapeTicket(ticket)];
 
-  // Multiple techs — split the ticket. Retail goes to the primary tech (createdBy).
+  // Multiple techs — split the ticket. Retail, packages, memberships go to the primary tech (createdBy).
   var products = items.filter(function(it) { return it.type === 'retail'; });
+  var packageItems = items.filter(function(it) { return it.type === 'package_sale'; });
+  var membershipItems = items.filter(function(it) { return it.type === 'membership_sale'; });
   var payments = ticket.payments || [];
   var payMethod = 'credit';
   if (payments.length > 0) {
@@ -135,6 +139,10 @@ function reshapeTicketsByTech(ticket) {
     var svcTotal = svcs.reduce(function(s, v) { return s + v.price_cents; }, 0);
     var prods = idx === 0 ? products.map(function(it) { return { name: it.name, price_cents: it.price_cents || 0 }; }) : [];
     var prodTotal = prods.reduce(function(s, v) { return s + v.price_cents; }, 0);
+    var pkgs = idx === 0 ? packageItems.map(function(it) { return { name: it.name, price_cents: it.price_cents || 0 }; }) : [];
+    var pkgTotal = pkgs.reduce(function(s, v) { return s + v.price_cents; }, 0);
+    var mems = idx === 0 ? membershipItems.map(function(it) { return { name: it.name, price_cents: it.price_cents || 0 }; }) : [];
+    var memTotal = mems.reduce(function(s, v) { return s + v.price_cents; }, 0);
     var tipShare = totalSvc > 0 ? Math.round(totalTip * svcTotal / totalSvc) : 0;
 
     return {
@@ -142,13 +150,20 @@ function reshapeTicketsByTech(ticket) {
       staff_id: tid,
       date: dateStr,
       voided: ticket.status === 'voided',
+      refunded: ticket.status === 'refunded',
+      refundCents: ticket.refundCents || ticket.refund_cents || 0,
+      status: ticket.status,
       services: svcs,
       products: prods,
+      packages: pkgs,
+      memberships: mems,
       tip_cents: tipShare,
       payment_method: payMethod,
       service_total: svcTotal,
       product_total: prodTotal,
-      subtotal: svcTotal + prodTotal,
+      package_total: pkgTotal,
+      membership_total: memTotal,
+      subtotal: svcTotal + prodTotal + pkgTotal + memTotal,
     };
   });
 }
@@ -242,35 +257,58 @@ export default function ReportsModule() {
     return result;
   }, [closedTickets]);
 
-  // Filter tickets for the range
+  // Filter tickets for the range — include ALL statuses (paid, voided, refunded)
   var filtered = useMemo(function() {
     return REPORT_TICKETS.filter(function(t) {
-      return !t.voided && t.date >= range.start && t.date <= range.end;
+      return t.date >= range.start && t.date <= range.end;
     });
   }, [range.start, range.end, REPORT_TICKETS]);
 
-  // ── Compute totals ──
+  // Separate by status
+  var paidTickets = filtered.filter(function(t) { return !t.voided; });
+  var voidedTickets = filtered.filter(function(t) { return t.voided; });
+
+  // ── Compute totals from PAID tickets (gross sales) ──
   var totalServiceSales = 0;
   var totalProductSales = 0;
+  var totalPackageSales = 0;
+  var totalMembershipSales = 0;
   var totalTips = 0;
   var paymentTotals = { cash: 0, credit: 0, gift: 0, zelle: 0 };
-  var ticketCount = filtered.length;
+  var ticketCount = paidTickets.length;
 
-  filtered.forEach(function(t) {
+  paidTickets.forEach(function(t) {
     totalServiceSales += t.service_total;
     totalProductSales += t.product_total;
+    totalPackageSales += (t.package_total || 0);
+    totalMembershipSales += (t.membership_total || 0);
     totalTips += t.tip_cents;
     if (paymentTotals[t.payment_method] !== undefined) {
       paymentTotals[t.payment_method] += t.subtotal;
     }
   });
 
-  var totalSales = totalServiceSales + totalProductSales;
-  var grandTotal = totalSales + totalTips;
+  // ── Void & Refund totals ──
+  var totalVoided = 0;
+  var voidCount = voidedTickets.length;
+  voidedTickets.forEach(function(t) { totalVoided += t.subtotal; });
 
-  // ── Tech breakdown ──
+  var totalRefunded = 0;
+  var refundCount = 0;
+  paidTickets.forEach(function(t) {
+    if (t.refundCents > 0) {
+      totalRefunded += t.refundCents;
+      refundCount++;
+    }
+  });
+
+  var totalSales = totalServiceSales + totalProductSales + totalPackageSales + totalMembershipSales;
+  var grandTotal = totalSales + totalTips;
+  var netTotal = grandTotal - totalVoided - totalRefunded;
+
+  // ── Tech breakdown (paid only) ──
   var techMap = {};
-  filtered.forEach(function(t) {
+  paidTickets.forEach(function(t) {
     if (!techMap[t.staff_id]) techMap[t.staff_id] = { sales: 0, tips: 0, tickets: 0 };
     techMap[t.staff_id].sales += t.subtotal;
     techMap[t.staff_id].tips += t.tip_cents;
@@ -280,9 +318,9 @@ export default function ReportsModule() {
     return { staff_id: sid, name: getStaffName(sid), sales: techMap[sid].sales, tips: techMap[sid].tips, total: techMap[sid].sales + techMap[sid].tips, tickets: techMap[sid].tickets };
   }).sort(function(a, b) { return b.sales - a.sales; }); // highest sales first
 
-  // ── Product breakdown ──
+  // ── Product breakdown (paid only) ──
   var productMap = {};
-  filtered.forEach(function(t) {
+  paidTickets.forEach(function(t) {
     (t.products || []).forEach(function(p) {
       if (!productMap[p.name]) productMap[p.name] = { name: p.name, qty: 0, revenue: 0 };
       productMap[p.name].qty++;
@@ -384,10 +422,10 @@ export default function ReportsModule() {
       {/* ═══ STAT CARDS ═══ */}
       <div style={{ display: 'flex', gap: 12, padding: '16px 20px 0', flexShrink: 0 }}>
         {[
-          { label: 'Total Sales', value: fmt(totalSales), color: '#22C55E', icon: '💰' },
-          { label: 'Tips', value: fmt(totalTips), color: '#38BDF8', icon: '💎' },
-          { label: 'Tickets', value: String(ticketCount), color: '#F59E0B', icon: '🎫' },
-          { label: 'Avg Ticket', value: ticketCount > 0 ? fmt(Math.round(totalSales / ticketCount)) : '$0.00', color: '#A78BFA', icon: '📊' },
+          { label: 'Gross Sales', value: fmt(totalSales), color: '#22C55E', icon: '💰' },
+          { label: 'Voids / Refunds', value: fmt(totalVoided + totalRefunded), color: '#EF4444', icon: '🚫' },
+          { label: 'Net Sales', value: fmt(totalSales - totalVoided - totalRefunded), color: '#38BDF8', icon: '📊' },
+          { label: 'Tickets', value: String(ticketCount) + (voidCount > 0 ? ' (' + voidCount + ' void)' : ''), color: '#F59E0B', icon: '🎫' },
         ].map(function(card) {
           return (
             <div key={card.label} style={{ flex: 1, background: 'linear-gradient(135deg, ' + card.color + '15, ' + card.color + '08)', border: '1px solid ' + card.color + '30', borderRadius: 10, padding: '14px 16px', position: 'relative', overflow: 'hidden' }}>
@@ -423,12 +461,25 @@ export default function ReportsModule() {
                 <div style={{ padding: '18px 24px', borderBottom: '1px dashed #334155' }}>
                   <ReceiptLine label="Service Sales" value={fmt(totalServiceSales)} />
                   <ReceiptLine label="Product Sales" value={fmt(totalProductSales)} />
+                  {totalPackageSales > 0 && <ReceiptLine label="Package Sales" value={fmt(totalPackageSales)} />}
+                  {totalMembershipSales > 0 && <ReceiptLine label="Membership Sales" value={fmt(totalMembershipSales)} />}
                   <div style={{ height: 1, background: '#1E293B', margin: '10px 0' }} />
-                  <ReceiptLine label="Total Sales" value={fmt(totalSales)} bold />
+                  <ReceiptLine label="GROSS SALES" value={fmt(totalSales)} bold />
                   <ReceiptLine label="Tips Collected" value={fmt(totalTips)} />
                   <div style={{ height: 1, background: '#1E293B', margin: '10px 0' }} />
-                  <ReceiptLine label="GRAND TOTAL" value={fmt(grandTotal)} bold large color="#22C55E" />
+                  <ReceiptLine label="GROSS TOTAL" value={fmt(grandTotal)} bold large color="#22C55E" />
                 </div>
+
+                {/* Voids & Refunds section */}
+                {(totalVoided > 0 || totalRefunded > 0) && (
+                  <div style={{ padding: '18px 24px', borderBottom: '1px dashed #334155' }}>
+                    <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>Voids & Refunds</div>
+                    {totalVoided > 0 && <ReceiptLine label={'Voided (' + voidCount + ' ticket' + (voidCount !== 1 ? 's' : '') + ')'} value={'\u2212' + fmt(totalVoided)} color="#EF4444" />}
+                    {totalRefunded > 0 && <ReceiptLine label={'Refunded (' + refundCount + ' ticket' + (refundCount !== 1 ? 's' : '') + ')'} value={'\u2212' + fmt(totalRefunded)} color="#F59E0B" />}
+                    <div style={{ height: 1, background: '#1E293B', margin: '10px 0' }} />
+                    <ReceiptLine label="NET TOTAL" value={fmt(netTotal)} bold large color="#38BDF8" />
+                  </div>
+                )}
 
                 {/* Payment method breakdown */}
                 <div style={{ padding: '18px 24px', borderBottom: '1px dashed #334155' }}>
@@ -459,7 +510,7 @@ export default function ReportsModule() {
                 <div style={{ padding: '18px 24px' }}>
                   <ReceiptLine label="Total Tickets" value={String(ticketCount)} />
                   <ReceiptLine label="Avg Ticket" value={ticketCount > 0 ? fmt(Math.round(totalSales / ticketCount)) : '$0.00'} />
-                  <ReceiptLine label="Days in Range" value={String(new Set(filtered.map(function(t) { return t.date; })).size)} />
+                  <ReceiptLine label="Days in Range" value={String(new Set(paidTickets.map(function(t) { return t.date; })).size)} />
                 </div>
               </>
             ) : (

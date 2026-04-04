@@ -31,6 +31,7 @@ import { ACTIONS } from '../../lib/rbac';
 import useCalendarDrag from './useCalendarDrag';
 import useCalendarPersist from './useCalendarPersist';
 import CalendarOverlays from './CalendarOverlays';
+
 import AreaTag from '../../components/ui/AreaTag';
 
 export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout, catalogLayout, salonSettings, onNavClick, onOwnerClick, unviewedCount, openTicketCount, drawerSession, onCashierClick, hasHourlyStaff, onTimeClockClick }){
@@ -43,7 +44,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   var _storeStaff = useStaffStore(function(s) { return s.staff; });
   var STAFF = useMemo(function() {
     return (_storeStaff || [])
-      .filter(function(s) { return s.status === 'active' && s.role === 'technician'; })
+      .filter(function(s) { return s.status === 'active' && s.role === 'technician' && s.show_on_calendar !== false; })
       .map(function(s) { return { id: s.id, display_name: s.display_name, photo_url: s.photo_url || null }; });
   }, [_storeStaff]);
   const[selectedDate,setSelectedDate]=useState(today);
@@ -126,6 +127,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   },[turnState, _settings]);
   const[activityLog,setActivityLog]=useState([]);
   const[showLogPopup,setShowLogPopup]=useState(false);
+
   const[vipCheckInAlert,setVipCheckInAlert]=useState(null);
   const[selectedAppt,setSelectedAppt]=useState(null);
   const[bookingCtx,setBookingCtx]=useState(null);

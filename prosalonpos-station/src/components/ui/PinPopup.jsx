@@ -3,6 +3,7 @@ import { useTheme } from '../../lib/ThemeContext';
 import { validatePin } from '../../lib/rbac';
 import { useStaffStore } from '../../lib/stores/staffStore';
 import { getPairedSalonId } from '../../lib/apiClient';
+import AreaTag from './AreaTag';
 
 /**
  * PinPopup — PIN entry modal for RBAC
@@ -201,6 +202,7 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
         }}>
 
         <style>{'@keyframes rbac-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-12px); } 40% { transform: translateX(12px); } 60% { transform: translateX(-8px); } 80% { transform: translateX(8px); } }'}</style>
+        <AreaTag id="PIN-RBAC" />
 
         {/* Lock icon + title */}
         <div style={{ textAlign: 'center', marginBottom: 16 }}>
@@ -257,7 +259,8 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
                   }}
                   onMouseEnter={function(e) { e.currentTarget.style.background = T.gridHover; }}
                   onMouseLeave={function(e) { e.currentTarget.style.background = T.grid; }}
-                >{key}</div>
+                >
+        {key}</div>
               );
             })}
           </div>

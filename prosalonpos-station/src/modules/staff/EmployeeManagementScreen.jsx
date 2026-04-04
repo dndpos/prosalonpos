@@ -220,7 +220,7 @@ export default function EmployeeManagementScreen({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', background: T.bg, fontFamily: "'Inter', sans-serif", position: 'relative' }}>
-      <AreaTag id="EMP" />
+      <AreaTag id="EMP" pos="tr" />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', padding: '16px 16px 16px 24px', gap: 16 }}>
 
         {/* ═══ Left panel — tabs + lists ═══ */}

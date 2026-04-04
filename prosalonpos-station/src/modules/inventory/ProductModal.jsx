@@ -12,6 +12,7 @@ import { useTheme } from '../../lib/ThemeContext';
 
 import React, { useState } from 'react';
 import { dollars } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 // ═══════════════════════════════════════
@@ -141,6 +142,7 @@ export default function ProductModal({ product, categories, activeCat, suppliers
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, fontFamily: "'Inter',sans-serif", paddingTop: 24, overflowY: 'auto' }}>
+        <AreaTag id="INV-PROD" />
       <div onClick={function(e) { e.stopPropagation(); }} style={{ background: T.chrome, borderRadius: 12, border: '1px solid ' + T.border, width: 560, maxWidth: '90vw', maxHeight: 'calc(100vh - 48px)', overflow: 'auto', padding: 28, boxShadow: '0 16px 48px rgba(0,0,0,0.5)', marginBottom: 24 }}>
 
         {/* Header */}

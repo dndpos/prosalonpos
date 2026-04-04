@@ -8,9 +8,9 @@ import { useToast } from '../../lib/ToastContext';
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { MOCK_CLIENT_MEMBERSHIPS, MOCK_BILLING_TRANSACTIONS, MOCK_MEMBERSHIP_PLANS, STATUS_COLORS, TXN_COLORS, cycleName } from './membershipBridge';
+import { MOCK_BILLING_TRANSACTIONS, STATUS_COLORS, TXN_COLORS, cycleName } from './membershipBridge';
 import { useMembershipStore } from '../../lib/stores/membershipStore';
-import { isProduction } from '../../lib/apiClient';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function formatDate(iso) {
@@ -34,14 +34,23 @@ function dollars(cents) { return '$' + (cents / 100).toFixed(2); }
 export default function MembershipMembers() {
   var T = useTheme();
   var toast = useToast();
-  var _isProd = isProduction();
-  var storeMembers = useMembershipStore(function(s) { return s.members; });
+  var members = useMembershipStore(function(s) { return s.members; }).map(function(m) {
+    // Normalize API shape → flat fields used in rendering
+    return Object.assign({}, m, {
+      client_name: m.client_name || (m.client ? (m.client.first_name + ' ' + (m.client.last_name || '')).trim() : 'Unknown'),
+      plan_name: m.plan_name || (m.plan ? m.plan.name : ''),
+      next_billing_date: m.next_billing_date || m.next_billing || null,
+      current_credit_cents: m.current_credit_cents || 0,
+      free_services_remaining: m.free_services_remaining || 0,
+      cycles_completed: m.cycles_completed || 0,
+      freeze_until: m.freeze_until || m.frozen_at || null,
+    });
+  });
   var fetchMembers = useMembershipStore(function(s) { return s.fetchMembers; });
-  var [members, setMembers] = useState(_isProd ? [] : MOCK_CLIENT_MEMBERSHIPS);
+  var storeUpdateMember = useMembershipStore(function(s) { return s.updateMember; });
+  var storePlans = useMembershipStore(function(s) { return s.plans; });
 
-  // Fetch and sync in production
-  useEffect(function() { if (_isProd) fetchMembers(); }, []);
-  useEffect(function() { if (_isProd && storeMembers.length > 0) setMembers(storeMembers); }, [_isProd, storeMembers]);
+  useEffect(function() { fetchMembers(); }, []);
   var [searchText, setSearchText] = useState('');
   var [filterStatus, setFilterStatus] = useState('all');
   var [selectedMember, setSelectedMember] = useState(null);
@@ -74,42 +83,49 @@ export default function MembershipMembers() {
     return { active: active, frozen: frozen, totalCredit: totalCredit, revenue: revenue };
   }, [members]);
 
-  // Actions
+  // Actions — call store API, then refresh
   function handleFreeze(memberId, until) {
-    setMembers(function(prev) { return prev.map(function(m) { return m.id === memberId ? Object.assign({}, m, { status: 'frozen', freeze_until: until, next_billing_date: null }) : m; }); });
-    if (selectedMember && selectedMember.id === memberId) {
-      setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'frozen', freeze_until: until, next_billing_date: null }); });
-    }
+    storeUpdateMember(memberId, { status: 'frozen' }).then(function() {
+      toast.show('Membership frozen', 'success');
+      if (selectedMember && selectedMember.id === memberId) {
+        setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'frozen', freeze_until: until }); });
+      }
+    }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
     setShowFreezePopup(false);
     setFreezeDateStr('');
   }
 
   function handleUnfreeze(memberId) {
-    setMembers(function(prev) { return prev.map(function(m) { return m.id === memberId ? Object.assign({}, m, { status: 'active', freeze_until: null }) : m; }); });
-    if (selectedMember && selectedMember.id === memberId) {
-      setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'active', freeze_until: null }); });
-    }
+    storeUpdateMember(memberId, { status: 'active' }).then(function() {
+      toast.show('Membership reactivated', 'success');
+      if (selectedMember && selectedMember.id === memberId) {
+        setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'active', freeze_until: null }); });
+      }
+    }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
   }
 
   function handleCancel(memberId) {
-    var now = new Date().toISOString();
-    setMembers(function(prev) { return prev.map(function(m) { return m.id === memberId ? Object.assign({}, m, { status: 'cancelled', cancelled_at: now, next_billing_date: null }) : m; }); });
-    if (selectedMember && selectedMember.id === memberId) {
-      setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'cancelled', cancelled_at: now, next_billing_date: null }); });
-    }
+    storeUpdateMember(memberId, { status: 'cancelled' }).then(function() {
+      toast.show('Membership cancelled', 'success');
+      if (selectedMember && selectedMember.id === memberId) {
+        setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'cancelled', cancelled_at: new Date().toISOString() }); });
+      }
+    }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
   }
 
   function handleReactivate(memberId) {
-    setMembers(function(prev) { return prev.map(function(m) { return m.id === memberId ? Object.assign({}, m, { status: 'active', cancelled_at: null, freeze_until: null }) : m; }); });
-    if (selectedMember && selectedMember.id === memberId) {
-      setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'active', cancelled_at: null, freeze_until: null }); });
-    }
+    storeUpdateMember(memberId, { status: 'active' }).then(function() {
+      toast.show('Membership reactivated', 'success');
+      if (selectedMember && selectedMember.id === memberId) {
+        setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'active', cancelled_at: null, freeze_until: null }); });
+      }
+    }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
   }
 
   // ── MEMBER DETAIL ──
   if (selectedMember) {
     var cm = selectedMember;
-    var plan = MOCK_MEMBERSHIP_PLANS.find(function(p) { return p.id === cm.plan_id; });
+    var plan = cm.plan || storePlans.find(function(p) { return p.id === cm.plan_id; });
     var txns = MOCK_BILLING_TRANSACTIONS.filter(function(t) { return t.membership_id === cm.id; })
       .sort(function(a, b) { return new Date(b.created_at).getTime() - new Date(a.created_at).getTime(); });
     var sc = STATUS_COLORS[cm.status] || STATUS_COLORS.active;
@@ -297,6 +313,7 @@ export default function MembershipMembers() {
             onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#3B4A63'; }}
             onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.grid; }}
           >
+        <AreaTag id="MB-MEM" />
             {/* Avatar */}
             <div style={{ width: 36, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 600, backgroundColor: 'rgba(139,92,246,0.2)', color: '#C4B5FD', flexShrink: 0 }}>
               {(m.client_name || '').split(' ').map(function(w) { return w[0]; }).join('').slice(0, 2)}

@@ -5,6 +5,7 @@ import { useTheme } from '../../lib/ThemeContext';
  */
 
 import React from 'react';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function Toggle({ value, onChange }) {
@@ -55,6 +56,7 @@ export default function InventorySettings({ settings, onUpdate }) {
 
   return (
     <div style={{ maxWidth: 700 }}>
+        <AreaTag id="INV-SET" />
       <div style={{ fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 14 }}>Inventory settings</div>
 
       <Card>

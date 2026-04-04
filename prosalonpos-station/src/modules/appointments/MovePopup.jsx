@@ -5,11 +5,13 @@ import { useTheme } from '../../lib/ThemeContext';
  * Includes requested technician warning.
  */
 import { formatTimeFull } from '../../lib/calendarHelpers';
+import AreaTag from '../../components/ui/AreaTag';
 
 export default function MovePopup({sl, newStaffName, newTime, oldStaffName, isRequestedWarning, groupCount, onConfirm, onCancel}){
   var C = useTheme();
   return(
     <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(0,0,0,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={onCancel}>
+        <AreaTag id="CAL-MOVE" />
       <div style={{backgroundColor:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:12,width:420,padding:0,boxShadow:'0 20px 60px rgba(0,0,0,0.5)'}} onClick={e=>e.stopPropagation()}>
         <div style={{padding:'20px 24px',borderBottom:`1px solid ${C.borderLight}`}}>
           <div style={{fontSize:15,fontWeight:600,color:C.textPrimary,marginBottom:12}}>Move Appointment{groupCount>1?` (${groupCount} services)`:''}</div>

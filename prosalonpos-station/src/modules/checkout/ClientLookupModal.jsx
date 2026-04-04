@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 import { CHECKOUT_CLIENTS } from './checkoutBridge';
 import { fp } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 function autoCap(v){return v.replace(/(^|\s)\S/g,c=>c.toUpperCase());}
 function Av({name,size=28,index=0}){
@@ -29,6 +30,7 @@ export default function ClientLookupModal({ onSelect, onClose }){
 
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={onClose}>
+        <AreaTag id="CO-CLIENT" />
       <div style={{background:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:12,width:480,maxHeight:'75vh',boxShadow:'0 20px 60px rgba(0,0,0,0.5)',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
         <div style={{padding:'14px 20px',borderBottom:`1px solid ${C.borderLight}`,flexShrink:0}}><div style={{fontSize:15,fontWeight:600,color:C.textPrimary}}>Look Up Client</div></div>
         <div style={{flex:1,overflow:'auto',display:'flex'}}>

@@ -10,6 +10,7 @@ import React, { useState, useMemo } from 'react';
 import { MOCK_CLIENT_LOYALTY, MOCK_LOYALTY_TRANSACTIONS, MOCK_LOYALTY_TIERS, TIER_COLORS } from './loyaltyBridge';
 import { useLoyaltyStore } from '../../lib/stores/loyaltyStore';
 import { isProduction } from '../../lib/apiClient';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function formatDate(iso) {
@@ -172,6 +173,7 @@ export default function LoyaltyMembers() {
             onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = T.gridHover; }}
             onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.grid; }}
           >
+        <AreaTag id="LY-MEM" />
             {/* Avatar */}
             <div style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, backgroundColor: T.accentBg, color: T.blueLight, flexShrink: 0 }}>
               {(m.name || '').split(' ').map(function(w) { return w[0]; }).join('').slice(0, 2)}

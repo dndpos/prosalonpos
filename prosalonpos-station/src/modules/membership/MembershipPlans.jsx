@@ -2,7 +2,7 @@ import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/ToastContext';
 /**
  * Pro Salon POS — Membership Plans
- * Session 12 Decisions #231–#239
+ * Session 96 — Wired to API via direct store subscription (no Proxy bridge).
  * Plan CRUD: name, billing cycle, price, perks (3 types), cancellation,
  * missed payment action, credit rollover, freeze, perk apply mode.
  * All numpads: div-based, calculator layout (7-8-9 top).
@@ -10,12 +10,12 @@ import { useToast } from '../../lib/ToastContext';
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { MOCK_MEMBERSHIP_PLANS, MOCK_MEMBERSHIP_PERKS, STATUS_COLORS, cycleName } from './membershipBridge';
+import { STATUS_COLORS, cycleName } from './membershipBridge';
 import { useMembershipStore } from '../../lib/stores/membershipStore';
-import { isProduction } from '../../lib/apiClient';
 import { useServiceStore } from '../../lib/stores/serviceStore';
 import CategoryGrid from '../../components/domain/CategoryGrid';
 import ServiceGrid from '../../components/domain/ServiceGrid';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function dollars(cents) { return '$' + (cents / 100).toFixed(2); }
@@ -135,23 +135,26 @@ function NumField({ label, value, suffix, active, onClick }) {
 export default function MembershipPlans({ catalogLayout }) {
   var T = useTheme();
   var toast = useToast();
-  var _isProd = isProduction();
   var MOCK_SERVICES = useServiceStore(function(s) { return s.services; });
   var MOCK_CATEGORIES = useServiceStore(function(s) { return s.categories; });
   var storePlans = useMembershipStore(function(s) { return s.plans; });
   var fetchPlans = useMembershipStore(function(s) { return s.fetchPlans; });
-  var [plans, setPlans] = useState(_isProd ? [] : MOCK_MEMBERSHIP_PLANS);
-  var [perks, setPerks] = useState(_isProd ? [] : MOCK_MEMBERSHIP_PERKS);
+  var storeCreatePlan = useMembershipStore(function(s) { return s.createPlan; });
+  var storeUpdatePlan = useMembershipStore(function(s) { return s.updatePlan; });
+  var storeDeletePlan = useMembershipStore(function(s) { return s.deletePlan; });
+  var storeInitialized = useMembershipStore(function(s) { return s.initialized; });
 
-  // Fetch and sync in production
-  useEffect(function() { if (_isProd) fetchPlans(); }, []);
-  useEffect(function() { if (_isProd && storePlans.length > 0) setPlans(storePlans); }, [_isProd, storePlans]);
+  // Plans come directly from store — perks are embedded on each plan object
+  var plans = storePlans;
+
+  // Fetch on mount
+  useEffect(function() { if (!storeInitialized) fetchPlans(); }, []);
   var [editingPlan, setEditingPlan] = useState(null);    // null = list, object = editing
+  var [editingPerks, setEditingPerks] = useState([]);     // perks for the plan being edited
   var [activeNumpad, setActiveNumpad] = useState(null);   // which numpad is open
   var [numStr, setNumStr] = useState('');
 
   // For perk editing
-  var [editingPerk, setEditingPerk] = useState(null);
   var [perkNumpad, setPerkNumpad] = useState(null);
   var [perkNumStr, setPerkNumStr] = useState('');
 
@@ -188,6 +191,7 @@ export default function MembershipPlans({ catalogLayout }) {
     var inactivePlans = plans.filter(function(p) { return !p.active; });
 
     function newPlan() {
+      setEditingPerks([]);
       setEditingPlan({
         id: 'mp-new-' + Date.now(),
         location_id: 'loc-01',
@@ -210,10 +214,10 @@ export default function MembershipPlans({ catalogLayout }) {
     }
 
     function renderPlanCard(plan) {
-      var planPerks = perks.filter(function(pk) { return pk.plan_id === plan.id; });
+      var planPerks = plan.perks || [];
       return (
         <div key={plan.id}
-          onClick={function() { setEditingPlan(Object.assign({}, plan)); }}
+          onClick={function() { setEditingPerks((plan.perks || []).map(function(pk) { return Object.assign({}, pk); })); setEditingPlan(Object.assign({}, plan)); }}
           style={{ backgroundColor: T.grid, borderRadius: 8, padding: '14px 16px', marginBottom: 6, cursor: 'pointer', transition: 'background-color 150ms', border: '1px solid ' + T.border }}
           onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#3B4A63'; }}
           onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.grid; }}
@@ -285,33 +289,69 @@ export default function MembershipPlans({ catalogLayout }) {
   // PLAN EDITOR
   // ═══════════════════════════════════════
   var ep = editingPlan;
-  var planPerks = perks.filter(function(pk) { return pk.plan_id === ep.id; });
+  var planPerks = editingPerks;
 
   function savePlan() {
     if (!ep.name.trim()) { toast.show('Plan name is required.', 'error'); return; }
     if (ep.price_cents <= 0) { toast.show('Price must be greater than $0.', 'error'); return; }
-    setPlans(function(prev) {
-      var idx = prev.findIndex(function(p) { return p.id === ep.id; });
-      var clean = Object.assign({}, ep);
-      delete clean._isNew;
-      if (idx >= 0) { var next = prev.slice(); next[idx] = clean; return next; }
-      return prev.concat([clean]);
-    });
-    setEditingPlan(null);
+
+    // Build payload — plan fields + perks array
+    var payload = {
+      name: ep.name,
+      description: ep.description || null,
+      price_cents: ep.price_cents,
+      billing_cycle_days: ep.billing_cycle_days || 30,
+      payment_method: ep.payment_method || 'in_person',
+      min_commitment_cycles: ep.min_commitment_cycles || null,
+      notice_period_days: ep.notice_period_days || null,
+      missed_payment_action: ep.missed_payment_action || 'pause',
+      missed_payment_threshold: ep.missed_payment_threshold || null,
+      credit_rollover: ep.credit_rollover === true,
+      perk_apply_mode: ep.perk_apply_mode || 'auto',
+      freeze_allowed: ep.freeze_allowed !== false,
+      active: ep.active !== false,
+      position: ep.position || 0,
+      perks: editingPerks.map(function(pk) {
+        return {
+          type: pk.type,
+          discount_percentage: pk.discount_percentage || null,
+          service_catalog_id: pk.service_catalog_id || null,
+          category_id: pk.category_id || null,
+          credit_amount_cents: pk.credit_amount_cents || null,
+          quantity_per_cycle: pk.quantity_per_cycle || null,
+        };
+      }),
+    };
+
+    if (ep._isNew) {
+      storeCreatePlan(payload).then(function() {
+        toast.show('Plan created', 'success');
+        setEditingPlan(null);
+        setEditingPerks([]);
+      }).catch(function(err) { toast.show('Save failed: ' + err.message, 'error'); });
+    } else {
+      storeUpdatePlan(ep.id, payload).then(function() {
+        toast.show('Plan updated', 'success');
+        setEditingPlan(null);
+        setEditingPerks([]);
+      }).catch(function(err) { toast.show('Save failed: ' + err.message, 'error'); });
+    }
   }
 
   function deletePlan() {
     toast.confirm('Delete this plan? This cannot be undone.', function() {
-      setPlans(function(prev) { return prev.filter(function(p) { return p.id !== ep.id; }); });
-      setPerks(function(prev) { return prev.filter(function(pk) { return pk.plan_id !== ep.id; }); });
-      setEditingPlan(null);
+      storeDeletePlan(ep.id).then(function() {
+        toast.show('Plan deleted', 'success');
+        setEditingPlan(null);
+        setEditingPerks([]);
+      }).catch(function(err) { toast.show('Delete failed: ' + err.message, 'error'); });
     });
   }
 
   // ── PERK MANAGEMENT ──
   function addPerk(type) {
     var newPerk = {
-      id: 'pk-new-' + Date.now(),
+      id: 'pk-local-' + Date.now(),
       plan_id: ep.id,
       type: type,
       discount_percentage: type === 'percentage_discount' ? 10 : null,
@@ -320,20 +360,19 @@ export default function MembershipPlans({ catalogLayout }) {
       credit_amount_cents: type === 'service_credit' ? 2500 : null,
       quantity_per_cycle: type === 'free_service' ? 1 : null,
     };
-    setPerks(function(prev) { return prev.concat([newPerk]); });
+    setEditingPerks(function(prev) { return prev.concat([newPerk]); });
   }
 
   function removePerk(perkId) {
-    setPerks(function(prev) { return prev.filter(function(pk) { return pk.id !== perkId; }); });
-    if (editingPerk === perkId) { setEditingPerk(null); setPerkNumpad(null); }
+    setEditingPerks(function(prev) { return prev.filter(function(pk) { return pk.id !== perkId; }); });
+    setPerkNumpad(null);
   }
 
   function updatePerk(perkId, key, val) {
-    setPerks(function(prev) { return prev.map(function(pk) { return pk.id === perkId ? Object.assign({}, pk, (function() { var o = {}; o[key] = val; return o; })()) : pk; }); });
+    setEditingPerks(function(prev) { return prev.map(function(pk) { return pk.id === perkId ? Object.assign({}, pk, (function() { var o = {}; o[key] = val; return o; })()) : pk; }); });
   }
 
   function renderPerkEditor(pk) {
-    var isEditing = editingPerk === pk.id;
 
     if (pk.type === 'percentage_discount') {
       return (
@@ -450,10 +489,11 @@ export default function MembershipPlans({ catalogLayout }) {
 
   // ── EDITOR RENDER ──
   return (
-    <div>
+    <div style={{position:'relative'}}>
+      <AreaTag id="MB-PLAN" />
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-        <div onClick={function() { setEditingPlan(null); setActiveNumpad(null); setPerkNumpad(null); setEditingPerk(null); }}
+        <div onClick={function() { setEditingPlan(null); setEditingPerks([]); setActiveNumpad(null); setPerkNumpad(null); }}
           onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#3E4C5E'; e.currentTarget.style.borderColor = T.textMuted; }}
           onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.chrome; e.currentTarget.style.borderColor = T.border; }}
           style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid ' + T.border, backgroundColor: T.chrome, color: T.textSecondary, fontSize: 11, fontWeight: 500, cursor: 'pointer', transition: 'background-color 150ms' }}
@@ -549,7 +589,8 @@ export default function MembershipPlans({ catalogLayout }) {
                     onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#3E4C5E'; }}
                     onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.chrome; }}
                     style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid ' + T.border, backgroundColor: T.chrome, color: btn.color, fontSize: 11, fontWeight: 500, cursor: 'pointer', transition: 'background-color 150ms' }}
-                  >{btn.label}</div>
+                  >
+        {btn.label}</div>
                 );
               })}
             </div>

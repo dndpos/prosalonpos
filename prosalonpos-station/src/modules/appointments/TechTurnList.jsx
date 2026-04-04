@@ -6,6 +6,7 @@ import { useTheme } from '../../lib/ThemeContext';
  */
 import { useState, useRef, useEffect } from 'react';
 import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
+import AreaTag from '../../components/ui/AreaTag';
 
 function Av({name,size=32,index=0,photo=null}){
   var C = useTheme();
@@ -181,7 +182,8 @@ export default function TechTurnList({techTurn, onReorder, onBreak, onEndBreak})
         const tech=techTurn.find(t=>t.id===confirmEndBreak);
         return(
           <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(0,0,0,0.55)',zIndex:400,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={()=>setConfirmEndBreak(null)}>
-            <div style={{backgroundColor:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:12,width:360,boxShadow:'0 20px 60px rgba(0,0,0,0.5)'}} onClick={e=>e.stopPropagation()}>
+            <div style={{backgroundColor:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:12,width:360,boxShadow:'0 20px 60px rgba(0,0,0,0.5)',position:'relative'}} onClick={e=>e.stopPropagation()}>
+              <AreaTag id="TECHTURN" />
               <div style={{padding:'20px 20px 14px'}}>
                 <div style={{fontSize:15,fontWeight:600,color:C.textPrimary,marginBottom:10}}>End Break?</div>
                 <div style={{fontSize:13,color:C.textPrimary,lineHeight:'1.6'}}>

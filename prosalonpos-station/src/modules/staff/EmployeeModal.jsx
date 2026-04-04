@@ -16,6 +16,7 @@ import CategoryGrid from '../../components/domain/CategoryGrid';
 import ServiceGrid from '../../components/domain/ServiceGrid';
 import EmployeePayTab from './EmployeePayTab';
 import EmployeePermissionsTab from './EmployeePermissionsTab';
+import AreaTag from '../../components/ui/AreaTag';
 
 var ROLE_OPTIONS = [
   { value: 'technician', label: 'Technician' },
@@ -143,6 +144,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
   var [payCheckPct, setPayCheckPct] = useState(isEdit ? String(employee.payout_check_pct || '100') : '100');
   var [payBonusPct, setPayBonusPct] = useState(isEdit ? String(employee.payout_bonus_pct || '0') : '0');
   var [techTurnEligible, setTechTurnEligible] = useState(isEdit ? employee.tech_turn_eligible : true);
+  var [showOnCalendar, setShowOnCalendar] = useState(isEdit ? employee.show_on_calendar !== false : true);
   var [isActive, setIsActive] = useState(isEdit ? employee.active : true);
   var [showPayNumpad, setShowPayNumpad] = useState(null);
 
@@ -208,9 +210,10 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
     payCheckPct !== String(employee.payout_check_pct || '100') ||
     payBonusPct !== String(employee.payout_bonus_pct || '0') ||
     techTurnEligible !== employee.tech_turn_eligible ||
+    showOnCalendar !== (employee.show_on_calendar !== false) ||
     isActive !== employee.active ||
     JSON.stringify(schedule) !== JSON.stringify(employee.schedule || DEFAULT_SCHEDULE) ||
-    JSON.stringify(assignedServiceIds.sort()) !== JSON.stringify((employee.assigned_service_ids || []).sort()) ||
+    JSON.stringify(assignedServiceIds.sort()) !== JSON.stringify((_editIds.length > 0 ? _editIds : [].concat(allActiveServiceIds)).sort()) ||
     JSON.stringify(permissionOverrides) !== JSON.stringify(employee.permission_overrides || {}) ||
     JSON.stringify(categoryCommRates) !== JSON.stringify(employee.category_commission_rates || {})
   ) : displayName.trim().length > 0;
@@ -232,7 +235,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
       category_commission_rates: categoryCommRates,
       daily_guarantee_cents: payType === 'commission' ? (parseInt(dailyGuarantee, 10) || 0) : undefined,
       payout_check_pct: parseInt(payCheckPct, 10) || 100, payout_bonus_pct: parseInt(payBonusPct, 10) || 0,
-      tech_turn_eligible: techTurnEligible, active: isActive, schedule: schedule,
+      tech_turn_eligible: techTurnEligible, show_on_calendar: showOnCalendar, active: isActive, schedule: schedule,
       assigned_service_ids: assignedServiceIds,
       permission_overrides: permissionOverrides,
       rbac_role: role === 'technician' ? 'tech' : role,
@@ -476,6 +479,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
             </div>
 
             <div style={{ borderTop: '1px solid ' + T.border, paddingTop: 8 }}>
+              <Toggle value={showOnCalendar} onChange={setShowOnCalendar} label="Show on Calendar" />
               <Toggle value={techTurnEligible} onChange={setTechTurnEligible} label="Tech Turn Eligible" />
               {isEdit && <Toggle value={!isActive} onChange={function(v) { setIsActive(!v); }} label="Deactivate Staff" />}
             </div>
@@ -490,6 +494,7 @@ export default function EmployeeModal({ employee, onSave, onClose, catalogLayout
               var d = schedule[day.key] || { enabled: false, start: 540, end: 1020 };
               return (
                 <div key={day.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid ' + T.borderLight, opacity: d.enabled ? 1 : 0.5 }}>
+        <AreaTag id="EMP-EDIT" />
                   <div onClick={function() { updateScheduleDay(day.key, 'enabled', !d.enabled); }}
                     style={{ width: 40, height: 22, borderRadius: 11, cursor: 'pointer', background: d.enabled ? T.success : T.grid, border: '1px solid ' + (d.enabled ? T.success : T.border), position: 'relative', flexShrink: 0 }}>
                     <div style={{ width: 16, height: 16, borderRadius: 8, background: '#FFFFFF', position: 'absolute', top: 2, left: d.enabled ? 20 : 2, transition: 'left 0.15s' }} />

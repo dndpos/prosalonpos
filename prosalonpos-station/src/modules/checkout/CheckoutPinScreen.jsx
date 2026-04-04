@@ -1,5 +1,6 @@
 import { useTheme } from '../../lib/ThemeContext';
 import { useEffect } from 'react';
+import AreaTag from '../../components/ui/AreaTag';
 /**
  * CheckoutPinScreen — PIN entry screen for checkout tech identification.
  * Session 95 — OK button added, no auto-detect.
@@ -78,6 +79,7 @@ export default function CheckoutPinScreen({ pinDigits, pinError, pinMatch, onPin
                 }}
                 onMouseEnter={function(e){e.currentTarget.style.backgroundColor=C.gridHover;}}
                 onMouseLeave={function(e){e.currentTarget.style.backgroundColor=C.grid;}}>
+        <AreaTag id="PIN-CO" />
                   {d}
                 </div>
               );

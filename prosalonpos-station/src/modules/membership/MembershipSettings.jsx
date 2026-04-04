@@ -6,6 +6,7 @@ import { useTheme } from '../../lib/ThemeContext';
  */
 
 import React from 'react';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function Toggle({ value, onChange }) {
@@ -37,7 +38,8 @@ export default function MembershipSettings({ settings, onUpdate }) {
   var s = settings || {};
 
   return (
-    <div>
+    <div style={{position:'relative'}}>
+        <AreaTag id="MB-SET" />
       <div style={{ fontSize: 28, fontWeight: 600, color: T.text, marginBottom: 14 }}>Membership settings</div>
 
       <Card>

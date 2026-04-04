@@ -29,6 +29,7 @@ import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { useClientStore } from '../../lib/stores/clientStore';
 import { useTicketStore } from '../../lib/stores/ticketStore';
 import { useStaffStore } from '../../lib/stores/staffStore';
+import AreaTag from '../../components/ui/AreaTag';
 // Session 88: isProduction removed
 
 function getInitials(first, last) {
@@ -472,7 +473,8 @@ export default function ClientProfileScreen({ client, onBack, onUpdateClient }) 
                           {redemptions.map(function(r) {
                             var isUpgrade = !r.isExactMatch && r.service_redeemed_id !== r.package_service_id;
                             return (
-                              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid ' + C.borderLight, fontSize: 11 }}>
+                              <div key={r.id} style={{position:'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid ' + C.borderLight, fontSize: 11 }}>
+        <AreaTag id="CLIPRO" />
                                 <div>
                                   <span style={{ color: C.text, fontWeight: 500 }}>{r.service_redeemed_name}</span>
                                   {isUpgrade && <span style={{ color: '#8B5CF6', marginLeft: 6 }}>↑ upgrade from {r.package_service_name}</span>}

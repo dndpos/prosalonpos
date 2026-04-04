@@ -9,6 +9,7 @@ import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 import { CHECKOUT_SETTINGS, SALON_INFO } from './checkoutBridge';
 import { fmt } from '../../lib/formatUtils';
 import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
+import AreaTag from '../../components/ui/AreaTag';
 
 function pad2(n){ return n<10?'0'+n:''+n; }
 function timeStr(ts){ if(!ts)return''; const d=new Date(ts); let h=d.getHours(),m=d.getMinutes(),ap=h>=12?'PM':'AM'; h=h%12||12; return `${h}:${pad2(m)} ${ap}`; }
@@ -511,7 +512,8 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
     const grandTotal = refundGrandTotal();
     const reasonDisplay = isOther ? otherText.trim() : selectedPreset;
     return(
-      <div style={wrap}><div style={{width:340,maxHeight:'90vh',overflow:'auto'}}>
+      <div style={wrap}>
+        <AreaTag id="REFUND" /><div style={{width:340,maxHeight:'90vh',overflow:'auto'}}>
         <div style={{background:'#fff',borderRadius:8,padding:'20px 16px',color:'#111',fontFamily:"'Courier New',monospace",fontSize:12,lineHeight:1.6}}>
           <div style={{textAlign:'center',marginBottom:8}}>
             <div style={{fontWeight:700,fontSize:14}}>{SALON_INFO.name}</div>

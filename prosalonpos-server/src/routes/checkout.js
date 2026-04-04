@@ -93,6 +93,35 @@ function getEasternOffset(date) {
  * items (as lineItems shape), status, payments, tipDistributions, etc.
  */
 function formatTicket(t) {
+  // Determine closedAt — works for paid, voided, and refunded statuses
+  var closedAtTs = null;
+  if (t.status === 'paid' || t.status === 'refunded') {
+    closedAtTs = t.updated_at ? t.updated_at.getTime() : Date.now();
+  } else if (t.status === 'voided') {
+    closedAtTs = t.void_at ? t.void_at.getTime() : (t.updated_at ? t.updated_at.getTime() : Date.now());
+  }
+
+  // Determine tipAutoRemoved — cash/zelle single-payment with no tip
+  var isCashOrZelle = t.payment_method === 'cash' || t.payment_method === 'zelle';
+  var tipAutoRemoved = isCashOrZelle && (t.tip_cents || 0) === 0 && t.status === 'paid';
+
+  // Build refunds array from single refund data (frontend expects array)
+  var refunds = [];
+  if ((t.refund_cents || 0) > 0 && t.refund_at) {
+    refunds.push({
+      refundTotal_cents: t.refund_cents || 0,
+      items: [],
+      refundTax_cents: 0,
+      refundTip: false,
+      tipRefunded_cents: 0,
+      reasonPreset: t.refund_reason || '',
+      reasonText: '',
+      processedBy: t.refund_by || 'Manager',
+      processedAt: t.refund_at ? t.refund_at.getTime() : null,
+      refundMethod: t.payment_method || 'credit',
+    });
+  }
+
   return {
     id: t.id,
     ticket_number: t.ticket_number,
@@ -124,9 +153,13 @@ function formatTicket(t) {
     tip_distributions: fromDb(t.tip_distributions),
     tipDistributions: fromDb(t.tip_distributions) || [],
     tipDistributed: !!(t.tip_distributions && (fromDb(t.tip_distributions) || []).length > 0),
+    tipAutoRemoved: tipAutoRemoved,
     void_reason: t.void_reason,
     voidReason: t.void_reason,
     void_by: t.void_by,
+    voided: t.status === 'voided',
+    voidedBy: t.void_by || null,
+    voidedAt: t.void_at ? t.void_at.getTime() : null,
     void_at: t.void_at,
     voidAt: t.void_at ? t.void_at.getTime() : null,
     refund_cents: t.refund_cents,
@@ -134,9 +167,10 @@ function formatTicket(t) {
     refund_reason: t.refund_reason,
     refund_by: t.refund_by,
     refund_at: t.refund_at,
+    refunds: refunds,
     created_at: t.created_at,
     createdAt: t.created_at ? t.created_at.getTime() : Date.now(),
-    closedAt: t.status === 'paid' ? (t.updated_at ? t.updated_at.getTime() : Date.now()) : null,
+    closedAt: closedAtTs,
     updated_at: t.updated_at,
     version: t.version,
     // Items formatted for frontend

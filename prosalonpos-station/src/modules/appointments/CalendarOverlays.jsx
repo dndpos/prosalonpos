@@ -17,6 +17,7 @@ import { useRBAC } from '../../lib/RBACContext';
 import { ACTIONS } from '../../lib/rbac';
 import { minutesToTime, formatTimeFull } from '../../lib/calendarHelpers';
 import { useStaffStore } from '../../lib/stores/staffStore';
+import AreaTag from '../../components/ui/AreaTag';
 
 export default function CalendarOverlays({
   // Drag move
@@ -46,7 +47,8 @@ export default function CalendarOverlays({
       {/* ── Group booking move popup ── */}
       {pendingGroupMove && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(0,0,0,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={cancelGroupMove}>
-          <div style={{backgroundColor:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:12,width:440,padding:0,boxShadow:'0 20px 60px rgba(0,0,0,0.5)'}} onClick={e=>e.stopPropagation()}>
+          <div style={{backgroundColor:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:12,width:440,padding:0,boxShadow:'0 20px 60px rgba(0,0,0,0.5)',position:'relative'}} onClick={e=>e.stopPropagation()}>
+            <AreaTag id="CAL-OVR" />
             <div style={{padding:'20px 24px',borderBottom:`1px solid ${C.borderLight}`}}>
               <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
                 <span style={{fontSize:18}}>👥</span>
@@ -183,6 +185,7 @@ export default function CalendarOverlays({
               <div style={{fontSize:14,color:'#94A3B8',marginBottom:8}}>with {bookingConfirm.techs.join(', ')}</div>
               {bookingConfirm.services.map(function(svc,i){return(
                 <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderTop:i===0?'1px solid #1E2D45':'none'}}>
+
                   <span style={{fontSize:14,color:'#E2E8F0'}}>{svc.name} <span style={{color:'#64748B'}}>({svc.dur}m)</span></span>
                   {svc.price>0&&<span style={{fontSize:14,color:'#94A3B8'}}>${(svc.price/100).toFixed(2)}</span>}
                 </div>);})}

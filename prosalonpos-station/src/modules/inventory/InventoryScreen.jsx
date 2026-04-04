@@ -12,6 +12,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { dollars } from '../../lib/formatUtils';
 import { useInventoryStore } from '../../lib/stores/inventoryStore';
 import ProductModal from './ProductModal';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 // ═══════════════════════════════════════
@@ -298,6 +299,7 @@ export default function InventoryScreen() {
                 onMouseEnter={function(e) { e.currentTarget.style.background = T.gridHover; e.currentTarget.style.borderColor = T.textMuted; }}
                 onMouseLeave={function(e) { e.currentTarget.style.background = T.grid; e.currentTarget.style.borderColor = T.border; }}
               >
+        <AreaTag id="INV-LIST" />
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{prod.name}</div>

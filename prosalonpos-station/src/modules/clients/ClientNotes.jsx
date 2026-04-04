@@ -8,6 +8,7 @@ import { useTheme } from '../../lib/ThemeContext';
  * - Owner/manager can delete
  */
 import { useState } from 'react';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function formatDate(iso) {
@@ -83,6 +84,7 @@ export default function ClientNotes({ notes = [], onAddNote, onDeleteNote }) {
           {notes.map(function(note) {
             return (
               <div key={note.id} style={{ padding: '12px 14px', background: C.chromeDark, borderRadius: 8, border: '1px solid ' + C.borderLight }}>
+        <AreaTag id="CLI-NOTE" />
                 <div style={{ color: C.textPrimary, fontSize: 14, lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-wrap' }}>{note.content}</div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ color: C.textMuted, fontSize: 11 }}>

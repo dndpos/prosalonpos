@@ -9,6 +9,7 @@ import { useAreaCodeStore } from '../../lib/stores/areaCodeStore';
 import RolesAccordion from './RolesAccordion';
 import DataImportExport from './DataImportExport';
 import OwnerCodeSection from './OwnerCodeSection';
+import AreaTag from '../../components/ui/AreaTag';
 /**
  * SalonSettingsPanel — All salon settings accordion sections
  * Extracted from OwnerDashboard.jsx (Session 37, TD-061)
@@ -105,7 +106,8 @@ function payNumpad(onKey, onDone, T) {
 function AccSection({ id, title, children, openId, onToggle, T }) {
   var isOpen = openId === id;
   return (
-    <div style={{ marginBottom: 8, borderRadius: 10, border: '1px solid ' + (isOpen ? T.primary + '60' : T.borderLight), background: T.surface, overflow: 'hidden' }}>
+    <div style={{ marginBottom: 8, borderRadius: 10, border: '1px solid ' + (isOpen ? T.primary + '60' : T.borderLight), background: T.surface, overflow: 'hidden', position: 'relative' }}>
+      {isOpen && <AreaTag id={'SS-' + id.toUpperCase()} />}
       <div onClick={function() { onToggle(isOpen ? null : id); }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', cursor: 'pointer', userSelect: 'none', background: isOpen ? T.blueTint : 'transparent' }}
         onMouseEnter={function(e) { if (!isOpen) e.currentTarget.style.background = T.grid; }}

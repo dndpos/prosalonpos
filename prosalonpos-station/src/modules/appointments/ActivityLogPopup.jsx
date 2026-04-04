@@ -1,10 +1,12 @@
 import { useTheme } from '../../lib/ThemeContext';
+import AreaTag from '../../components/ui/AreaTag';
 
 export default function ActivityLogPopup({activityLog, onClose}){
   var C = useTheme();
   return(
     <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(0,0,0,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={onClose}>
-      <div style={{backgroundColor:C.chrome,border:'1px solid '+C.borderMedium,borderRadius:12,width:600,maxHeight:'80vh',overflow:'hidden',boxShadow:'0 20px 60px rgba(0,0,0,0.5)',display:'flex',flexDirection:'column'}} onClick={function(e){e.stopPropagation();}}>
+      <div style={{backgroundColor:C.chrome,border:'1px solid '+C.borderMedium,borderRadius:12,width:600,maxHeight:'80vh',overflow:'hidden',boxShadow:'0 20px 60px rgba(0,0,0,0.5)',display:'flex',flexDirection:'column',position:'relative'}} onClick={function(e){e.stopPropagation();}}>
+        <AreaTag id="CAL-LOG" />
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'16px 20px',borderBottom:'1px solid '+C.borderLight,flexShrink:0}}>
           <span style={{fontSize:16,fontWeight:600,color:C.textPrimary}}>Appointment Log ({activityLog.length})</span>
           <button onClick={onClose} style={{background:'none',border:'none',color:C.textPrimary,fontSize:20,cursor:'pointer',padding:'4px 8px',borderRadius:4}}>✕</button>
@@ -46,6 +48,7 @@ export default function ActivityLogPopup({activityLog, onClose}){
                             {d.services.map(function(svc, si){
                               return(
                                 <div key={si} style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:4}}>
+
                                   <span style={{fontSize:12,color:C.textPrimary}}>{svc.name}</span>
                                   <span style={{fontSize:11,color:C.textMuted}}>{svc.dur} min</span>
                                 </div>

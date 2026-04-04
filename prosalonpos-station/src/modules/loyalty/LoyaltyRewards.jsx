@@ -14,6 +14,7 @@ import { useServiceStore } from '../../lib/stores/serviceStore';
 import CategoryGrid from '../../components/domain/CategoryGrid';
 import ServiceGrid from '../../components/domain/ServiceGrid';
 import { fmt } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 
@@ -365,6 +366,7 @@ function ServicePickerPanel({ selectedIds, onToggle, onDone, catalogLayout }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <AreaTag id="LY-REW" />
       {/* Header bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid ' + T.border, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

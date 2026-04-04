@@ -10,6 +10,7 @@ import { useStaffStore } from '../../lib/stores/staffStore';
 import { useServiceStore } from '../../lib/stores/serviceStore';
 import { useAppointmentStore } from '../../lib/stores/appointmentStore';
 import { isProduction, getPairedSalonName } from '../../lib/apiClient';
+import AreaTag from '../../components/ui/AreaTag';
 
 /**
  * Kiosk — Client Self-Check-In
@@ -483,6 +484,7 @@ export default function KioskApp() {
     var isWalkin = appointments.length === 0;
     return (
       <div style={pageStyle}>
+        <AreaTag id="KIOSK" />
         <div style={cardStyle}>
           <div style={{ width: 72, height: 72, borderRadius: '50%', background: S.successLight, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
             <span style={{ fontSize: 36, color: S.success }}>✓</span>

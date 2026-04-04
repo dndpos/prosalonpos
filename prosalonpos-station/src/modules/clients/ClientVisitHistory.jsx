@@ -9,6 +9,7 @@ import { useTheme } from '../../lib/ThemeContext';
  */
 import { useState, useMemo } from 'react';
 import { fmt } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 
@@ -86,6 +87,7 @@ export default function ClientVisitHistory({ visits = [] }) {
                 background: C.chromeDark, borderRadius: 8, border: '1px solid ' + C.borderLight,
                 opacity: isCompleted ? 1 : 0.7,
               }}>
+        <AreaTag id="CLI-HIST" />
                 {/* Date */}
                 <div style={{ width: 90, flexShrink: 0 }}>
                   <div style={{ color: C.textPrimary, fontSize: 13, fontWeight: 500 }}>{v.date}</div>

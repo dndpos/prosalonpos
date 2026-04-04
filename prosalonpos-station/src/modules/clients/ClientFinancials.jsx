@@ -1,5 +1,6 @@
 import { useTheme } from '../../lib/ThemeContext';
 import { fmt } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 /**
  * Pro Salon POS — Client Financials Panel
  * Session 7 Decision #169: Eight financial/program data points
@@ -69,6 +70,7 @@ export default function ClientFinancials({ financials, storeCreditCents = 0 }) {
         {items.map(function(item, i) {
           return (
             <div key={i} style={{ padding: '12px 14px', background: C.chromeDark, borderRadius: 8, border: item.warn ? '1px solid ' + C.danger : '1px solid ' + C.borderLight }}>
+        <AreaTag id="CLI-FIN" />
               <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{item.label}</div>
               <div style={{ color: item.color, fontSize: 14, fontWeight: 500, wordBreak: 'break-word' }}>{item.value}</div>
               {item.sub && <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>{item.sub}</div>}

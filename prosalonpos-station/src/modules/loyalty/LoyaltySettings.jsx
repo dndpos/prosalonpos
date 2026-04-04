@@ -8,6 +8,7 @@ import { useTheme } from '../../lib/ThemeContext';
 import React, { useState } from 'react';
 import { MOCK_LOYALTY_PROGRAM } from './loyaltyBridge';
 import { isProduction } from '../../lib/apiClient';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function Toggle({ value, onChange }) {
@@ -117,7 +118,8 @@ export default function LoyaltySettings({ program, onProgramUpdate }) {
   function set(key, val) { onProgramUpdate(key, val); }
 
   return (
-    <div>
+    <div style={{position:'relative'}}>
+        <AreaTag id="LY-SET" />
       <div style={{ fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 14 }}>Loyalty settings</div>
 
       <Card>

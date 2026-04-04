@@ -8,6 +8,7 @@ import { fmt, numpadDisplay, numpadTap, numpadToCents, numpadToFloat, numpadKeys
 import { MOCK_GIFT_CARDS } from '../gift-cards/giftCardBridge';
 import ClientLookupModal from './ClientLookupModal';
 import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
+import AreaTag from '../../components/ui/AreaTag';
 
 export default function CheckoutModals({ ctx }) {
   var C = useTheme();
@@ -321,6 +322,7 @@ export default function CheckoutModals({ ctx }) {
         const btnLabel=isDisc?(editDiscType==='flat'?(hasVal?`Apply −$${numpadDisplay(editPrice,settings.numpad_mode)}`:'Apply'):(hasVal?`Apply −${editPrice}%`:'Apply')):(hasVal?`Set Price $${numpadDisplay(editPrice,settings.numpad_mode)}`:'Set Price');
         return(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={cancelEdit}>
+        <AreaTag id="CO-MODAL" />
           <div style={{background:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:12,width:340,boxShadow:'0 20px 60px rgba(0,0,0,0.5)'}} onClick={e=>e.stopPropagation()}>
             <div style={{padding:'12px 20px',borderBottom:`1px solid ${C.borderLight}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <div style={{color:C.textPrimary,fontSize:14,fontWeight:600,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{editItem?.name||''}</div>

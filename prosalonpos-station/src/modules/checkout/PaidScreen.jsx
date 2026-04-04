@@ -15,6 +15,7 @@ import { getNextSlipNumber } from '../../lib/techSlipCounter';
 import { useState, useEffect } from 'react';
 import { CHECKOUT_SETTINGS } from './checkoutBridge';
 import { fmt, fp } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 export default function PaidScreen({ totalCents, clientName, client, payments, changeDue, onCloseTicket, salonSettings, ticket }){
   var C = useTheme();
@@ -227,7 +228,8 @@ export default function PaidScreen({ totalCents, clientName, client, payments, c
 
         {/* Inline input area — shows when email or text is selected */}
         {receiptChoice === 'email' && (
-          <div style={{marginBottom:16}}>
+          <div style={{position:'relative',marginBottom:16}}>
+        <AreaTag id="PAID" />
             <div style={{color:C.textPrimary,fontSize:12,marginBottom:8}}>Confirm email with client</div>
             <div style={{display:'flex',gap:8,maxWidth:360,margin:'0 auto'}}>
               <input value={emailInput} onChange={e=>setEmailInput(e.target.value)} placeholder="client@email.com" type="email"

@@ -6,6 +6,7 @@ var _MOCK_TIP_PRESETS = [18, 20, 25];
 var _MOCK_RECEIPT_OPTIONS = { email: true, text: true, print: true };
 import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { isProduction, getPairedSalonName } from '../../lib/apiClient';
+import AreaTag from '../../components/ui/AreaTag';
 
 /**
  * Customer-Facing Display — Micro-frontend #2
@@ -483,7 +484,8 @@ function ThanksScreen({ receiptChoice, onReset }) {
   };
 
   return (
-    <div style={{ textAlign: 'center' }}>
+    <div style={{position:'relative', textAlign: 'center' }}>
+        <AreaTag id="CUSTDISP" />
       <div style={{ width: 100, height: 100, borderRadius: '50%', background: S.successBg, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', border: '3px solid ' + S.success }}>
         <span style={{ fontSize: 48 }}>✓</span>
       </div>

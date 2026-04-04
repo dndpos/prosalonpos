@@ -29,3 +29,32 @@ html, body, #root {
 ::selection { background: var(--color-accent); color: white; }
 
 button:focus, button:focus-visible { outline: none; box-shadow: none; }
+
+/* Date picker inputs — bigger calendar popup */
+input[type="date"] {
+  font-size: 15px !important;
+  cursor: pointer;
+  min-width: 160px;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  font-size: 20px;
+  padding: 6px;
+  filter: invert(0.7);
+  opacity: 1;
+}
+input[type="date"]::-webkit-datetime-edit {
+  font-size: 15px;
+  padding: 4px 6px;
+  letter-spacing: 0.02em;
+}
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+  padding: 2px 4px;
+}
+/* Chrome date picker popup styling */
+::-webkit-calendar-picker {
+  font-size: 16px;
+  border: 2px solid #4A5568;
+  border-radius: 8px;
+  padding: 8px;
+}

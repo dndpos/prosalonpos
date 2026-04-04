@@ -14,11 +14,14 @@ import useBarcodeScanner from './useBarcodeScanner';
 import { relayPrint } from '../../lib/printRelay';
 import { CHECKOUT_SETTINGS, CHECKOUT_STAFF, MOCK_RETAIL } from './checkoutBridge';
 import { MOCK_GIFT_CARDS } from '../gift-cards/giftCardBridge';
-import { findRedeemablePackageItems, MOCK_CLIENT_PACKAGES, MOCK_CLIENT_PACKAGE_ITEMS } from '../packages/packageBridge';
+import { MOCK_CLIENT_PACKAGE_ITEMS } from '../packages/packageBridge';
+import usePackageRedemption from './usePackageRedemption';
+import useMembershipPerks from './useMembershipPerks';
 import { useClientStore } from '../../lib/stores/clientStore';
 import { useServiceStore } from '../../lib/stores/serviceStore';
 import { useStaffStore } from '../../lib/stores/staffStore';
 import { useSettingsStore } from '../../lib/stores/settingsStore';
+import { useMembershipStore } from '../../lib/stores/membershipStore';
 import { fmt, fp, numpadDisplay, numpadTap, numpadToCents, numpadToFloat, numpadKeys, roundToNickel, cashQuickAmounts } from './checkoutHelpers';
 import { useRBAC } from '../../lib/RBACContext';
 import { ACTIONS } from '../../lib/rbac';
@@ -32,8 +35,8 @@ const TICKET_W = 300;
 export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket, openTickets, onCombineTicket, nextTicketNumber, catalogLayout, drawerSession, salonSettings, onCashPayment, canProcessPayments, onPrintHold }){
   var C = useTheme();
   var rbac = useRBAC();
-  var MOCK_CLIENTS = useClientStore(function(s) { return s.clients; });
-  var MOCK_SERVICES = useServiceStore(function(s) { return s.services; });
+  var storeClients = useClientStore(function(s) { return s.clients; });
+  var storeServices = useServiceStore(function(s) { return s.services; });
   var canPay = canProcessPayments !== false; // default true
   const [depositCents, setDepositCents] = useState(appointmentData?.depositCents || 0);
   const hasCashier = !!appointmentData?.cashierStaff;
@@ -64,38 +67,32 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
   const [discountValue, setDiscountValue] = useState('');
   const [showTipForm, setShowTipForm] = useState(false);
   const [tipInput, setTipInput] = useState('');
-  // Client lookup
   const [showClientLookup, setShowClientLookup] = useState(false);
-  // Price editing / per-item discount (numpad popup)
   const [editingId, setEditingId] = useState(null);
   const [editPrice, setEditPrice] = useState('');
   const [editMode, setEditMode] = useState('price'); // price | discount
   const [editDiscType, setEditDiscType] = useState('flat'); // flat | pct
   const [itemDiscounts, setItemDiscounts] = useState(appointmentData?.originalTicket?.itemDiscounts || {});
-  // Remove confirmation
   const [confirmRemove, setConfirmRemove] = useState(null); // {id, name}
-  // Tip distribution (multi-tech)
   const [tipDistributions, setTipDistributions] = useState(appointmentData?.originalTicket?.tipDistributions || null);
   const [showTipDist, setShowTipDist] = useState(false);
   const [pendingClose, setPendingClose] = useState(null); // {receiptMethod} — waiting for tip dist
   const [tipAutoRemoved, setTipAutoRemoved] = useState(false); // cash/zelle single-pay tip removal
-  // Package redemption tracking: { [itemId]: { cpkgId, cpiId, pkgName, pkgServiceName, originalPrice, upgradeDiff } }
-  const [packageRedemptions, setPackageRedemptions] = useState({});
-  // Track session deductions per client package item (to prevent double-use in same checkout)
-  const [pkgSessionsUsed, setPkgSessionsUsed] = useState({}); // { [cpiId]: count }
-  // Payment numpad
-  const [payMethod, setPayMethod] = useState(null); // 'cash'|'credit'|'giftcard'|'zelle'
+  var pkgHook = usePackageRedemption(items, serviceOverrides, setServiceOverrides, storeClients, storeServices);
+  var packageRedemptions = pkgHook.packageRedemptions;
+  var pkgSessionsUsed = pkgHook.pkgSessionsUsed;
+  // ── TD-112: Auto-apply membership perks (percentage discount, free service, service credit) ──
+  useMembershipPerks(items, clientMembership, membershipBanner, storeServices, itemDiscounts, setItemDiscounts);
+  const [payMethod, setPayMethod] = useState(null);
   const [payInput, setPayInput] = useState('');
-  const [payments, setPayments] = useState([]); // [{method, amount_cents}]
-  // Gift card lookup
-  const [gcLookup, setGcLookup] = useState(null); // null | 'input' | {card, balance}
+  const [payments, setPayments] = useState([]);
+  const [gcLookup, setGcLookup] = useState(null);
   const [gcCodeInput, setGcCodeInput] = useState('');
   const [gcError, setGcError] = useState(false);
   const gcLookupRef = useRef(null);
   useEffect(function(){ gcLookupRef.current = gcLookup; }, [gcLookup]);
   const settings = CHECKOUT_SETTINGS;
   var vipCfg = useSettingsStore(function(s) { return { enabled: s.settings.vip_enabled !== false, type: s.settings.vip_discount_type || 'percent', amount: s.settings.vip_discount_amount || 0 }; });
-  // Auto-apply VIP discount when client is VIP and VIP is enabled
   useEffect(function() {
     if (!client || !client.is_vip || !vipCfg.enabled || vipCfg.amount <= 0) return;
     // Check if VIP discount already exists (prevent double-add on re-render)
@@ -106,6 +103,37 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
       : { id: 'vip-' + Date.now(), type: 'flat_total', value: vipCfg.amount, label: 'VIP Discount', desc: '👑 VIP Discount ($' + (vipCfg.amount / 100).toFixed(2) + ' off)' };
     setDiscounts(function(prev) { return prev.concat([vipDisc]); });
   }, [client?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Membership: check overdue on client load, renew or cancel at checkout ──
+  var _memStore = useMembershipStore(function(s) { return { fetch: s.fetchClientMembership, enroll: s.enrollMember, renew: s.renewMember, update: s.updateMember }; });
+  var [clientMembership, setClientMembership] = useState(null);
+  var [membershipBanner, setMembershipBanner] = useState(null);
+  useEffect(function() {
+    setClientMembership(null); setMembershipBanner(null);
+    if (!client || !client.id) return;
+    _memStore.fetch(client.id).then(function(mem) {
+      if (!mem || !mem.plan) return;
+      setClientMembership(mem);
+      if (!mem.next_billing) return;
+      var now = new Date(); now.setHours(0,0,0,0);
+      var due = new Date(mem.next_billing); due.setHours(0,0,0,0);
+      if (due > now) return;
+      var cd = mem.plan.billing_cycle_days || 30;
+      var missed = Math.max(1, Math.ceil((now.getTime() - due.getTime()) / 86400000 / cd) + 1);
+      setMembershipBanner({ cycles: missed, totalOwed: missed * mem.plan.price_cents, plan: mem.plan, membershipId: mem.id });
+    });
+  }, [client?.id]);
+  function handleMembershipRenew() {
+    if (!membershipBanner) return;
+    var b = membershipBanner;
+    setItems(function(prev) { return prev.concat([{ id:'mem-renew-'+Date.now(), type:'membership_sale', name:'🎫 '+b.plan.name+' ('+b.cycles+' cycle'+(b.cycles>1?'s':'')+')', price_cents:b.totalOwed, techId:activeTechId, tech:CHECKOUT_STAFF.find(function(s){return s.id===activeTechId;})?.display_name||null, planId:b.plan.id, membershipId:b.membershipId, isRenewal:true, color:'#EC4899' }]); });
+    setMembershipBanner(null);
+  }
+  function handleMembershipCancel() {
+    if (!membershipBanner) return;
+    rbac.requirePermission(ACTIONS.MANAGE_STAFF, function() {
+      _memStore.update(membershipBanner.membershipId, { status:'cancelled' }).then(function() { setMembershipBanner(null); setClientMembership(null); });
+    });
+  }
   var cashBlocked = !!(salonSettings && salonSettings.cashier_enabled && (!drawerSession || drawerSession.status !== 'open'));
   const outstandingCents = client?.outstanding_balance_cents || 0;
   function getPrice(it){ return serviceOverrides[it.id] ?? it.price_cents; }
@@ -115,12 +143,12 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     return d.type==='flat'?Math.min(d.value,base):Math.round(base*d.value/100);
   }
   const canAdjust = settings.price_adjust_permission !== 'disabled';
-  // ── Calculations ──
   const serviceTotal = items.filter(i=>i.type==='service').reduce((s,it)=>s+getPrice(it),0);
   const retailTotal = items.filter(i=>i.type==='retail').reduce((s,it)=>s+(getPrice(it)*(it.qty||1)),0);
   const gcTotal = items.filter(i=>i.type==='giftcard').reduce((s,it)=>s+it.price_cents,0);
-  const pkgSaleTotal = items.filter(i=>i.type==='package_sale').reduce((s,it)=>s+it.price_cents,0);
-  const subtotalBefore = serviceTotal + retailTotal + gcTotal + pkgSaleTotal;
+  const pkgSaleTotal = items.filter(i=>i.type==='package_sale').reduce((s,it)=>s+getPrice(it),0);
+  const memSaleTotal = items.filter(i=>i.type==='membership_sale').reduce((s,it)=>s+getPrice(it),0);
+  const subtotalBefore = serviceTotal + retailTotal + gcTotal + pkgSaleTotal + memSaleTotal;
   const itemDiscTotal = items.reduce((s,it)=>s+getItemDiscAmt(it),0);
   const discountTotal = useMemo(()=>{
     let t=0;
@@ -157,7 +185,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     });
     return Object.values(groups);
   },[items]);
-  // ── Handlers ──
   function handleAddItem(item){
     if(item.type==='retail'){
       setItems(prev=>{
@@ -193,66 +220,20 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
       color:'#8B5CF6',
     }]);
   }
-  // ── Package Redemption ──
-  function applyPackageToItem(itemId, match) {
-    var item = items.find(function(i){ return i.id === itemId; });
-    if (!item) return;
-    // Save original price and set override to upgrade difference (0 for exact match)
-    var upgradeDiff = match.upgradeDifferenceCents || 0;
-    setServiceOverrides(function(prev){ return { ...prev, [itemId]: upgradeDiff }; });
-    setPackageRedemptions(function(prev){
-      return { ...prev, [itemId]: {
-        cpkgId: match.clientPackage.id,
-        cpiId: match.clientPackageItem.id,
-        pkgName: match.clientPackage.package_name,
-        pkgServiceName: match.clientPackageItem.service_name,
-        originalPrice: item.price_cents,
-        upgradeDiff: upgradeDiff,
-        isExact: match.isExactMatch,
-      }};
-    });
-    // Track session used
-    setPkgSessionsUsed(function(prev){
-      var key = match.clientPackageItem.id;
-      return { ...prev, [key]: (prev[key] || 0) + 1 };
-    });
+  function handleSellMembership(plan){
+    setItems(prev=>[...prev,{
+      id:'mem-sale-'+Date.now(),type:'membership_sale',
+      name:'🎫 ' + plan.name,
+      price_cents:plan.price_cents,
+      techId:activeTechId,
+      tech:CHECKOUT_STAFF.find(function(s){return s.id===activeTechId;})?.display_name||null,
+      planId:plan.id,
+      color:'#EC4899',
+    }]);
   }
-  function removePackageFromItem(itemId) {
-    var redemption = packageRedemptions[itemId];
-    if (!redemption) return;
-    // Restore original price
-    setServiceOverrides(function(prev){ var n = { ...prev }; delete n[itemId]; return n; });
-    setPackageRedemptions(function(prev){ var n = { ...prev }; delete n[itemId]; return n; });
-    // Release session
-    setPkgSessionsUsed(function(prev){
-      var key = redemption.cpiId;
-      var n = { ...prev };
-      n[key] = Math.max(0, (n[key] || 0) - 1);
-      if (n[key] === 0) delete n[key];
-      return n;
-    });
-  }
-  // Find redeemable packages for a service item (considering already-used sessions in this checkout)
-  function getRedeemableForItem(item) {
-    if (!client || item.type !== 'service') return [];
-    var svcId = item.serviceCatalogId || null;
-    if (!svcId) return [];
-    // Resolve client ID — direct id or phone lookup
-    var clientId = client.id;
-    if (!clientId || !clientId.startsWith('cli-')) {
-      var ph = (client.phone || '').replace(/\D/g, '');
-      if (ph) {
-        var mc = MOCK_CLIENTS.find(function(c) { return (c.phone || '').replace(/\D/g, '') === ph; });
-        if (mc) clientId = mc.id;
-      }
-    }
-    if (!clientId) return [];
-    var matches = findRedeemablePackageItems(clientId, svcId, MOCK_SERVICES, []);
-    return matches.filter(function(m) {
-      var usedInCheckout = pkgSessionsUsed[m.clientPackageItem.id] || 0;
-      return (m.clientPackageItem.remaining - usedInCheckout) > 0;
-    });
-  }
+  var applyPackageToItem = pkgHook.applyPackageToItem;
+  var removePackageFromItem = pkgHook.removePackageFromItem;
+  function getRedeemableForItem(item) { return pkgHook.getRedeemableForItem(item, client); }
   function removeItem(id){ if(packageRedemptions[id]) removePackageFromItem(id); setItems(prev=>prev.filter(i=>i.id!==id)); setConfirmRemove(null); }
   function handleAddTech(tech){ setActiveTechId(tech.id); }
   function handleClientSelect(c){ setClient(c); setShowClientLookup(false); }
@@ -356,7 +337,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     // If no client yet, use the combined ticket's client
     if(!client && ticket.client) setClient(ticket.client);
   }
-  // ── Sub-flows ──
   const clientName = client ? `${client.first_name} ${client.last_name}` : null;
   const isMultiTech = techs.length > 1;
   // Build ticket snapshot and close
@@ -397,7 +377,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     setItems, setClient, setDepositCents, setPayments, setGcLookup, setGcCodeInput, setGcError,
     onCombineTicket: handleCombine,
   });
-  // ── Local SHA-256 PIN helper (instant, no network) ──
   async function sha256(str) {
     var buf = new TextEncoder().encode(str);
     var hash = await crypto.subtle.digest('SHA-256', buf);
@@ -503,8 +482,20 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
             <button onClick={()=>setShowClientLookup(true)} style={{width:'100%',height:34,background:C.blueTint,border:`1px dashed ${C.blue}`,borderRadius:6,color:C.blueLight,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>+ Add Client</button>
           )}
         </div>
+        {/* Membership Renewal Banner */}
+        {membershipBanner && (
+          <div style={{margin:'0 8px 4px',padding:'10px 12px',borderRadius:6,background:'rgba(236,72,153,0.12)',border:'1px solid rgba(236,72,153,0.3)'}}>
+            <div style={{fontSize:12,fontWeight:600,color:'#F9A8D4',marginBottom:4}}>🎫 Membership Renewal Due</div>
+            <div style={{fontSize:11,color:C.textSecondary,marginBottom:6}}>{client?.first_name||client?.name||'Client'} owes {membershipBanner.cycles} cycle{membershipBanner.cycles>1?'s':''} of {membershipBanner.plan.name} — {fmt(membershipBanner.totalOwed)}</div>
+            <div style={{display:'flex',gap:6}}>
+              <div onClick={handleMembershipRenew} style={{flex:1,padding:'7px 0',borderRadius:5,background:'#EC4899',color:'#fff',fontSize:12,fontWeight:600,textAlign:'center',cursor:'pointer'}}>Renew {fmt(membershipBanner.totalOwed)}</div>
+              <div onClick={handleMembershipCancel} style={{padding:'7px 12px',borderRadius:5,border:'1px solid #EF4444',color:'#EF4444',fontSize:12,fontWeight:600,textAlign:'center',cursor:'pointer'}}>Cancel</div>
+            </div>
+          </div>
+        )}
         {/* Items */}
-        <div style={{flex:1,overflow:'auto',padding:'6px 8px'}}>
+        <div style={{flex:1,overflow:'auto',padding:'6px 8px',position:'relative'}}>
+          <AreaTag id="CO-ITEMS" pos="tr" />
           {!hasItems&&(
             <div style={{padding:'30px 8px',textAlign:'center'}}>
               <div style={{color:C.textMuted,fontSize:28,marginBottom:6}}>🧾</div>
@@ -563,11 +554,11 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
                         <span style={{color:'#8B5CF6',fontSize:10,fontWeight:500}}>{pkgRed.isExact?'Package':'Package upgrade'} — {pkgRed.pkgName} ({(function(){var cpi=MOCK_CLIENT_PACKAGE_ITEMS.find(function(c){return c.id===pkgRed.cpiId;});return cpi?(cpi.remaining-(pkgSessionsUsed[cpi.id]||0))+'/'+cpi.total_quantity:'';})()})</span>
                         <button onClick={function(){removePackageFromItem(it.id);}} style={{color:C.danger,background:'none',border:'none',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>×</button>
                       </div>}
-                      {iDisc&&<div style={{display:'flex',justifyContent:'space-between',padding:'2px 6px 4px',background:'rgba(5,150,105,0.08)',borderRadius:'0 0 4px 4px',marginBottom:2}}>
-                        <span style={{color:C.success,fontSize:10}}>{iDisc.desc}</span>
+                      {iDisc&&<div style={{display:'flex',justifyContent:'space-between',padding:'2px 6px 4px',background:iDisc.membership?'rgba(236,72,153,0.08)':'rgba(5,150,105,0.08)',borderRadius:'0 0 4px 4px',marginBottom:2}}>
+                        <span style={{color:iDisc.membership?'#F9A8D4':C.success,fontSize:10}}>{iDisc.desc}</span>
                         <div style={{display:'flex',alignItems:'center',gap:4}}>
-                          <span style={{color:C.success,fontSize:10,fontWeight:500}}>−{fmt(iDiscAmt)}</span>
-                          <button onClick={()=>setItemDiscounts(prev=>{const n={...prev};delete n[it.id];return n;})} style={{color:C.danger,background:'none',border:'none',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>×</button>
+                          <span style={{color:iDisc.membership?'#F9A8D4':C.success,fontSize:10,fontWeight:500}}>−{fmt(iDiscAmt)}</span>
+                          {!iDisc.membership&&<button onClick={()=>setItemDiscounts(prev=>{const n={...prev};delete n[it.id];return n;})} style={{color:C.danger,background:'none',border:'none',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>×</button>}
                         </div>
                       </div>}
                     </div>
@@ -595,7 +586,8 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
             );})}
         </div>
         {/* Totals + actions + payment — always visible */}
-          <div style={{borderTop:`1px solid ${C.borderLight}`,flexShrink:0}}>
+          <div style={{borderTop:`1px solid ${C.borderLight}`,flexShrink:0,position:'relative'}}>
+            <AreaTag id="CO-TOTALS" pos="tr" />
             <div style={{padding:'6px 10px'}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.textMuted,fontSize:11}}>Subtotal</span><span style={{color:C.textPrimary,fontSize:11}}>{fmt(subtotalBefore)}</span></div>
               {itemDiscTotal>0&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.success,fontSize:11}}>Item discounts</span><span style={{color:C.success,fontSize:11}}>−{fmt(itemDiscTotal)}</span></div>}
@@ -648,7 +640,8 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
             )}
             {/* Payment buttons — only if station can process payments */}
             {canPay && (
-            <div style={{padding:'6px 8px',borderTop:`1px solid ${C.borderLight}`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:4}}>
+            <div style={{padding:'6px 8px',borderTop:`1px solid ${C.borderLight}`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:4,position:'relative'}}>
+              <AreaTag id="CO-PAY" pos="tr" />
               {[{id:'cash',label:'💵 Cash'},{id:'credit',label:'💳 Credit'},{id:'giftcard',label:'🎁 Gift Card'},{id:'zelle',label:'⚡ Zelle'}].map(m=>{
                 var disabled=remaining<=0||!hasItems||hasUnpricedOpen;
                 var isCashDisabled = m.id==='cash' && cashBlocked;
@@ -739,7 +732,7 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
       {/* ═══ RIGHT: SELECTOR ═══ */}
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
         <AreaTag id="CO-TABS" pos="tr" />
-        <CheckoutTabs activeTechId={activeTechId} onAddItem={handleAddItem} onAddTech={handleAddTech} onSellGiftCard={handleAddGiftCard} onSellPackage={handleSellPackage} client={client} openTickets={openTickets} onCombineTicket={handleCombine} catalogLayout={catalogLayout} salonSettings={salonSettings}/>
+        <CheckoutTabs activeTechId={activeTechId} onAddItem={handleAddItem} onAddTech={handleAddTech} onSellGiftCard={handleAddGiftCard} onSellPackage={handleSellPackage} onSellMembership={handleSellMembership} client={client} openTickets={openTickets} onCombineTicket={handleCombine} catalogLayout={catalogLayout} salonSettings={salonSettings}/>
       </div>
       <CheckoutModals ctx={{
         gcLookup, setGcLookup, gcCodeInput, setGcCodeInput, gcError, setGcError,

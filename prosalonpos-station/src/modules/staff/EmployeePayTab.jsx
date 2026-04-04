@@ -3,6 +3,7 @@
  */
 import { useTheme } from '../../lib/ThemeContext';
 import { FEATURES, isFeatureEnabled } from '../../lib/features';
+import AreaTag from '../../components/ui/AreaTag';
 
 // ── Reusable inline numpad component ──
 function InlineNumpad({ isOpen, onToggle, label, value, displayValue, suffix, prefix, onKey, T, padId, showPayNumpad, isCashRegister }) {
@@ -311,6 +312,7 @@ export default function EmployeePayTab({ ctx }) {
                               style={{ height: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', background: isDanger ? '#7F1D1D' : (isWarn ? '#78350F' : T.chrome), border: '1px solid ' + T.border, borderRadius: 6, color: isDanger ? '#FCA5A5' : (isWarn ? '#FCD34D' : T.text), fontSize: 16, fontWeight: 500, cursor: 'pointer', userSelect: 'none' }}
                               onMouseEnter={function(e) { e.currentTarget.style.background = isDanger ? '#991B1B' : (isWarn ? '#92400E' : T.gridHover); }}
                               onMouseLeave={function(e) { e.currentTarget.style.background = isDanger ? '#7F1D1D' : (isWarn ? '#78350F' : T.chrome); }}>
+        <AreaTag id="EMP-PAY" />
                               {key}
                             </div>
                           );

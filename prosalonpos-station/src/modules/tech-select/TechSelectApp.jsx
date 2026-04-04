@@ -28,6 +28,7 @@ import { useState } from 'react';
  */
 
 import { useStaffStore } from '../../lib/stores/staffStore';
+import AreaTag from '../../components/ui/AreaTag';
 
 var AVATAR_COLORS = ['#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#EF4444', '#06B6D4', '#84CC16'];
 
@@ -265,7 +266,8 @@ export default function TechSelectApp({ onTechSelected, onExit, stationMode, can
                 <div style={{ marginTop: 14, textAlign: 'left', background: T.card, borderRadius: 10, padding: '12px 16px', border: '1px solid ' + T.border }}>
                   {appt.services.map(function(svc, i) {
                     return (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < appt.services.length - 1 ? '1px solid ' + T.border : 'none' }}>
+                      <div key={i} style={{position:'relative', display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < appt.services.length - 1 ? '1px solid ' + T.border : 'none' }}>
+        <AreaTag id="TECHSEL" />
                         <span style={{ fontSize: 13, color: T.text }}>{svc.name}</span>
                         <span style={{ fontSize: 13, color: T.textSoft || T.textMuted, fontWeight: 500 }}>${(svc.price_cents / 100).toFixed(2)}</span>
                       </div>

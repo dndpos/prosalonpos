@@ -19,6 +19,7 @@ import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 import { CHECKOUT_STAFF, CHECKOUT_SETTINGS } from './checkoutBridge';
 import { fmt } from '../../lib/formatUtils';
 import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
+import AreaTag from '../../components/ui/AreaTag';
 
 
 function Av({name,size=36,index=0,photo=null}){
@@ -147,7 +148,8 @@ export default function TipDistribution({ tipAmount, items, defaultMode, initial
   }
 
   return(
-    <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif"}}>
+    <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif",position:'relative'}}>
+      <AreaTag id="CO-TIPDIST" />
       <div style={{width:420,maxHeight:'85vh',display:'flex',flexDirection:'column'}}>
 
         {/* Header */}
@@ -179,6 +181,7 @@ export default function TipDistribution({ tipAmount, items, defaultMode, initial
             const staff = CHECKOUT_STAFF.find(s=>s.id===d.techId);
             return(
               <div key={d.techId} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 12px',background:C.chromeDark,border:`1px solid ${C.borderLight}`,borderRadius:8,marginBottom:6}}>
+
                 <Av name={d.techName} size={40} index={i} photo={staff?.photo_url}/>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{color:C.textPrimary,fontSize:14,fontWeight:600}}>{d.techName}</div>

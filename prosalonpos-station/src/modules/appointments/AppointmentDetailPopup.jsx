@@ -17,6 +17,7 @@ import { useTheme } from '../../lib/ThemeContext';
  */
 import { useState } from 'react';
 import { useClientStore } from '../../lib/stores/clientStore';
+import AreaTag from '../../components/ui/AreaTag';
 
 export const STATUS_CONFIG={
   pending:     {label:'Pending Confirmation', bg:'rgba(245,158,11,0.15)', color:'#FBBF24',  dot:'#F59E0B'},
@@ -567,7 +568,8 @@ export default function AppointmentDetailPopup({sl, allServiceLines, staff, onCl
   // ── Main detail popup ──
   return(
     <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(0,0,0,0.55)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={onClose}>
-      <div style={{backgroundColor:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:14,width:460,maxHeight:'85vh',overflow:'hidden',boxShadow:'0 24px 80px rgba(0,0,0,0.6)',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
+      <div style={{backgroundColor:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:14,width:460,maxHeight:'85vh',overflow:'hidden',boxShadow:'0 24px 80px rgba(0,0,0,0.6)',display:'flex',flexDirection:'column',position:'relative'}} onClick={e=>e.stopPropagation()}>
+        <AreaTag id="APPTDET" />
 
         {/* Header with color accent bar */}
         <div style={{position:'relative',overflow:'hidden'}}>

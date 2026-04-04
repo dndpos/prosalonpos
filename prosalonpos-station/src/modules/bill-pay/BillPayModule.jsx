@@ -4,6 +4,7 @@ import { useSettingsStore } from '../../lib/stores/settingsStore';
 import PayeeDetailPopup from './PayeeDetailPopup';
 import { printBillChecks, printAllSummary } from './billPayPrintUtils';
 import { fmt } from '../../lib/formatUtils';
+import AreaTag from '../../components/ui/AreaTag';
 
 /**
  * BillPayModule — Owner Dashboard section
@@ -657,7 +658,8 @@ export default function BillPayModule({ initTab, onInitTabConsumed }) {
   // MAIN RENDER
   // ═══════════════════════════════════════
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '20px 24px' }}>
+    <div style={{position:'relative', height: '100%', display: 'flex', flexDirection: 'column', padding: '20px 24px' }}>
+        <AreaTag id="BILLPAY" />
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         <div onClick={function() { setTab('write'); }} style={tabStyle('write')}>Write Checks</div>

@@ -10,6 +10,7 @@ import BookingFlowModals from './BookingFlowModals';
 import BookingTicketPanel from './BookingTicketPanel';
 import NewClientForm from './NewClientForm';
 import ClientNameScreen from './ClientNameScreen';
+import AreaTag from '../../components/ui/AreaTag';
 function ft(h,m){return`${h>12?h-12:h===0?12:h}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`;}
 function autoCap(v){return v.replace(/(^|\s)\S/g,c=>c.toUpperCase());}
 const F='Inter,system-ui,sans-serif';
@@ -594,7 +595,8 @@ export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initial
             <div style={{display:'flex',gap:8}}>
               {[15,30,45,60].map(mins=>{const isSelected=(activeTechEntry?.extraTime||0)===mins;return(
                 <button key={mins} onClick={()=>setExtraTimeForActiveTech(mins)} style={{flex:1,height:52,background:isSelected?C.blueTint:'transparent',border:isSelected?`2px solid ${C.blue}`:`2px solid ${C.borderMedium}`,borderRadius:8,color:C.textPrimary,fontSize:16,fontWeight:600,cursor:'pointer',fontFamily:F}}
-                  onMouseEnter={e=>{if(!isSelected)e.currentTarget.style.background=C.gridHover;}} onMouseLeave={e=>{if(!isSelected)e.currentTarget.style.background=isSelected?C.blueTint:'transparent';}}>+{mins}<div style={{fontSize:10,fontWeight:400,color:C.textPrimary,marginTop:2}}>min</div></button>);})}
+                  onMouseEnter={e=>{if(!isSelected)e.currentTarget.style.background=C.gridHover;}} onMouseLeave={e=>{if(!isSelected)e.currentTarget.style.background=isSelected?C.blueTint:'transparent';}}>+{mins}<div style={{position:'relative',fontSize:10,fontWeight:400,color:C.textPrimary,marginTop:2}}>
+        <AreaTag id="BOOK" />min</div></button>);})}
             </div>
             <button onClick={()=>setShowTimePopup(false)} style={{width:'100%',marginTop:12,height:36,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:F}}>Close</button>
           </div>

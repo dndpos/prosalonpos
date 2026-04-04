@@ -7,7 +7,7 @@ import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { useServiceStore } from '../../lib/stores/serviceStore';
 import { useTicketStore } from '../../lib/stores/ticketStore';
 import { usePayrollStore } from '../../lib/stores/payrollStore';
-import { calculateCommission, calculateSimpleCommission } from '../../lib/commissionEngine';
+import { calculatePaycheck } from './payrollCalculator';
 import { amountToWords, formatCheckDate, printChecks, printTickets } from '../../lib/checkUtils';
 import { FEATURES, isFeatureEnabled } from '../../lib/features';
 import DateRangePicker from './PayrollDatePicker';
@@ -17,24 +17,6 @@ import PayPeriodPopup from './PayPeriodPopup';
 import TimeClockTimesheets from '../time-clock/TimeClockTimesheets';
 import { fmt } from '../../lib/formatUtils';
 import { reshapeTicketForPayroll, calculateHoursFromPunches, calculateTipsFromTickets, reshapePayrollHistory, getCurrentPayPeriod } from './payrollDataHelpers';
-
-/**
- * Payroll Module — Module 11
- *
- * Commission calculation uses the full rules engine (Session 14 + Session 27):
- *   - Resolution priority: per-tech per-item > per-tech per-category > per-tech flat >
- *     location per-item > location per-category > location flat.
- *   - Tiered revenue thresholds replace flat rate when enabled.
- *   - Retail commission only when retail_commission_enabled is ON (default OFF).
- *   - Falls back to legacy staff.commission_pct when no rules are configured.
- *
- * Three pay types:
- *   Commission — earns commission via rules engine. Daily guarantee compares, tech gets higher.
- *   Hourly — hourly_rate × hours. If commission_bonus_enabled, also earns commission on top (stacked).
- *   Salary — flat salary. If commission_bonus_enabled, also earns commission on top (stacked).
- *
- * Check/bonus split is purely reporting — labels on total earnings, doesn't change what they earn.
- */
 
 
 function fmtShort(cents) { return '$' + Math.round(cents / 100).toLocaleString(); }
@@ -58,200 +40,26 @@ function payTypeDisplay(staff) {
   return base;
 }
 
-// ═══════════════════════════════════════════
-// PAYCHECK CALCULATION — from staff profile
-// ═══════════════════════════════════════════
-function calculatePaycheck(staff, tickets, hours, cardTips, MOCK_SALON_SETTINGS, MOCK_COMMISSION_RULES, MOCK_COMMISSION_TIERS, MOCK_SERVICES) {
-  // Get this tech's tickets (exclude voided)
-  var techTickets = tickets.filter(function(t) { return t.staff_id === staff.id && !t.voided; });
-
-  // Gross sales = sum of all service prices
-  var grossSales = 0;
-  techTickets.forEach(function(t) {
-    (t.services || []).forEach(function(s) { grossSales += s.price_cents; });
-  });
-
-  // Days worked (unique dates with tickets)
-  var workedDates = {};
-  techTickets.forEach(function(t) { if (t.date) workedDates[t.date] = true; });
-  var daysWorked = Object.keys(workedDates).length;
-
-  // ── Calculate earnings by type ──
-  var hourlyEarnings = 0;
-  var salaryEarnings = 0;
-  var serviceCommission = 0;
-  var productCommission = 0;
-  var guaranteeApplied = false;
-  var guaranteeAmount = 0;
-
-  // Build service lines for commission engine
-  // Session 75: product cost deducted BEFORE commission calculation.
-  // Session 30: discount_reduces_commission toggle controls which price goes to commission.
-  // OFF (default): commission on full price_cents (discount ignored).
-  // ON: commission on (price_cents - discount_cents).
-  var discountReduces = !!MOCK_SALON_SETTINGS.discount_reduces_commission;
-  var totalDiscounts = 0;
-
-  // ── Product cost deductions (calculated first, before commission) ──
-  // Look up product_cost_cents from service catalog by name match.
-  // Session 75: deducted from service price BEFORE commission is calculated.
-  var productDeductions = 0;
-  techTickets.forEach(function(t) {
-    (t.services || []).forEach(function(s) {
-      var catalogEntry = MOCK_SERVICES.find(function(cs) { return cs.name === s.name; });
-      if (catalogEntry && catalogEntry.product_cost_cents > 0) {
-        productDeductions += catalogEntry.product_cost_cents;
-      }
-    });
-  });
-
-  var serviceLines = [];
-  techTickets.forEach(function(t) {
-    (t.services || []).forEach(function(s) {
-      var disc = s.discount_cents || 0;
-      totalDiscounts += disc;
-      var catalogEntry = MOCK_SERVICES.find(function(cs) { return cs.name === s.name; });
-      var prodCost = (catalogEntry && catalogEntry.product_cost_cents > 0) ? catalogEntry.product_cost_cents : 0;
-      var commissionablePrice = discountReduces ? (s.price_cents - disc) : s.price_cents;
-      commissionablePrice = commissionablePrice - prodCost;
-      if (commissionablePrice < 0) commissionablePrice = 0;
-      serviceLines.push({
-        service_catalog_id: s.service_catalog_id || s.id,
-        price_cents: commissionablePrice,
-        category_ids: s.category_ids,
-      });
-    });
-  });
-
-  // Build product sales for retail commission
-  var productSales = [];
-  techTickets.forEach(function(t) {
-    (t.products || []).forEach(function(p) {
-      productSales.push({
-        product_id: p.product_id || p.id,
-        price_cents: p.price_cents,
-        category_ids: p.category_ids || [],
-      });
-    });
-  });
-
-  // Use commission rules engine if rules exist, otherwise fall back to legacy flat rate
-  var useEngine = MOCK_COMMISSION_RULES.length > 0 && MOCK_SALON_SETTINGS.commission_enabled;
-
-  // Helper: run commission engine or fallback — returns { service, product } split
-  function getCommissionSplit() {
-    if (useEngine) {
-      var result = calculateCommission({
-        staff: staff, serviceLines: serviceLines, productSales: productSales,
-        rules: MOCK_COMMISSION_RULES, tiers: MOCK_COMMISSION_TIERS,
-        settings: MOCK_SALON_SETTINGS, services: MOCK_SERVICES,
-      });
-      return { service: result.service_commission, product: result.retail_commission };
-    }
-    return { service: calculateSimpleCommission(grossSales, staff.commission_pct), product: 0 };
-  }
-
-  // Retail product commission — simple flat % from salon settings (Session 30)
-  // This is separate from the rules engine retail commission.
-  // retail_commission_pct: 0 = techs earn nothing, 10 = techs get 10% of retail sold.
-  var retailCommPct = MOCK_SALON_SETTINGS.retail_commission_pct || 0;
-  var totalRetailSales = 0;
-  productSales.forEach(function(p) { totalRetailSales += p.price_cents; });
-
-  if (staff.pay_type === 'commission') {
-    var split = getCommissionSplit();
-    serviceCommission = split.service;
-    // Use simple retail_commission_pct for product commission (Session 30)
-    productCommission = retailCommPct > 0 ? Math.round(totalRetailSales * retailCommPct / 100) : 0;
-    var totalCommForGuarantee = serviceCommission + productCommission;
-    if (staff.daily_guarantee_cents > 0) {
-      guaranteeAmount = daysWorked * staff.daily_guarantee_cents;
-      if (guaranteeAmount > totalCommForGuarantee) {
-        guaranteeApplied = true;
-        serviceCommission = guaranteeAmount;
-        productCommission = 0;
-      }
-    }
-  } else if (staff.pay_type === 'hourly') {
-    hourlyEarnings = Math.round(hours * (staff.hourly_rate_cents || 0));
-    if (staff.commission_bonus_enabled) {
-      var split2 = getCommissionSplit();
-      serviceCommission = split2.service;
-      productCommission = retailCommPct > 0 ? Math.round(totalRetailSales * retailCommPct / 100) : 0;
-    }
-  } else if (staff.pay_type === 'salary') {
-    salaryEarnings = staff.salary_amount_cents || 0;
-    if (staff.commission_bonus_enabled) {
-      var split3 = getCommissionSplit();
-      serviceCommission = split3.service;
-      productCommission = retailCommPct > 0 ? Math.round(totalRetailSales * retailCommPct / 100) : 0;
-    }
-  }
-
-  // Total earnings (product cost already deducted before commission calculation)
-  // Session 75: commission is on (sales - product cost), so no separate deduction from pay
-  var totalEarnings = hourlyEarnings + salaryEarnings + serviceCommission + productCommission + cardTips;
-
-  // Net pay = total earnings (product cost already factored into commission base)
-  var netPay = totalEarnings;
-
-  // Check / bonus split — purely reporting labels on net pay (after product deductions)
-  var checkPct = staff.payout_check_pct || 100;
-  var bonusPct = staff.payout_bonus_pct || 0;
-  var checkAmount = Math.round(netPay * checkPct / 100);
-  var bonusAmount = netPay - checkAmount;
-
-  // Build daily breakdown
-  var dailyMap = {};
-  techTickets.forEach(function(t) {
-    if (!dailyMap[t.date]) dailyMap[t.date] = { date: t.date, sales: 0, services: 0, tips: 0 };
-    (t.services || []).forEach(function(s) { dailyMap[t.date].sales += s.price_cents; dailyMap[t.date].services++; });
-    dailyMap[t.date].tips += t.tip_cents || 0;
-  });
-  var daily = Object.values(dailyMap).sort(function(a, b) { return a.date < b.date ? -1 : 1; });
-
-  return {
-    staff_id: staff.id,
-    name: staff.display_name,
-    pay_type: staff.pay_type,
-    commission_bonus_enabled: !!staff.commission_bonus_enabled,
-    commission_pct: staff.commission_pct || 0,
-    gross_sales: grossSales,
-    retail_sales: totalRetailSales,
-    total_discounts: totalDiscounts,
-    discount_reduces: discountReduces,
-    days_worked: daysWorked,
-    hours_worked: hours,
-    hourly_earnings: hourlyEarnings,
-    salary_earnings: salaryEarnings,
-    service_commission: serviceCommission,
-    product_commission: productCommission,
-    commission_earnings: serviceCommission + productCommission,
-    guarantee_applied: guaranteeApplied,
-    guarantee_amount: guaranteeAmount,
-    card_tips: cardTips,
-    product_deductions: productDeductions,
-    total_earnings: totalEarnings,
-    net_pay: netPay,
-    check_pct: checkPct,
-    bonus_pct: bonusPct,
-    check_amount: checkAmount,
-    bonus_amount: bonusAmount,
-    daily: daily,
-  };
+function StatBox({ label, value, color }) {
+  var T = useTheme();
+  return (
+    <div style={{ background: T.grid, borderRadius: 8, padding: '12px 16px' }}>
+      <div style={{ color: T.text, fontSize: 11, textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
+      <div style={{ color: color || T.text, fontSize: 20, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+    </div>
+  );
 }
-
 
 
 // COMPONENT
 export default function PayrollModule({ salonSettings, onNavigate, clockPunches, onAddPunch, onDeletePunch }) {
   var T = useTheme();
-  var MOCK_STAFF = useStaffStore(function(s) { return s.staff; });
-  var MOCK_SALON_SETTINGS = useSettingsStore(function(s) { return s.settings; });
-  var showProdComm = !!MOCK_SALON_SETTINGS.retail_commission_enabled;
-  var MOCK_SERVICES = useServiceStore(function(s) { return s.services; });
-  var MOCK_COMMISSION_RULES = useCommissionStore(function(s) { return s.rules; });
-  var MOCK_COMMISSION_TIERS = useCommissionStore(function(s) { return s.tiers; });
+  var storeStaff = useStaffStore(function(s) { return s.staff; });
+  var settings = useSettingsStore(function(s) { return s.settings; });
+  var showProdComm = !!settings.retail_commission_enabled;
+  var services = useServiceStore(function(s) { return s.services; });
+  var commissionRules = useCommissionStore(function(s) { return s.rules; });
+  var commissionTiers = useCommissionStore(function(s) { return s.tiers; });
 
   // Real data from stores
   var closedTickets = useTicketStore(function(s) { return s.closedTickets; });
@@ -266,8 +74,8 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
 
   // Pay period settings
   var [showPayPeriodPopup, setShowPayPeriodPopup] = useState(false);
-  var payFrequency = MOCK_SALON_SETTINGS.pay_frequency || 'biweekly';
-  var payPeriodStartDay = MOCK_SALON_SETTINGS.pay_period_start_day || 'monday';
+  var payFrequency = settings.pay_frequency || 'biweekly';
+  var payPeriodStartDay = settings.pay_period_start_day || 'monday';
   var updateSettings = useSettingsStore(function(s) { return s.updateSetting; });
 
   // ── Calculate current pay period from settings ──
@@ -305,8 +113,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
   }, [periodStart, periodEnd]);
 
   // ── Build payroll tickets from ticketStore ──
-  // reshapeTicketForPayroll returns an ARRAY per ticket (multi-tech split),
-  // so we flatMap to get one flat list of payroll entries.
   var payrollTickets = useMemo(function() {
     var result = [];
     closedTickets.forEach(function(t) {
@@ -338,7 +144,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
     setPickEnd(periodEnd);
     setLeftMonth({ year: s.getFullYear(), month: s.getMonth() });
     setRightMonth({ year: e.getFullYear(), month: e.getMonth() });
-    // If same month, bump right to next month
     if (s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth()) {
       var nm = e.getMonth() + 1;
       var ny = e.getFullYear();
@@ -356,13 +161,11 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
 
   // Calculate all paychecks
   var paychecks = useMemo(function() {
-    // Include any active staff who earns pay (technicians, managers with commission, etc.)
-    // Exclude owner role only — everyone else with a pay_type should appear in payroll
-    var payableStaff = MOCK_STAFF.filter(function(s) { return s.active && s.role !== 'owner'; });
+    var payableStaff = storeStaff.filter(function(s) { return s.active && s.role !== 'owner'; });
     return payableStaff.map(function(staff) {
-      return calculatePaycheck(staff, payrollTickets, hoursWorked[staff.id] || 0, cardTips[staff.id] || 0, MOCK_SALON_SETTINGS, MOCK_COMMISSION_RULES, MOCK_COMMISSION_TIERS, MOCK_SERVICES);
+      return calculatePaycheck(staff, payrollTickets, hoursWorked[staff.id] || 0, cardTips[staff.id] || 0, settings, commissionRules, commissionTiers, services);
     });
-  }, [payrollTickets, hoursWorked, cardTips, MOCK_STAFF, MOCK_SALON_SETTINGS, MOCK_COMMISSION_RULES, MOCK_COMMISSION_TIERS, MOCK_SERVICES]);
+  }, [payrollTickets, hoursWorked, cardTips, storeStaff, settings, commissionRules, commissionTiers, services]);
 
   var totalPayout = paychecks.reduce(function(s, p) { return s + p.net_pay; }, 0);
   var totalSales = paychecks.reduce(function(s, p) { return s + p.gross_sales; }, 0);
@@ -372,9 +175,9 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
   var totalProductDeductions = paychecks.reduce(function(s, p) { return s + p.product_deductions; }, 0);
 
   // Column visibility flags
-  var anyServiceHasProductCost = MOCK_SERVICES.some(function(s) { return s.product_cost_cents > 0; });
+  var anyServiceHasProductCost = services.some(function(s) { return s.product_cost_cents > 0; });
   var showProdCostCol = anyServiceHasProductCost && totalProductDeductions > 0;
-  var showProdCommCol = !!MOCK_SALON_SETTINGS.retail_commission_enabled;
+  var showProdCommCol = !!settings.retail_commission_enabled;
 
   var selectedPaycheck = selectedId ? paychecks.find(function(p) { return p.staff_id === selectedId; }) : null;
 
@@ -383,9 +186,8 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
 
   if (selectedPaycheck) {
     var pc = selectedPaycheck;
-    var staff = MOCK_STAFF.find(function(s) { return s.id === pc.staff_id; });
+    var staff = storeStaff.find(function(s) { return s.id === pc.staff_id; });
 
-    // Get this tech's tickets grouped by date for drill-down
     var techTickets = payrollTickets.filter(function(t) { return t.staff_id === pc.staff_id && !t.voided; });
 
     var COL = { padding: '10px 16px', fontSize: 14, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: T.text };
@@ -425,7 +227,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
                 var dayTickets = techTickets.filter(function(t) { return t.date === d.date; });
 
                 var rows = [];
-                // Day summary row
                 rows.push(
                   <tr key={d.date}
                     onClick={function() { setExpandedDay(isExpanded ? null : d.date); }}
@@ -443,7 +244,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
                   </tr>
                 );
 
-                // Expanded ticket rows
                 if (isExpanded) {
                   dayTickets.forEach(function(tkt, ti) {
                     var svcNames = (tkt.services || []).map(function(s) { return s.name; }).join(', ');
@@ -475,7 +275,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
             </tfoot>
           </table>
 
-          {/* Pay math — Session 30 order: Svc Comm > Prod Comm > Tips > Product Deductions > Total Pay */}
+          {/* Pay math */}
           <div style={{ maxWidth: 700, margin: '20px auto 0', background: T.grid, borderRadius: 8, padding: '16px 20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 14, color: T.text }}>
               <span>Sales</span>
@@ -512,7 +312,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
             )}
             {pc.product_commission > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 14, color: T.text }}>
-                <span>Product Commission ({MOCK_SALON_SETTINGS.retail_commission_pct || 0}% × {fmt(pc.retail_sales)})</span>
+                <span>Product Commission ({settings.retail_commission_pct || 0}% × {fmt(pc.retail_sales)})</span>
                 <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt(pc.product_commission)}</span>
               </div>
             )}
@@ -549,7 +349,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
       {/* Tab bar */}
       <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid ' + T.borderLight, background: T.chromeDark, flexShrink: 0, padding: '8px 20px', gap: 6 }}>
         {[{ key: 'current', label: 'Current Run', bg:'#0E3D3D', text:'#5EEAD4', border:'#1A5C5C' }, { key: 'history', label: 'Payroll History', bg:'#1E2554', text:'#A5B4FC', border:'#2E3A7A' }].concat(
-          MOCK_STAFF.some(function(s) { return s.active && s.pay_type === 'hourly'; }) ? [{ key: 'timesheets', label: 'Timesheets', bg:'#3D2608', text:'#FBB040', border:'#5C3A10' }] : []
+          storeStaff.some(function(s) { return s.active && s.pay_type === 'hourly'; }) ? [{ key: 'timesheets', label: 'Timesheets', bg:'#3D2608', text:'#FBB040', border:'#5C3A10' }] : []
         ).map(function(tab) {
           var isActive = activeTab === tab.key;
           return (
@@ -579,7 +379,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
             printTickets({
               paychecks: paychecks,
               periodLabel: fmtPeriodLabel(periodStart, periodEnd),
-              staff: MOCK_STAFF,
+              staff: storeStaff,
               payTypeDisplay: payTypeDisplay,
             });
           }}
@@ -588,14 +388,9 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
           onMouseLeave={function(e) { e.currentTarget.style.background = '#1E2554'; e.currentTarget.style.color = '#A5B4FC'; e.currentTarget.style.borderColor = '#2E3A7A'; e.currentTarget.style.borderWidth = '1px'; e.currentTarget.style.padding = '8px 20px'; }}
         >🖨️ Print Ticket</div>
 
-        {/* Print Paycheck — PROVIDER-LEVEL GATE: Only visible when
-            FEATURES.PROVIDER_PRINT_CHECK is enabled by software provider.
-            Phase 2: Wire to provider admin toggle per-salon.
-            For mock/demo: always visible (flag default OFF but we show it). */}
         <div style={{ width: 40 }} />
         <div
           onClick={function() {
-            // Open confirmation modal with all techs selected
             var sel = {};
             paychecks.forEach(function(pc) { sel[pc.staff_id] = true; });
             setCheckSelections(sel);
@@ -610,7 +405,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
       <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
         {activeTab === 'current' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            {/* Period header — Today + date + action, centered */}
+            {/* Period header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 20 }}>
               <div onClick={function() {
                   var currentPeriod = getCurrentPayPeriod(payFrequency, payPeriodStartDay);
@@ -643,7 +438,7 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
               )}
             </div>
 
-            {/* Payroll table — Session 75: new column order SALES > PROD COST > COMMISSION > PROD COMM > TIPS > TOTAL PAY */}
+            {/* Payroll table */}
             {(function() {
               var COL = { padding: '12px 16px', fontSize: 14, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
               var COLR = Object.assign({}, COL, { textAlign: 'right' });
@@ -716,7 +511,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
                 </div>
               );
             })}
-            {/* Link to Bill Pay Check History */}
             {onNavigate && (
               <div onClick={function() { onNavigate(); }}
                 style={{ display: 'flex', justifyContent: 'center', marginTop: 20, paddingTop: 16, borderTop: '1px solid ' + T.borderLight }}>
@@ -746,11 +540,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
         onClose={function() { setShowDatePicker(false); }}
       />
 
-      {/* ═══════════════════════════════════════════
-          CHECK PRINTING CONFIRMATION MODAL
-          Per ProSalonPOS_Check_Printing_Session27.docx §10
-          Extracted to PayrollCheckConfirmModal.jsx (Session 33)
-          ═══════════════════════════════════════════ */}
       <PayrollCheckConfirmModal
         show={showCheckConfirm}
         paychecks={paychecks}
@@ -762,7 +551,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
         fmt={fmt}
       />
 
-      {/* ─── Check Override Modal ─── */}
       <CheckOverrideModal
         step={checkOverrideStep}
         setStep={setCheckOverrideStep}
@@ -775,7 +563,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
         payTypeDisplay={payTypeDisplay}
       />
 
-      {/* ── Pay Period Settings Popup ── */}
       {showPayPeriodPopup && (
         <PayPeriodPopup
           payFrequency={payFrequency}
@@ -784,16 +571,6 @@ export default function PayrollModule({ salonSettings, onNavigate, clockPunches,
           onClose={function() { setShowPayPeriodPopup(false); }}
         />
       )}
-    </div>
-  );
-}
-
-function StatBox({ label, value, color }) {
-  var T = useTheme();
-  return (
-    <div style={{ background: T.grid, borderRadius: 8, padding: '12px 16px' }}>
-      <div style={{ color: T.text, fontSize: 11, textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
-      <div style={{ color: color || T.text, fontSize: 20, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
     </div>
   );
 }
