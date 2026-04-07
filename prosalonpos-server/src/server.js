@@ -234,22 +234,6 @@ httpServer.listen(PORT, async function() {
 
   console.log('');
 
-  // ── Ensure database schema is up to date ──
-  // On Railway, db push can't run during build (no DB access).
-  // Run it here at startup so tables exist before bootstrap queries them.
-  try {
-    console.log('[Schema] Running prisma db push...');
-    var { execSync } = await import('child_process');
-    execSync('npx prisma db push --skip-generate --accept-data-loss', {
-      cwd: dirname(fileURLToPath(import.meta.url)) + '/..',
-      stdio: 'inherit'
-    });
-    console.log('[Schema] ✅ Database schema is up to date');
-  } catch (schemaErr) {
-    console.error('[Schema] ❌ prisma db push failed:', schemaErr.message);
-    console.error('[Schema]    Server will attempt to continue...');
-  }
-
   // ── Auto-bootstrap: ensure salon + default data exist ──
   // Runs in ALL modes (dev, cloud, .exe). On a fresh database, creates
   // salon record, default categories, services, settings, and one manager.

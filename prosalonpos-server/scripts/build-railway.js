@@ -1,19 +1,16 @@
 #!/usr/bin/env node
 /**
  * build-railway.js — Railway Deployment Build Script
- * Session V23 — Pre-built frontend
+ * Session 92 — v4
  *
- * The React frontend is pre-built locally and committed as server/public/.
- * Railway's Railpack only copies the server folder, so the station folder
- * is not available during build. This script just runs prisma generate
- * and verifies public/ exists.
+ * Railway constraints:
+ *   - Root Directory = /prosalonpos-server → only this folder is copied to /app/
+ *   - Database is NOT reachable during build
+ *   - prisma generate runs via "postinstall" in package.json (after npm install)
  *
- * Railway settings:
- *   - Build Command  = node scripts/build-railway.js
- *   - Start Command  = node src/server.js
+ * This script just verifies the pre-built frontend exists.
  */
 import { existsSync } from 'fs';
-import { execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -21,37 +18,18 @@ var __dirname = dirname(fileURLToPath(import.meta.url));
 var serverRoot = join(__dirname, '..');
 var publicDir = join(serverRoot, 'public');
 
-function run(cmd) {
-  console.log('[build] > ' + cmd);
-  execSync(cmd, { cwd: serverRoot, stdio: 'inherit' });
-}
-
 console.log('');
 console.log('╔══════════════════════════════════════════╗');
-console.log('║   ProSalonPOS — Railway Build (V23)      ║');
+console.log('║   ProSalonPOS — Railway Build (S92v4)    ║');
 console.log('╚══════════════════════════════════════════╝');
 console.log('');
 
-// ── Step 1: Prisma generate ──
-console.log('[build] Step 1: Generating Prisma client...');
-run('npx prisma generate');
-console.log('[build] ✅ Prisma client generated');
-console.log('');
-
-// ── Step 2: Verify pre-built frontend ──
-console.log('[build] Step 2: Checking for pre-built frontend...');
-if (existsSync(join(publicDir, 'index.html'))) {
-  console.log('[build] ✅ Pre-built frontend found in public/');
+// Prisma generate already ran via postinstall — just verify public/ exists
+if (existsSync(publicDir)) {
+  console.log('[build-railway] ✅ Pre-built frontend found in public/');
 } else {
-  console.error('[build] ❌ FATAL: public/index.html not found!');
-  console.error('[build]    The frontend must be pre-built locally before pushing to GitHub.');
-  console.error('[build]    Run: cd prosalonpos-station && npm run build');
-  console.error('[build]    Then copy dist/ contents to prosalonpos-server/public/');
-  process.exit(1);
+  console.log('[build-railway] ⚠️  No public/ folder — frontend must be pre-built locally');
 }
 
-console.log('');
-console.log('╔══════════════════════════════════════════╗');
-console.log('║   ✅ BUILD COMPLETE — Ready to start     ║');
-console.log('╚══════════════════════════════════════════╝');
+console.log('[build-railway] ✅ Build complete!');
 console.log('');
