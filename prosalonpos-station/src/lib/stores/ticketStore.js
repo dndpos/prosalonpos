@@ -13,12 +13,14 @@
 
 import { create } from 'zustand';
 import { api, isBackendAvailable, checkBackend } from '../apiClient';
+import { useGiftCardStore } from './giftCardStore';
 
 var useTicketStore = create(function(set, get) {
   return {
     // ─── State ───
     openTickets: [],
     closedTickets: [],
+    mergedTickets: [],
     loading: false,
     error: null,
     source: 'pending',
@@ -45,11 +47,13 @@ var useTicketStore = create(function(set, get) {
         var tickets = data.tickets || [];
 
         var open = tickets.filter(function(t) { return t.status === 'open'; });
-        var closed = tickets.filter(function(t) { return t.status !== 'open'; });
+        var merged = tickets.filter(function(t) { return t.status === 'merged'; });
+        var closed = tickets.filter(function(t) { return t.status !== 'open' && t.status !== 'merged'; });
 
         set({
           openTickets: open,
           closedTickets: closed,
+          mergedTickets: merged,
           loading: false,
           source: 'api',
           initialized: true,
@@ -131,8 +135,23 @@ var useTicketStore = create(function(set, get) {
 
     refundTicket: async function(ticketId, refundData) {
       var data = await api.post('/checkout/tickets/' + ticketId + '/refund', refundData);
-      get().fetchTickets();
+      if (data.ticket) {
+        set(function(s) {
+          return {
+            closedTickets: s.closedTickets.map(function(t) {
+              return t.id === ticketId ? data.ticket : t;
+            }),
+          };
+        });
+      }
+      // Refresh gift card balances in case refund restored a gift card
+      try { useGiftCardStore.getState().fetchGiftCards(); } catch(e) {}
       return data.refund;
+    },
+
+    deletePayments: async function(ticketId) {
+      var data = await api.del('/checkout/tickets/' + ticketId + '/payments');
+      return data;
     },
 
     updateTip: async function(ticketId, tipData) {
@@ -147,16 +166,36 @@ var useTicketStore = create(function(set, get) {
       return data.ticket;
     },
 
-    reopenTicket: function(ticketId) {
+    reopenTicket: async function(ticketId) {
+      // Call dedicated reopen endpoint — sets paid→open on server
+      try {
+        var data = await api.post('/checkout/tickets/' + ticketId + '/reopen');
+        var ticket = data.ticket;
+        set(function(s) {
+          return {
+            closedTickets: s.closedTickets.filter(function(t) { return t.id !== ticketId; }),
+            openTickets: s.openTickets.concat([ticket]),
+          };
+        });
+        return ticket;
+      } catch (err) {
+        console.error('[ticketStore] Reopen FAILED:', err.message);
+        alert('⚠ Reopen failed: ' + (err.message || 'Server error') + '\n\nCheck server terminal for details.');
+        return null;
+      }
+    },
+
+    mergeTickets: async function(ticketIds) {
+      var data = await api.post('/checkout/tickets/merge', { ticketIds: ticketIds });
+      var absorber = data.ticket;
+      // Remove all merged ticket IDs from open, add absorber
       set(function(s) {
-        var ticket = s.closedTickets.find(function(t) { return t.id === ticketId; });
-        if (!ticket || ticket.status === 'voided') return s;
-        var reopened = Object.assign({}, ticket, { status: 'open' });
-        return {
-          closedTickets: s.closedTickets.filter(function(t) { return t.id !== ticketId; }),
-          openTickets: s.openTickets.concat([reopened]),
-        };
+        var remaining = s.openTickets.filter(function(t) {
+          return !ticketIds.includes(t.id);
+        });
+        return { openTickets: remaining.concat([absorber]) };
       });
+      return absorber;
     },
 
     removeOpenTicket: function(ticketId) {
@@ -188,6 +227,24 @@ var useTicketStore = create(function(set, get) {
 
     updateClosedTicket: function(ticketId, updates) {
       get().fetchTickets();
+    },
+
+    // Admin: permanently delete a single ticket (owner only)
+    deleteTicket: async function(ticketId) {
+      await api.del('/checkout/tickets/' + ticketId);
+      set(function(s) {
+        return {
+          openTickets: s.openTickets.filter(function(t) { return t.id !== ticketId; }),
+          closedTickets: s.closedTickets.filter(function(t) { return t.id !== ticketId; }),
+        };
+      });
+    },
+
+    // Admin: delete ALL tickets for this salon (owner only, test cleanup)
+    deleteAllTickets: async function() {
+      var data = await api.del('/checkout/tickets/bulk/all');
+      set({ openTickets: [], closedTickets: [], nextTicketNumber: 1 });
+      return data.deleted;
     },
   };
 });

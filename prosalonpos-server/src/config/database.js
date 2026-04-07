@@ -30,7 +30,13 @@ if (isSQLite) {
   }
 }
 
-var prisma = new PrismaClient();
+var prisma = new PrismaClient({
+  datasources: isSQLite ? undefined : {
+    db: {
+      url: process.env.DATABASE_URL + (process.env.DATABASE_URL.indexOf('?') === -1 ? '?' : '&') + 'connection_limit=20&pool_timeout=10'
+    }
+  }
+});
 
 // Log which database mode is active on startup
 if (isSQLite) {

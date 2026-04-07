@@ -5,7 +5,7 @@
 import { useTheme } from '../../lib/ThemeContext';
 import { useEffect } from 'react';
 import { fmt, numpadDisplay, numpadTap, numpadToCents, numpadToFloat, numpadKeys, roundToNickel, cashQuickAmounts } from './checkoutHelpers';
-import { MOCK_GIFT_CARDS } from '../gift-cards/giftCardBridge';
+import { useGiftCardStore } from '../../lib/stores/giftCardStore';
 import ClientLookupModal from './ClientLookupModal';
 import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 import AreaTag from '../../components/ui/AreaTag';
@@ -35,6 +35,18 @@ export default function CheckoutModals({ ctx }) {
   useNumpadKeyboard(showTipForm, function(d){ setTipInput(function(p){ return numpadTap(d,p,settings.numpad_mode); }); }, function(){ setTipInput(function(p){ return numpadTap('⌫',p,settings.numpad_mode); }); }, null, function(){ setShowTipForm(false); }, [showTipForm]);
   // Price/discount edit numpad
   useNumpadKeyboard(!!editingId, function(d){ setEditPrice(function(p){ return editDiscType==='pct' ? (/\d/.test(d)?p+d:p) : numpadTap(d,p,settings.numpad_mode); }); }, function(){ setEditPrice(function(p){ return editDiscType==='pct' ? p.slice(0,-1) : numpadTap('⌫',p,settings.numpad_mode); }); }, null, cancelEdit, [editingId, editDiscType]);
+  // Gift card lookup keyboard — supports digits AND letters (card codes can be alphanumeric)
+  useEffect(function() {
+    if (gcLookup !== 'input') return;
+    function handleGcKey(e) {
+      if (/^[a-zA-Z0-9]$/.test(e.key)) { e.preventDefault(); setGcCodeInput(function(p) { return p + e.key.toUpperCase(); }); setGcError(false); return; }
+      if (e.key === 'Backspace') { e.preventDefault(); setGcCodeInput(function(p) { return p.slice(0, -1); }); setGcError(false); return; }
+      if (e.key === '-') { e.preventDefault(); setGcCodeInput(function(p) { return p + '-'; }); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setGcLookup(null); setGcCodeInput(''); setGcError(false); return; }
+    }
+    window.addEventListener('keydown', handleGcKey);
+    return function() { window.removeEventListener('keydown', handleGcKey); };
+  }, [gcLookup]);
 
   return (
     <>
@@ -47,26 +59,27 @@ export default function CheckoutModals({ ctx }) {
         }
         function gcLookupCard(code){
           var search=code||gcCodeInput;
-          var clean=search.replace(/[^0-9]/g,'');
-          var card=MOCK_GIFT_CARDS.find(function(c){return c.code.replace(/[^0-9]/g,'')===clean||c.code===search;});
-          if(!card||card.status==='depleted'||card.balance_cents<=0){setGcError(true);return;}
-          if(card.balance_cents>=remaining){
-            // Card covers full remaining — deduct and close
-            card.balance_cents -= remaining;
-            if(card.balance_cents<=0) card.status='depleted';
-            setPayments(prev=>[...prev,{method:'giftcard',amount_cents:remaining,gc_id:card.id,gc_code:card.code}]);
-            setGcLookup(null);setGcCodeInput('');
-          } else {
-            setGcLookup({card:card,balance:card.balance_cents});
-          }
+          if(!search||!search.trim()){setGcError(true);return;}
+          // Use API lookup instead of local array search
+          var lookupFn=useGiftCardStore.getState().lookupGiftCard;
+          lookupFn(search.trim()).then(function(card){
+            if(!card||card.status==='depleted'||card.balance_cents<=0){setGcError(true);return;}
+            if(card.balance_cents>=remaining){
+              // Card covers full remaining — add payment and close
+              setPayments(prev=>[...prev,{method:'giftcard',amount_cents:remaining,gc_id:card.id,gc_code:card.code,gc_original_balance:card.balance_cents}]);
+              setGcLookup(null);setGcCodeInput('');
+            } else {
+              setGcLookup({card:card,balance:card.balance_cents});
+            }
+          }).catch(function(err){
+            console.warn('[GC Lookup] API error:', err.message);
+            setGcError(true);
+          });
         }
         function gcUseBalance(){
           var card=gcLookup.card;
           var amt=gcLookup.balance;
-          // Deduct full remaining balance from card
-          card.balance_cents=0;
-          card.status='depleted';
-          setPayments(prev=>[...prev,{method:'giftcard',amount_cents:amt,gc_id:card.id,gc_code:card.code}]);
+          setPayments(prev=>[...prev,{method:'giftcard',amount_cents:amt,gc_id:card.id,gc_code:card.code,gc_original_balance:card.balance_cents}]);
           setGcLookup(null);setGcCodeInput('');
         }
         var isInput=gcLookup==='input';

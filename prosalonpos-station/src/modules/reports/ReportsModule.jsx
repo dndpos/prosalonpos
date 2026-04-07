@@ -2,209 +2,27 @@ import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
 import { useState, useMemo, useEffect } from 'react';
 import { getStaffName, PAYMENT_LABELS, PAYMENT_COLORS } from './reportsUtils';
-
 import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { useTicketStore } from '../../lib/stores/ticketStore';
 import { fmt } from '../../lib/formatUtils';
-
+import { reshapeTicket, reshapeTicketsByTech, shiftDate, formatDate, formatDateLong, ReceiptLine, CalendarPicker } from './ReportsHelpers';
 // Reports Module — Daily closeout report. S85: wired to ticketStore. S111: void/refund tracking.
-// Reshape a closed ticket from ticketStore into the report format
-function reshapeTicket(ticket) {
-  var items = ticket.items || ticket.lineItems || [];
-  var services = items.filter(function(it) { return it.type === 'service'; }).map(function(it) {
-    return { name: it.name, price_cents: it.price_cents || 0 };
-  });
-  var products = items.filter(function(it) { return it.type === 'retail'; }).map(function(it) {
-    return { name: it.name, price_cents: it.price_cents || 0 };
-  });
-  var packageItems = items.filter(function(it) { return it.type === 'package_sale'; }).map(function(it) {
-    return { name: it.name, price_cents: it.price_cents || 0 };
-  });
-  var membershipItems = items.filter(function(it) { return it.type === 'membership_sale'; }).map(function(it) {
-    return { name: it.name, price_cents: it.price_cents || 0 };
-  });
-  var svcTotal = services.reduce(function(s, v) { return s + v.price_cents; }, 0);
-  var prodTotal = products.reduce(function(s, v) { return s + v.price_cents; }, 0);
-  var pkgTotal = packageItems.reduce(function(s, v) { return s + v.price_cents; }, 0);
-  var memTotal = membershipItems.reduce(function(s, v) { return s + v.price_cents; }, 0);
-
-  // Determine primary payment method from payments array
-  var payments = ticket.payments || [];
-  var payMethod = 'credit';
-  if (payments.length > 0) {
-    // Use whichever method covers the most amount
-    var methodTotals = {};
-    payments.forEach(function(p) {
-      var m = p.method || 'credit';
-      if (m === 'giftcard') m = 'gift';
-      methodTotals[m] = (methodTotals[m] || 0) + (p.amount_cents || 0);
-    });
-    var best = 'credit';
-    var bestAmt = 0;
-    Object.keys(methodTotals).forEach(function(m) {
-      if (methodTotals[m] > bestAmt) { best = m; bestAmt = methodTotals[m]; }
-    });
-    payMethod = best;
-  }
-
-  // Determine staff_id — first service item's techId, or createdBy
-  var staffId = '';
-  var firstService = items.find(function(it) { return it.type === 'service' && it.techId; });
-  if (firstService) staffId = firstService.techId;
-  else staffId = ticket.createdBy || ticket.closedBy || '';
-
-  // Date from closedAt (can be timestamp or ISO string)
-  var dateStr = '';
-  if (ticket.closedAt) {
-    var d = new Date(ticket.closedAt);
-    if (!isNaN(d.getTime())) {
-      dateStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    }
-  }
-  if (!dateStr && ticket.created_at) {
-    var d2 = new Date(ticket.created_at);
-    if (!isNaN(d2.getTime())) {
-      dateStr = d2.getFullYear() + '-' + String(d2.getMonth() + 1).padStart(2, '0') + '-' + String(d2.getDate()).padStart(2, '0');
-    }
-  }
-
-  return {
-    id: ticket.id,
-    staff_id: staffId,
-    date: dateStr,
-    voided: ticket.status === 'voided',
-    refunded: ticket.status === 'refunded',
-    refundCents: ticket.refundCents || ticket.refund_cents || 0,
-    status: ticket.status,
-    services: services,
-    products: products,
-    packages: packageItems,
-    memberships: membershipItems,
-    tip_cents: ticket.tipCents || ticket.tip_cents || 0,
-    payment_method: payMethod,
-    service_total: svcTotal,
-    product_total: prodTotal,
-    package_total: pkgTotal,
-    membership_total: memTotal,
-    subtotal: svcTotal + prodTotal + pkgTotal + memTotal,
-  };
-}
-
-// For multi-tech tickets, split into one report entry per tech
-function reshapeTicketsByTech(ticket) {
-  var items = ticket.items || ticket.lineItems || [];
-  var techGroups = {};
-  items.forEach(function(it) {
-    if (it.type !== 'service') return;
-    var tid = it.techId || ticket.createdBy || '';
-    if (!techGroups[tid]) techGroups[tid] = [];
-    techGroups[tid].push(it);
-  });
-  var techIds = Object.keys(techGroups);
-  // If no tech grouping or single tech, just return the reshaped ticket
-  if (techIds.length <= 1) return [reshapeTicket(ticket)];
-
-  // Multiple techs — split the ticket. Retail, packages, memberships go to the primary tech (createdBy).
-  var products = items.filter(function(it) { return it.type === 'retail'; });
-  var packageItems = items.filter(function(it) { return it.type === 'package_sale'; });
-  var membershipItems = items.filter(function(it) { return it.type === 'membership_sale'; });
-  var payments = ticket.payments || [];
-  var payMethod = 'credit';
-  if (payments.length > 0) {
-    var methodTotals = {};
-    payments.forEach(function(p) {
-      var m = p.method || 'credit';
-      if (m === 'giftcard') m = 'gift';
-      methodTotals[m] = (methodTotals[m] || 0) + (p.amount_cents || 0);
-    });
-    var best = 'credit'; var bestAmt = 0;
-    Object.keys(methodTotals).forEach(function(m) {
-      if (methodTotals[m] > bestAmt) { best = m; bestAmt = methodTotals[m]; }
-    });
-    payMethod = best;
-  }
-
-  var dateStr = '';
-  if (ticket.closedAt) {
-    var d = new Date(ticket.closedAt);
-    if (!isNaN(d.getTime())) dateStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  }
-
-  // Split tip proportionally by service amount
-  var totalSvc = items.filter(function(it) { return it.type === 'service'; }).reduce(function(s, it) { return s + (it.price_cents || 0); }, 0);
-  var totalTip = ticket.tipCents || ticket.tip_cents || 0;
-
-  return techIds.map(function(tid, idx) {
-    var svcs = techGroups[tid].map(function(it) { return { name: it.name, price_cents: it.price_cents || 0 }; });
-    var svcTotal = svcs.reduce(function(s, v) { return s + v.price_cents; }, 0);
-    var prods = idx === 0 ? products.map(function(it) { return { name: it.name, price_cents: it.price_cents || 0 }; }) : [];
-    var prodTotal = prods.reduce(function(s, v) { return s + v.price_cents; }, 0);
-    var pkgs = idx === 0 ? packageItems.map(function(it) { return { name: it.name, price_cents: it.price_cents || 0 }; }) : [];
-    var pkgTotal = pkgs.reduce(function(s, v) { return s + v.price_cents; }, 0);
-    var mems = idx === 0 ? membershipItems.map(function(it) { return { name: it.name, price_cents: it.price_cents || 0 }; }) : [];
-    var memTotal = mems.reduce(function(s, v) { return s + v.price_cents; }, 0);
-    var tipShare = totalSvc > 0 ? Math.round(totalTip * svcTotal / totalSvc) : 0;
-
-    return {
-      id: ticket.id + '-' + tid,
-      staff_id: tid,
-      date: dateStr,
-      voided: ticket.status === 'voided',
-      refunded: ticket.status === 'refunded',
-      refundCents: ticket.refundCents || ticket.refund_cents || 0,
-      status: ticket.status,
-      services: svcs,
-      products: prods,
-      packages: pkgs,
-      memberships: mems,
-      tip_cents: tipShare,
-      payment_method: payMethod,
-      service_total: svcTotal,
-      product_total: prodTotal,
-      package_total: pkgTotal,
-      membership_total: memTotal,
-      subtotal: svcTotal + prodTotal + pkgTotal + memTotal,
-    };
-  });
-}
-
-
-// Quick date helpers
-function shiftDate(dateStr, days) {
-  var d = new Date(dateStr + 'T00:00');
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function formatDate(dateStr) {
-  var d = new Date(dateStr + 'T00:00');
-  return (d.getMonth() + 1) + '-' + d.getDate() + '-' + d.getFullYear();
-}
-function formatDateLong(dateStr) {
-  var d = new Date(dateStr + 'T00:00');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
 var AVATAR_COLORS = ['#1E3A5F', '#064E3B', '#7C2D12', '#4C1D95', '#831843'];
-
 // Default to today's date
 var _todayStr = (function() {
   var d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 })();
-
 export default function ReportsModule() {
   var T = useTheme();
   var _settings = useSettingsStore(function(s) { return s.settings; });
   var _rptSalonName = (_settings && _settings.salon_name) || 'Your Salon';
   var _rptSalonAddr1 = (_settings && _settings.salon_address_line1) || '';
   var _rptSalonAddr2 = (_settings && _settings.salon_address_line2) || '';
-
   // Read from ticketStore — API only
   var closedTickets = useTicketStore(function(s) { return s.closedTickets; });
   var fetchTickets = useTicketStore(function(s) { return s.fetchTickets; });
   var ticketSource = useTicketStore(function(s) { return s.source; });
-
   var [startDate, setStartDate] = useState(_todayStr);
   var [endDate, setEndDate] = useState(_todayStr);
   var [showRangePicker, setShowRangePicker] = useState(false);
@@ -213,7 +31,6 @@ export default function ReportsModule() {
   var [viewTab, setViewTab] = useState('daily'); // 'daily' | 'products'
   var [expandedTech, setExpandedTech] = useState(null); // staff_id or null
   var isRange = startDate !== endDate;
-
   // Arrow navigation — shift both dates by 1 day together
   function goLeft() {
     setStartDate(function(s) { return shiftDate(s, -1); });
@@ -223,7 +40,6 @@ export default function ReportsModule() {
     setStartDate(function(s) { return shiftDate(s, 1); });
     setEndDate(function(e) { return shiftDate(e, 1); });
   }
-
   // Open range picker
   function openPicker() {
     setPickerStart(startDate);
@@ -239,14 +55,11 @@ export default function ReportsModule() {
     }
     setShowRangePicker(false);
   }
-
   var range = { start: startDate, end: endDate };
-
   // Fetch tickets when date range changes
   useEffect(function() {
     fetchTickets(startDate, endDate);
   }, [startDate, endDate]);
-
   // Build report tickets from closed tickets
   var REPORT_TICKETS = useMemo(function() {
     var result = [];
@@ -256,14 +69,12 @@ export default function ReportsModule() {
     });
     return result;
   }, [closedTickets]);
-
   // Filter tickets for the range — include ALL statuses (paid, voided, refunded)
   var filtered = useMemo(function() {
     return REPORT_TICKETS.filter(function(t) {
       return t.date >= range.start && t.date <= range.end;
     });
   }, [range.start, range.end, REPORT_TICKETS]);
-
   // Separate by status
   var paidTickets = filtered.filter(function(t) { return !t.voided; });
   var voidedTickets = filtered.filter(function(t) { return t.voided; });
@@ -273,8 +84,12 @@ export default function ReportsModule() {
   var totalProductSales = 0;
   var totalPackageSales = 0;
   var totalMembershipSales = 0;
+  var totalGiftCardSales = 0;
   var totalTips = 0;
-  var paymentTotals = { cash: 0, credit: 0, gift: 0, zelle: 0 };
+  var totalTaxCollected = 0;
+  var totalPkgRedeemed = 0;
+  var totalPkgCreditsRestored = 0;
+  var paymentTotals = { cash: 0, credit: 0, gift: 0, zelle: 0, package: 0 };
   var ticketCount = paidTickets.length;
 
   paidTickets.forEach(function(t) {
@@ -282,9 +97,20 @@ export default function ReportsModule() {
     totalProductSales += t.product_total;
     totalPackageSales += (t.package_total || 0);
     totalMembershipSales += (t.membership_total || 0);
+    totalGiftCardSales += (t.gc_total || 0);
     totalTips += t.tip_cents;
-    if (paymentTotals[t.payment_method] !== undefined) {
-      paymentTotals[t.payment_method] += t.subtotal;
+    totalTaxCollected += (t.taxCents || 0);
+    totalPkgRedeemed += (t.pkgRedeemCents || 0);
+    totalPkgCreditsRestored += (t.pkgCreditsRestoredCents || 0);
+    // Use actual payment records for payment method breakdown
+    if (t.payments && t.payments.length > 0) {
+      t.payments.forEach(function(p) {
+        var m = p.method || 'credit';
+        if (m === 'giftcard') m = 'gift';
+        if (paymentTotals[m] !== undefined) paymentTotals[m] += (p.amount_cents || 0);
+      });
+    } else if (paymentTotals[t.payment_method] !== undefined) {
+      paymentTotals[t.payment_method] += t.subtotal - (t.pkgRedeemCents || 0);
     }
   });
 
@@ -292,19 +118,35 @@ export default function ReportsModule() {
   var totalVoided = 0;
   var voidCount = voidedTickets.length;
   voidedTickets.forEach(function(t) { totalVoided += t.subtotal; });
-
   var totalRefunded = 0;
   var refundCount = 0;
   paidTickets.forEach(function(t) {
     if (t.refundCents > 0) {
       totalRefunded += t.refundCents;
       refundCount++;
+      // Deduct refunded amounts from payment totals so payments net to zero on full refund
+      if (t.payments && t.payments.length > 0) {
+        var refundLeft = t.refundCents;
+        // Distribute refund across payment methods proportionally to original payments
+        var totalPaid = t.payments.reduce(function(s, p) { return s + (p.amount_cents || 0); }, 0);
+        t.payments.forEach(function(p) {
+          if (refundLeft <= 0 || totalPaid <= 0) return;
+          var m = p.method || 'credit';
+          if (m === 'giftcard') m = 'gift';
+          var share = Math.round(t.refundCents * (p.amount_cents || 0) / totalPaid);
+          var deduct = Math.min(share, refundLeft, paymentTotals[m] || 0);
+          if (paymentTotals[m] !== undefined) paymentTotals[m] -= deduct;
+          refundLeft -= deduct;
+        });
+      }
     }
   });
 
-  var totalSales = totalServiceSales + totalProductSales + totalPackageSales + totalMembershipSales;
+  var totalSales = totalServiceSales + totalProductSales + totalPackageSales + totalMembershipSales + totalGiftCardSales;
   var grandTotal = totalSales + totalTips;
-  var netTotal = grandTotal - totalVoided - totalRefunded;
+  // GROSS TOTAL includes tax collected; refund amount also includes tax, so net math is correct
+  var grossWithTax = grandTotal + totalTaxCollected;
+  var netTotal = grossWithTax - totalVoided - totalRefunded - totalPkgRedeemed;
 
   // ── Tech breakdown (paid only) ──
   var techMap = {};
@@ -390,6 +232,10 @@ export default function ReportsModule() {
             style={{ height: 36, padding: '0 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: '1px solid ' + T.border, borderRadius: 6, color: T.textSecondary, fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', userSelect: 'none', marginLeft: 4 }}
             onMouseEnter={function(e) { e.currentTarget.style.background = T.grid; }}
             onMouseLeave={function(e) { e.currentTarget.style.background = 'transparent'; }}>Today</div>
+          <div onClick={function() { fetchTickets(startDate, endDate); }}
+            style={{ height: 36, padding: '0 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: '1px solid ' + T.border, borderRadius: 6, color: T.textSecondary, fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', userSelect: 'none' }}
+            onMouseEnter={function(e) { e.currentTarget.style.background = T.grid; }}
+            onMouseLeave={function(e) { e.currentTarget.style.background = 'transparent'; }}>↻ Refresh</div>
         </div>
 
         {/* Print button — top right */}
@@ -424,7 +270,7 @@ export default function ReportsModule() {
         {[
           { label: 'Gross Sales', value: fmt(totalSales), color: '#22C55E', icon: '💰' },
           { label: 'Voids / Refunds', value: fmt(totalVoided + totalRefunded), color: '#EF4444', icon: '🚫' },
-          { label: 'Net Sales', value: fmt(totalSales - totalVoided - totalRefunded), color: '#38BDF8', icon: '📊' },
+          { label: 'Net Total', value: fmt(netTotal), color: '#38BDF8', icon: '📊' },
           { label: 'Tickets', value: String(ticketCount) + (voidCount > 0 ? ' (' + voidCount + ' void)' : ''), color: '#F59E0B', icon: '🎫' },
         ].map(function(card) {
           return (
@@ -463,17 +309,21 @@ export default function ReportsModule() {
                   <ReceiptLine label="Product Sales" value={fmt(totalProductSales)} />
                   {totalPackageSales > 0 && <ReceiptLine label="Package Sales" value={fmt(totalPackageSales)} />}
                   {totalMembershipSales > 0 && <ReceiptLine label="Membership Sales" value={fmt(totalMembershipSales)} />}
+                  {totalGiftCardSales > 0 && <ReceiptLine label="Gift Card Sales" value={fmt(totalGiftCardSales)} />}
                   <div style={{ height: 1, background: '#1E293B', margin: '10px 0' }} />
                   <ReceiptLine label="GROSS SALES" value={fmt(totalSales)} bold />
+                  {totalPkgCreditsRestored > 0 && <ReceiptLine label="Pkg Credits Restored" value={'+' + fmt(totalPkgCreditsRestored)} color="#8B5CF6" />}
                   <ReceiptLine label="Tips Collected" value={fmt(totalTips)} />
+                  {totalTaxCollected > 0 && <ReceiptLine label="Tax Collected" value={fmt(totalTaxCollected)} />}
                   <div style={{ height: 1, background: '#1E293B', margin: '10px 0' }} />
-                  <ReceiptLine label="GROSS TOTAL" value={fmt(grandTotal)} bold large color="#22C55E" />
+                  <ReceiptLine label="GROSS TOTAL" value={fmt(grossWithTax)} bold large color="#22C55E" />
                 </div>
 
-                {/* Voids & Refunds section */}
-                {(totalVoided > 0 || totalRefunded > 0) && (
+                {/* Deductions section */}
+                {(totalVoided > 0 || totalRefunded > 0 || totalPkgRedeemed > 0) && (
                   <div style={{ padding: '18px 24px', borderBottom: '1px dashed #334155' }}>
                     <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>Voids & Refunds</div>
+                    {totalPkgRedeemed > 0 && <ReceiptLine label="Pkg Redeemed" value={'\u2212' + fmt(totalPkgRedeemed)} color="#A855F7" />}
                     {totalVoided > 0 && <ReceiptLine label={'Voided (' + voidCount + ' ticket' + (voidCount !== 1 ? 's' : '') + ')'} value={'\u2212' + fmt(totalVoided)} color="#EF4444" />}
                     {totalRefunded > 0 && <ReceiptLine label={'Refunded (' + refundCount + ' ticket' + (refundCount !== 1 ? 's' : '') + ')'} value={'\u2212' + fmt(totalRefunded)} color="#F59E0B" />}
                     <div style={{ height: 1, background: '#1E293B', margin: '10px 0' }} />
@@ -687,114 +537,3 @@ export default function ReportsModule() {
   );
 }
 
-// ── Receipt line component ──
-function ReceiptLine({ label, value, bold, large, color }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
-      <span style={{ fontSize: large ? 14 : 13, color: color || (bold ? '#F1F5F9' : '#E2E8F0'), fontWeight: bold ? 600 : 400 }}>{label}</span>
-      <span style={{ fontSize: large ? 16 : 13, color: color || (bold ? '#F1F5F9' : '#E2E8F0'), fontWeight: bold ? 600 : 500, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
-    </div>
-  );
-}
-
-// ── Calendar picker component ──
-var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-var DAY_HEADERS = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-
-function CalendarPicker({ label, value, onChange }) {
-  var T = useTheme();
-  // Parse selected date or default to today
-  var sel = value ? new Date(value + 'T00:00') : new Date();
-  var initYear = sel.getFullYear();
-  var initMonth = sel.getMonth();
-
-  var [viewYear, setViewYear] = useState(initYear);
-  var [viewMonth, setViewMonth] = useState(initMonth);
-
-  function prevMonth() {
-    if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); }
-    else setViewMonth(viewMonth - 1);
-  }
-  function nextMonth() {
-    if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); }
-    else setViewMonth(viewMonth + 1);
-  }
-
-  // Build calendar grid
-  var firstDay = new Date(viewYear, viewMonth, 1).getDay(); // 0=Sun
-  var daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  var cells = [];
-
-  // Empty cells before first day
-  for (var e = 0; e < firstDay; e++) cells.push(null);
-  // Day cells
-  for (var d = 1; d <= daysInMonth; d++) cells.push(d);
-
-  // Selected date string for comparison
-  var selectedStr = value || '';
-
-  function pickDay(day) {
-    var mm = String(viewMonth + 1).padStart(2, '0');
-    var dd = String(day).padStart(2, '0');
-    onChange(viewYear + '-' + mm + '-' + dd);
-  }
-
-  var CELL = 40;
-
-  return (
-    <div>
-      <div style={{ fontSize: 13, color: '#F1F5F9', fontWeight: 500, marginBottom: 10, textAlign: 'center' }}>{label}</div>
-
-      {/* Month/year header with arrows */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div onClick={prevMonth}
-          style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: '1px solid #475569', borderRadius: 6, color:T.textPrimary, fontSize: 16, cursor: 'pointer', userSelect: 'none' }}
-          onMouseEnter={function(ev) { ev.currentTarget.style.background = '#334155'; }}
-          onMouseLeave={function(ev) { ev.currentTarget.style.background = 'transparent'; }}>‹</div>
-        <div style={{ fontSize: 14, fontWeight: 500, color: '#F1F5F9' }}>{MONTH_NAMES[viewMonth]} {viewYear}</div>
-        <div onClick={nextMonth}
-          style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: '1px solid #475569', borderRadius: 6, color:T.textPrimary, fontSize: 16, cursor: 'pointer', userSelect: 'none' }}
-          onMouseEnter={function(ev) { ev.currentTarget.style.background = '#334155'; }}
-          onMouseLeave={function(ev) { ev.currentTarget.style.background = 'transparent'; }}>›</div>
-      </div>
-
-      {/* Day headers */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, ' + CELL + 'px)', gap: 2 }}>
-        {DAY_HEADERS.map(function(dh) {
-          return <div key={dh} style={{ height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#64748B', fontWeight: 500 }}>{dh}</div>;
-        })}
-
-        {/* Day cells */}
-        {cells.map(function(day, i) {
-          if (day === null) return <div key={'e' + i} style={{ height: CELL }} />;
-          var mm = String(viewMonth + 1).padStart(2, '0');
-          var dd = String(day).padStart(2, '0');
-          var dateStr = viewYear + '-' + mm + '-' + dd;
-          var isSelected = dateStr === selectedStr;
-          var isToday = dateStr === new Date().toISOString().slice(0, 10);
-
-          return (
-            <div key={day} onClick={function() { pickDay(day); }}
-              style={{
-                height: CELL, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 13, fontWeight: isSelected ? 600 : 400, cursor: 'pointer', borderRadius: 8, userSelect: 'none',
-                background: isSelected ? T.accent : 'transparent',
-                color: isSelected ? '#fff' : (isToday ? T.blueLight : '#E2E8F0'),
-                border: isToday && !isSelected ? '1px solid #60A5FA' : '1px solid transparent',
-                transition: 'background 100ms',
-              }}
-              onMouseEnter={function(ev) { if (!isSelected) ev.currentTarget.style.background = '#334155'; }}
-              onMouseLeave={function(ev) { if (!isSelected) ev.currentTarget.style.background = 'transparent'; }}>
-              {day}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Selected date display */}
-      <div style={{ textAlign: 'center', marginTop: 10, fontSize: 13, color: value ? '#F1F5F9' : '#64748B', fontWeight: 500 }}>
-        {value ? (new Date(value + 'T00:00').getMonth() + 1) + '-' + new Date(value + 'T00:00').getDate() + '-' + new Date(value + 'T00:00').getFullYear() : 'Select a date'}
-      </div>
-    </div>
-  );
-}

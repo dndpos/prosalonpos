@@ -5,6 +5,7 @@ import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 import { CHECKOUT_CLIENTS } from './checkoutBridge';
 import { fp } from '../../lib/formatUtils';
 import AreaTag from '../../components/ui/AreaTag';
+import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 
 function autoCap(v){return v.replace(/(^|\s)\S/g,c=>c.toUpperCase());}
 function Av({name,size=28,index=0}){
@@ -23,6 +24,15 @@ export default function ClientLookupModal({ onSelect, onClose }){
   const filtered = CHECKOUT_CLIENTS.filter(c=>phoneDigits?c.phone.includes(phoneDigits):true);
 
   function handleSelect(c){ onSelect(c); }
+
+  useNumpadKeyboard(
+    true,
+    function(d) { if (phoneDigits.length < 10) setPhoneDigits(function(p) { return p + d; }); },
+    function() { setPhoneDigits(function(p) { return p.slice(0, -1); }); },
+    null,
+    onClose,
+    [phoneDigits]
+  );
   function handleNewSave(){
     if(!newFirst.trim()||phoneDigits.length!==10)return;
     onSelect({id:'c-new-'+Date.now(),first_name:newFirst.trim(),last_name:newLast.trim(),phone:phoneDigits,outstanding_balance_cents:0});

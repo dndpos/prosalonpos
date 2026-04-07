@@ -245,7 +245,7 @@ router.put('/categories/:id', async function(req, res, next) {
 
     var d = req.body;
     var updateData = {};
-    var fields = ['name', 'position', 'active'];
+    var fields = ['name', 'position', 'active', 'taxable'];
     fields.forEach(function(f) {
       if (d[f] !== undefined) updateData[f] = d[f];
     });

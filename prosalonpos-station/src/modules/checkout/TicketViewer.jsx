@@ -1,4 +1,5 @@
 import AreaTag from '../../components/ui/AreaTag';
+import PinPopup from '../../components/ui/PinPopup';
 import { useTheme } from '../../lib/ThemeContext';
 /**
  * Pro Salon POS — Ticket Viewer
@@ -37,19 +38,17 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
   // Read from store directly — props may be stale during navigation
   var storeOpen = useTicketStore(function(s) { return s.openTickets; });
   var storeClosed = useTicketStore(function(s) { return s.closedTickets; });
+  var storeMerged = useTicketStore(function(s) { return s.mergedTickets; });
   var openTickets = storeOpen.length > 0 ? storeOpen : propOpen;
   var closedTickets = storeClosed.length > 0 ? storeClosed : propClosed;
+  var mergedTickets = storeMerged || [];
   const [selectedOpen, setSelectedOpen] = useState([]); // ids of selected open tickets
   const [selectedClosedId, setSelectedClosedId] = useState(null);
   const [showReopenPin, setShowReopenPin] = useState(false);
-  const [pinDigits, setPinDigits] = useState('');
-  const [pinError, setPinError] = useState(false);
 
   // Tip distribution on closed tickets
   const [showTipDist, setShowTipDist] = useState(false);
   const [showTipPin, setShowTipPin] = useState(false);
-  const [tipPinDigits, setTipPinDigits] = useState('');
-  const [tipPinError, setTipPinError] = useState(false);
 
   // Add Tip on closed credit card tickets
   const [showAddTip, setShowAddTip] = useState(false);
@@ -70,6 +69,8 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
   const [fromDate, setFromDate] = useState(_today);
   const [toDate, setToDate] = useState(_today);
   var fetchTickets = useTicketStore(function(s) { return s.fetchTickets; });
+  var deleteTicket = useTicketStore(function(s) { return s.deleteTicket; });
+  var deleteAllTickets = useTicketStore(function(s) { return s.deleteAllTickets; });
   var isToday = fromDate === _today && toDate === _today;
 
   // Auto-fetch on mount + whenever date range changes
@@ -119,16 +120,10 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
     return ticket.items.reduce((s,it)=>s+(it.price_cents*(it.qty||1)),0);
   }
 
-  // PIN check for reopen
-  function handlePinTap(d){
-    if(pinDigits.length>=8) return;
-    const next=pinDigits+d; setPinDigits(next); setPinError(false);
-    if(next.length>=2){
-      const match=CHECKOUT_STAFF.find(s=>s.pin===next);
-      const mockAllowed=!!match&&(permission==='all_staff'||match.id==='s1');
-      if(mockAllowed){ onReopen(selectedClosed); setShowReopenPin(false); setPinDigits(''); setSelectedClosedId(null); }
-      else if(next.length>=8){ setPinError(true); setTimeout(()=>{setPinDigits('');setPinError(false);},1000); }
-    }
+  // PIN success for reopen
+  function handleReopenPinSuccess(staff) {
+    setShowReopenPin(false);
+    if (selectedClosed) { onReopen(selectedClosed); setSelectedClosedId(null); }
   }
 
   // Tip distribution — check PIN if required, then show distribution screen
@@ -145,21 +140,11 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
   function hasCreditPayment(ticket){
     return ticket.payments && ticket.payments.some(function(p){ return p.method==='credit'; });
   }
-  function handleTipPinTap(d){
-    if(tipPinDigits.length>=4) return;
-    const next=tipPinDigits+d; setTipPinDigits(next); setTipPinError(false);
-    if(next.length===4){
-      const match=CHECKOUT_STAFF.find(s=>s.pin===next);
-      // Add Tip always requires manager/owner (mock: s1). Distribute uses tipPerm.
-      const perm = addTipPending==='add_tip' ? 'manager_owner' : tipPerm;
-      const mockAllowed=!!match&&(perm==='all_staff'||match.id==='s1');
-      if(mockAllowed){
-        setShowTipPin(false); setTipPinDigits('');
-        if(addTipPending==='add_tip'){ setShowAddTip(true); setAddTipInput(''); }
-        else { setShowTipDist(true); }
-      }
-      else { setTipPinError(true); setTimeout(()=>{setTipPinDigits('');setTipPinError(false);},1000); }
-    }
+  // PIN success for tip operations
+  function handleTipPinSuccess(staff) {
+    setShowTipPin(false);
+    if (addTipPending === 'add_tip') { setShowAddTip(true); setAddTipInput(''); }
+    else { setShowTipDist(true); }
   }
   // Confirm the added tip amount
   function confirmAddTip(){
@@ -202,18 +187,26 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
     });
   }
 
+  // ── PIN POPUPS (fixed overlays, must render before early returns) ──
+  var pinPopups = (
+    <>
+      <PinPopup show={showReopenPin} title="Enter manager or owner PIN to reopen this ticket" onSuccess={handleReopenPinSuccess} onCancel={function(){ setShowReopenPin(false); }} />
+      <PinPopup show={showTipPin} title={addTipPending==='add_tip' ? 'Enter manager or owner PIN to add a tip' : 'Enter PIN to edit tip distribution'} onSuccess={handleTipPinSuccess} onCancel={function(){ setShowTipPin(false); setAddTipPending(null); }} />
+    </>
+  );
+
   // ── VOID FLOW ──
   if(showVoidFlow && selectedClosed){
-    return <VoidFlow ticket={selectedClosed} staffName={vrPinStaffName}
+    return <>{pinPopups}<VoidFlow ticket={selectedClosed} staffName={vrPinStaffName}
       onConfirm={function(data){ if(onVoid) onVoid(selectedClosed.id, data); setShowVoidFlow(false); setSelectedClosedId(null); }}
-      onCancel={function(){ setShowVoidFlow(false); }} />;
+      onCancel={function(){ setShowVoidFlow(false); }} /></>;
   }
 
   // ── REFUND FLOW ──
   if(showRefundFlow && selectedClosed){
-    return <RefundFlow ticket={selectedClosed} staffName={vrPinStaffName}
-      onConfirm={function(data){ if(onRefund) onRefund(selectedClosed.id, data); setShowRefundFlow(false); setSelectedClosedId(null); }}
-      onCancel={function(){ setShowRefundFlow(false); }} />;
+    return <>{pinPopups}<RefundFlow ticket={selectedClosed} staffName={vrPinStaffName}
+      onConfirm={function(data){ if(onRefund){ onRefund(selectedClosed.id, data).then(function(){ setShowRefundFlow(false); setTimeout(function(){ fetchTickets(); }, 500); }).catch(function(){ setShowRefundFlow(false); }); } else { setShowRefundFlow(false); } }}
+      onCancel={function(){ setShowRefundFlow(false); }} /></>;
   }
 
   // ── ADD TIP SCREEN (credit card closed tickets) ──
@@ -286,55 +279,6 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
     />;
   }
 
-  // ── TIP EDIT PIN GATE ──
-  if(showTipPin){
-    const isAddTip = addTipPending==='add_tip';
-    const permLabel = isAddTip ? 'manager or owner' : (tipPerm==='all_staff'?'staff':'manager or owner');
-    const permAction = isAddTip ? 'add a tip to this ticket' : 'edit tip distribution';
-    return(
-      <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif"}}>
-        <div style={{width:320,textAlign:'center'}}>
-          <div style={{fontSize:16,fontWeight:600,color:C.textPrimary,marginBottom:6}}>PIN Required</div>
-          <div style={{color:C.textPrimary,fontSize:13,marginBottom:24}}>Enter {permLabel} PIN to {permAction}</div>
-          <div style={{display:'flex',justifyContent:'center',gap:12,marginBottom:20}}>
-            {[0,1,2,3].map(i=>(<div key={i} style={{width:18,height:18,borderRadius:'50%',background:tipPinError?C.danger:i<tipPinDigits.length?C.blueLight:'transparent',border:tipPinError?`2px solid ${C.danger}`:i<tipPinDigits.length?'2px solid transparent':`2px solid ${C.borderMedium}`,transition:'all 0.15s'}}/>))}
-          </div>
-          {tipPinError&&<div style={{color:C.danger,fontSize:13,marginBottom:12}}>Not authorized — try again</div>}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,maxWidth:260,margin:'0 auto'}}>
-            {['7','8','9','4','5','6','1','2','3'].map(d=>(<div key={d} onClick={()=>handleTipPinTap(d)} style={{height:56,background:C.btnBg,border:'1px solid '+C.btnBorder,borderRadius:8,color:C.btnText,fontSize:22,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#E2E8F0'} onMouseLeave={e=>e.currentTarget.style.background=C.btnBg}>{d}</div>))}
-            <div onClick={()=>{setTipPinDigits('');setTipPinError(false);}} style={{height:56,background:'#334155',border:'1px solid #475569',borderRadius:8,color:C.warning,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#E2E8F0'} onMouseLeave={e=>e.currentTarget.style.background=C.btnBg}>Clear</div>
-            <div onClick={()=>handleTipPinTap('0')} style={{height:56,background:C.btnBg,border:'1px solid '+C.btnBorder,borderRadius:8,color:C.btnText,fontSize:22,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#E2E8F0'} onMouseLeave={e=>e.currentTarget.style.background=C.btnBg}>0</div>
-            <div onClick={()=>setTipPinDigits(prev=>prev.slice(0,-1))} style={{height:56,background:'#334155',border:'1px solid #475569',borderRadius:8,color:C.danger,fontSize:16,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#E2E8F0'} onMouseLeave={e=>e.currentTarget.style.background=C.btnBg}>⌫</div>
-          </div>
-          <button onClick={()=>{setShowTipPin(false);setTipPinDigits('');}} style={{marginTop:20,background:'none',border:'none',color:C.textPrimary,fontSize:13,cursor:'pointer',fontFamily:'inherit',textDecoration:'underline'}}>Cancel</button>
-        </div>
-      </div>
-    );
-  }
-
-  // ── REOPEN PIN GATE ──
-  if(showReopenPin){
-    return(
-      <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif"}}>
-        <div style={{width:320,textAlign:'center'}}>
-          <div style={{fontSize:16,fontWeight:600,color:C.textPrimary,marginBottom:6}}>Manager PIN Required</div>
-          <div style={{color:C.textPrimary,fontSize:13,marginBottom:24}}>Enter manager or owner PIN to reopen this ticket</div>
-          <div style={{display:'flex',justifyContent:'center',gap:12,marginBottom:20}}>
-            {[0,1,2,3].map(i=>(<div key={i} style={{width:18,height:18,borderRadius:'50%',background:pinError?C.danger:i<pinDigits.length?C.blueLight:'transparent',border:pinError?`2px solid ${C.danger}`:i<pinDigits.length?'2px solid transparent':`2px solid ${C.borderMedium}`,transition:'all 0.15s'}}/>))}
-          </div>
-          {pinError&&<div style={{color:C.danger,fontSize:13,marginBottom:12}}>Not authorized — try again</div>}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,maxWidth:260,margin:'0 auto'}}>
-            {['7','8','9','4','5','6','1','2','3'].map(d=>(<div key={d} onClick={()=>handlePinTap(d)} style={{height:56,background:C.btnBg,border:'1px solid '+C.btnBorder,borderRadius:8,color:C.btnText,fontSize:22,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#E2E8F0'} onMouseLeave={e=>e.currentTarget.style.background=C.btnBg}>{d}</div>))}
-            <div onClick={()=>{setPinDigits('');setPinError(false);}} style={{height:56,background:'#334155',border:'1px solid #475569',borderRadius:8,color:C.warning,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#E2E8F0'} onMouseLeave={e=>e.currentTarget.style.background=C.btnBg}>Clear</div>
-            <div onClick={()=>handlePinTap('0')} style={{height:56,background:C.btnBg,border:'1px solid '+C.btnBorder,borderRadius:8,color:C.btnText,fontSize:22,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#E2E8F0'} onMouseLeave={e=>e.currentTarget.style.background=C.btnBg}>0</div>
-            <div onClick={()=>setPinDigits(prev=>prev.slice(0,-1))} style={{height:56,background:'#334155',border:'1px solid #475569',borderRadius:8,color:C.danger,fontSize:16,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#E2E8F0'} onMouseLeave={e=>e.currentTarget.style.background=C.btnBg}>⌫</div>
-          </div>
-          <button onClick={()=>{setShowReopenPin(false);setPinDigits('');}} style={{marginTop:20,background:'none',border:'none',color:C.textPrimary,fontSize:13,cursor:'pointer',fontFamily:'inherit',textDecoration:'underline'}}>Cancel</button>
-        </div>
-      </div>
-    );
-  }
-
   // ── CLOSED TICKET DETAIL ──
   if(selectedClosed){
     const groups={};
@@ -349,13 +293,15 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
     const undistributed = hasTip && multiTech && !selectedClosed.tipDistributed;
     return(
       <>
+      {pinPopups}
       {showReceipt && <ReceiptPreview ticket={selectedClosed} onClose={()=>setShowReceipt(false)}/>}
       <div style={{width:'100%',height:'100%',display:'flex',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif",overflow:'hidden'}}>
         <div style={{width:360,minWidth:360,background:C.chromeDark,borderRight:`1px solid ${C.borderLight}`,display:'flex',flexDirection:'column',flexShrink:0}}>
           <div style={{padding:'12px 14px',borderBottom:`1px solid ${C.borderLight}`,flexShrink:0,display:'flex',alignItems:'center',gap:10}}>
-            <button onClick={()=>setSelectedClosedId(null)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'2px 6px'}}>←</button>
+            <div onClick={()=>setSelectedClosedId(null)} style={{height:28,padding:'0 12px',background:'#1E3A5F',border:'1px solid #2D5A8E',borderRadius:6,color:'#93C5FD',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:4,userSelect:'none'}}
+              onMouseEnter={function(e){e.currentTarget.style.background='#244872';}} onMouseLeave={function(e){e.currentTarget.style.background='#1E3A5F';}}>← Back</div>
             <div>
-              <div style={{fontSize:14,fontWeight:600,color:C.textPrimary}}>Ticket #{selectedClosed.ticketNumber}</div>
+              <div style={{fontSize:14,fontWeight:600,color:C.textPrimary}}>Ticket #{selectedClosed.displayNumber||selectedClosed.ticketNumber}</div>
               <div style={{fontSize:11,color:C.textPrimary}}>{timeStr(selectedClosed.closedAt)}{selectedClosed.clientName?` · ${selectedClosed.clientName}`:''}</div>
             </div>
             <div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
@@ -406,8 +352,8 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
                 {selectedClosed.refunds.map((rf,ri)=>(
                   <div key={ri} style={{padding:'6px 8px',background:'rgba(217,119,6,0.08)',borderRadius:4,marginBottom:4}}>
                     <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
-                      <span style={{color:C.warning,fontSize:10,fontWeight:600}}>Refund #{ri+1}</span>
-                      <span style={{color:C.warning,fontSize:11,fontWeight:600}}>−{fmt(rf.refundTotal_cents)}</span>
+                      <span style={{color:rf.pkgCreditsRestored?'#8B5CF6':C.warning,fontSize:10,fontWeight:600}}>{rf.pkgCreditsRestored?'📦 Pkg Credits Restored':'Refund #'+(ri+1)}</span>
+                      {!rf.pkgCreditsRestored&&<span style={{color:C.warning,fontSize:11,fontWeight:600}}>−{fmt(rf.refundTotal_cents)}</span>}
                     </div>
                     {rf.items.map(rfi=><div key={rfi.itemId} style={{color:C.textPrimary,fontSize:10}}>{rfi.name}: −{fmt(rfi.refundAmount_cents)}</div>)}
                     {rf.refundTax_cents>0&&<div style={{color:C.textPrimary,fontSize:10}}>Tax: −{fmt(rf.refundTax_cents)}</div>}
@@ -422,13 +368,19 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
           <div style={{padding:'8px 12px',borderTop:`1px solid ${C.borderLight}`,display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
             {selectedClosed.voided ? (
               <div style={{display:'flex',gap:8}}>
-                <button onClick={()=>setSelectedClosedId(null)} style={{flex:1,height:40,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:C.textPrimary,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Back</button>
+                <button onClick={()=>setSelectedClosedId(null)} style={{flex:1,height:40,background:'#3B1C1C',border:'1px solid #7F1D1D',borderRadius:6,color:'#FCA5A5',fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
                 <button onClick={()=>setShowReceipt(true)} style={{flex:1,height:40,background:C.grid,border:`1px solid ${C.borderMedium}`,borderRadius:6,color:C.textPrimary,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>🧾 Receipt</button>
               </div>
             ) : (
               <>
                 <div style={{display:'flex',gap:6}}>
-                  <button onClick={()=>setSelectedClosedId(null)} style={{flex:1,height:36,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Back</button>
+                  {(function(){
+                    var refundedIds = selectedClosed.refundedItemIds || {};
+                    var allItemsRefunded = (selectedClosed.items || []).every(function(it){ return refundedIds[it.id]; });
+                    var refundDisabled = selectedClosed.status === 'refunded' || allItemsRefunded;
+                    return <button onClick={refundDisabled?undefined:handleRefundStart} disabled={refundDisabled} title={refundDisabled?'All items already refunded':''}
+                    style={{flex:1,height:36,background:'transparent',border:'1px solid '+(refundDisabled?C.borderMedium:C.warning),borderRadius:6,color:refundDisabled?C.textMuted:C.warning,fontSize:12,fontWeight:500,cursor:refundDisabled?'default':'pointer',fontFamily:'inherit',opacity:refundDisabled?0.5:1}}>Refund</button>;
+                  })()}
                   <button onClick={()=>setShowReceipt(true)} style={{flex:1,height:36,background:C.grid,border:`1px solid ${C.borderMedium}`,borderRadius:6,color:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>🧾 Receipt</button>
                   <button onClick={()=>setShowReopenPin(true)} style={{flex:1,height:36,background:C.warning,border:'none',borderRadius:6,color:'#fff',fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Reopen</button>
                 </div>
@@ -442,10 +394,11 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
                     var voidTip = hasRefunds ? 'Cannot void — refund exists' : !isToday ? 'Cannot void — not today' : '';
                     return(
                       <>
+                        <button onClick={()=>setSelectedClosedId(null)} style={{flex:1,height:36,background:'#3B1C1C',border:'1px solid #7F1D1D',borderRadius:6,color:'#FCA5A5',fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
                         <button onClick={voidDisabled?undefined:handleVoidStart} disabled={voidDisabled} title={voidTip}
                           style={{flex:1,height:36,background:'transparent',border:`1px solid ${voidDisabled?C.borderMedium:C.danger}`,borderRadius:6,color:voidDisabled?C.textMuted:C.danger,fontSize:12,fontWeight:500,cursor:voidDisabled?'default':'pointer',fontFamily:'inherit',opacity:voidDisabled?0.5:1}}>Void Ticket</button>
-                        <button onClick={handleRefundStart}
-                          style={{flex:1,height:36,background:'transparent',border:`1px solid ${C.warning}`,borderRadius:6,color:C.warning,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Refund</button>
+                        <button onClick={function(){rbac.requirePermission(ACTIONS.VOID_TICKET,function(){if(confirm('Permanently delete ticket #'+selectedClosed.ticketNumber+'? This cannot be undone.')){deleteTicket(selectedClosed.id).then(function(){setSelectedClosedId(null);fetchTickets(fromDate,toDate);}).catch(function(e){alert(e.message);});}});}}
+                          style={{flex:1,height:36,background:'transparent',border:`1px solid ${C.textMuted}`,borderRadius:6,color:C.textMuted,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Delete</button>
                       </>
                     );
                   })()}
@@ -618,6 +571,10 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
             style={{padding:'8px 16px',borderRadius:8,fontSize:14,fontWeight:600,cursor:'pointer',background:isToday?C.blue:C.chromeDark,color:isToday?'#fff':C.blueLight,border:isToday?'none':'2px solid '+C.borderMedium}}
             onMouseEnter={function(e){ if(!isToday) e.currentTarget.style.background=C.gridHover;}}
             onMouseLeave={function(e){ if(!isToday) e.currentTarget.style.background=C.chromeDark;}}>Today</div>
+          <div onClick={function(){rbac.requirePermission(ACTIONS.VOID_TICKET,function(){if(confirm('DELETE ALL TICKETS for this salon? This cannot be undone.')){deleteAllTickets().then(function(n){alert('Deleted '+n+' tickets');fetchTickets(fromDate,toDate);}).catch(function(e){alert(e.message);});}});}}
+            style={{padding:'8px 12px',borderRadius:8,fontSize:12,fontWeight:500,cursor:'pointer',background:C.chromeDark,color:C.danger,border:'1px solid '+C.danger}}
+            onMouseEnter={function(e){e.currentTarget.style.background='rgba(239,68,68,0.15)';}}
+            onMouseLeave={function(e){e.currentTarget.style.background=C.chromeDark;}}>Delete All</div>
         </div>
       </div>
 
@@ -743,7 +700,7 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
                     onMouseLeave={e=>{e.currentTarget.style.borderColor=borderColor;e.currentTarget.style.background=isVoided?'rgba(239,68,68,0.04)':C.chromeDark;}}>
                     <div style={{width:50,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                       <div style={{width:50,height:50,borderRadius:8,background:isVoided?'rgba(239,68,68,0.12)':C.grid,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                        <span style={{color:isVoided?C.danger:C.textPrimary,fontSize:15,fontWeight:700}}>#{ticket.ticketNumber}</span>
+                        <span style={{color:isVoided?C.danger:C.textPrimary,fontSize:ticket.displayNumber?12:15,fontWeight:700}}>#{ticket.displayNumber||ticket.ticketNumber}</span>
                       </div>
                     </div>
                     <div style={{flex:1,minWidth:0}}>
@@ -751,7 +708,7 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
                         <span style={{color:isVoided?C.textMuted:C.textPrimary,fontSize:16,fontWeight:600,textDecoration:isVoided?'line-through':'none'}}>{ticket.clientName||'Walk-in'}</span>
                         <span style={{color:C.textPrimary,fontSize:12}}>{timeStr(ticket.closedAt)}</span>
                         {isVoided&&<span style={{padding:'2px 6px',borderRadius:4,background:'rgba(239,68,68,0.2)',color:C.danger,fontSize:10,fontWeight:700}}>VOID</span>}
-                        {hasRefund&&!isVoided&&<span style={{padding:'2px 6px',borderRadius:4,background:'rgba(217,119,6,0.2)',color:C.warning,fontSize:10,fontWeight:600}}>Refund</span>}
+                        {hasRefund&&!isVoided&&(function(){ var isPkgRefund=ticket.refunds[0]&&ticket.refunds[0].pkgCreditsRestored; return <span style={{padding:'2px 6px',borderRadius:4,background:isPkgRefund?'rgba(139,92,246,0.2)':'rgba(217,119,6,0.2)',color:isPkgRefund?'#8B5CF6':C.warning,fontSize:10,fontWeight:600}}>{isPkgRefund?'📦 Pkg Refund':'Refund'}</span>; })()}
                         {tipAction==='split_tip'&&!isVoided&&<span style={{padding:'2px 6px',borderRadius:4,background:'rgba(217,119,6,0.2)',color:C.warning,fontSize:10,fontWeight:600}}>💰 Split Tip</span>}
                       </div>
                       {Object.entries(byTech).map(([tech, items])=>(
@@ -764,11 +721,47 @@ export default function TicketViewer({ openTickets: propOpen, closedTickets: pro
                     <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',justifyContent:'center',flexShrink:0}}>
                       <div style={{color:isVoided?C.danger:C.textPrimary,fontSize:18,fontWeight:700,textDecoration:isVoided?'line-through':'none'}}>{fmt(ticket.totalCents)}</div>
                       <div style={{color:isVoided?C.danger:C.success,fontSize:11,fontWeight:500,marginTop:2}}>{isVoided?'Voided':'Paid'}</div>
+                      {!isVoided&&ticket.payments&&ticket.payments.length>0&&(function(){
+                        var MC={cash:'#22C55E',credit:'#38BDF8',giftcard:'#F59E0B',zelle:'#8B5CF6'};
+                        var MN={cash:'Cash',credit:'Credit',giftcard:'Gift Card',zelle:'Zelle'};
+                        var seen={};var unique=[];
+                        ticket.payments.forEach(function(p){if(!seen[p.method]){seen[p.method]=true;unique.push(p.method);}});
+                        var label=unique.map(function(m){return MN[m]||m;}).join(' + ');
+                        var color=unique.length===1?(MC[unique[0]]||'#94A3B8'):'#94A3B8';
+                        return <div style={{fontSize:10,fontWeight:600,marginTop:2,color:color}}>{label}</div>;
+                      })()}
                     </div>
                   </button>
                 );
               });
             })()}
+          </>
+        )}
+
+        {/* ── MERGED TICKETS (grayed out, bottom of list) ── */}
+        {mergedTickets.length>0&&(
+          <>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,marginTop:12}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.textMuted}}>Merged</div>
+              <div style={{padding:'2px 8px',borderRadius:10,background:C.grid,color:C.textMuted,fontSize:11,fontWeight:600}}>{mergedTickets.length}</div>
+            </div>
+            {mergedTickets.map(function(ticket){
+              var absorberTicket = closedTickets.concat(openTickets).find(function(t){ return t.id === ticket.mergedInto; });
+              var absorberNum = absorberTicket ? (absorberTicket.displayNumber || absorberTicket.ticketNumber) : '?';
+              return(
+                <div key={ticket.id} style={{display:'flex',alignItems:'center',gap:14,width:'100%',padding:'14px 16px',background:C.chromeDark,border:'1px solid '+C.borderLight,borderRadius:10,marginBottom:8,opacity:0.5,cursor:'default'}}>
+                  <div style={{width:50,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <div style={{width:50,height:50,borderRadius:8,background:C.grid,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <span style={{color:C.textMuted,fontSize:15,fontWeight:700}}>#{ticket.ticketNumber}</span>
+                    </div>
+                  </div>
+                  <div style={{flex:1}}>
+                    <span style={{color:C.textMuted,fontSize:14,fontWeight:500}}>{ticket.clientName||'Walk-in'}</span>
+                    <div style={{color:C.textMuted,fontSize:12,marginTop:2}}>Merged → #{absorberNum}</div>
+                  </div>
+                </div>
+              );
+            })}
           </>
         )}
 

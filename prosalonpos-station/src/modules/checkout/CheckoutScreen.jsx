@@ -11,18 +11,22 @@ import CheckoutModals from './CheckoutModals';
 import CheckoutPinScreen from './CheckoutPinScreen';
 import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 import useBarcodeScanner from './useBarcodeScanner';
+import useCheckoutDrag from './useCheckoutDrag';
+import useCheckoutCalc from './useCheckoutCalc';
 import { relayPrint } from '../../lib/printRelay';
 import { CHECKOUT_SETTINGS, CHECKOUT_STAFF, MOCK_RETAIL } from './checkoutBridge';
 import { MOCK_GIFT_CARDS } from '../gift-cards/giftCardBridge';
-import { MOCK_CLIENT_PACKAGE_ITEMS } from '../packages/packageBridge';
 import usePackageRedemption from './usePackageRedemption';
+import ChangePaymentPopup from './ChangePaymentPopup';
 import useMembershipPerks from './useMembershipPerks';
 import { useClientStore } from '../../lib/stores/clientStore';
+import { useTicketStore } from '../../lib/stores/ticketStore';
 import { useServiceStore } from '../../lib/stores/serviceStore';
 import { useStaffStore } from '../../lib/stores/staffStore';
 import { useSettingsStore } from '../../lib/stores/settingsStore';
 import { useMembershipStore } from '../../lib/stores/membershipStore';
-import { fmt, fp, numpadDisplay, numpadTap, numpadToCents, numpadToFloat, numpadKeys, roundToNickel, cashQuickAmounts } from './checkoutHelpers';
+import { usePackageStore } from '../../lib/stores/packageStore';
+import { fmt, fp, numpadDisplay, numpadTap, numpadToCents, numpadToFloat, numpadKeys, cashQuickAmounts } from './checkoutHelpers';
 import { useRBAC } from '../../lib/RBACContext';
 import { ACTIONS } from '../../lib/rbac';
 function Av({name,size=28,index=0,photo=null}){
@@ -32,25 +36,53 @@ function Av({name,size=28,index=0,photo=null}){
   return(<div style={{width:size,height:size,borderRadius:'50%',background:AVATAR_COLORS[index%AVATAR_COLORS.length],display:'flex',alignItems:'center',justifyContent:'center',color:C.textPrimary,fontSize:size<28?9:11,fontWeight:500,flexShrink:0}}>{getInitials(name)}</div>);
 }
 const TICKET_W = 300;
-export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket, openTickets, onCombineTicket, nextTicketNumber, catalogLayout, drawerSession, salonSettings, onCashPayment, canProcessPayments, onPrintHold }){
+export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket, openTickets, nextTicketNumber, catalogLayout, drawerSession, salonSettings, onCashPayment, canProcessPayments, onPrintHold }){
   var C = useTheme();
   var rbac = useRBAC();
   var storeClients = useClientStore(function(s) { return s.clients; });
   var storeServices = useServiceStore(function(s) { return s.services; });
   var canPay = canProcessPayments !== false; // default true
+  var storeCloseTicket = useTicketStore(function(s) { return s.closeTicket; });
+  function handleCancel() {
+    if (isReopened && reopenedTicketId) {
+      // Restore ticket to paid status — undo the reopen
+      storeCloseTicket(reopenedTicketId, {}).catch(function(err) {
+        console.warn('[CheckoutScreen] Cancel-reopen restore failed:', err.message);
+      });
+    }
+    onDone();
+  }
   const [depositCents, setDepositCents] = useState(appointmentData?.depositCents || 0);
-  const hasCashier = !!appointmentData?.cashierStaff;
-  const needsPin = !appointmentData || (appointmentData && !appointmentData.services && !hasCashier);
+  var isReopened = !!(appointmentData && appointmentData.reopened);
+  var reopenedTicketId = appointmentData?.reopenedTicketId || null;
+  var reopenedTicketNumber = appointmentData?.reopenedTicketNumber || null;
+  var alreadyPaidCents = appointmentData?.alreadyPaidCents || 0; var originalPayments = appointmentData?.originalPayments || [];
+  var displayNumber = appointmentData?.displayNumber || null; const hasCashier = !!appointmentData?.cashierStaff;
+  const needsPin = !appointmentData || (appointmentData && !appointmentData.services && !hasCashier && !appointmentData.skipPin);
   const [screen, setScreen] = useState(needsPin ? 'pin' : 'main');
   const [client, setClient] = useState(appointmentData?.client || null);
   const [pinDigits, setPinDigits] = useState('');
   const [pinError, setPinError] = useState(false);
   const [pinMatch, setPinMatch] = useState(null);
   const initialItems = (appointmentData?.services || []).map(s=>({...s, type: s.type || 'service'}));
+  const initialItemIds = useMemo(function(){ var m={}; initialItems.forEach(function(it){m[it.id]=true;}); return m; }, []);
   const [items, setItems] = useState(initialItems);
   const [discounts, setDiscounts] = useState(appointmentData?.originalTicket?.discounts || []);
   const [tipAmount, setTipAmount] = useState(appointmentData?.originalTicket?.tipCents || 0);
   const [serviceOverrides, setServiceOverrides] = useState({});
+  var _reopenChk = useMemo(function() {
+    if (!isReopened) return {c:false,p:false};
+    var priceChanged = false, hasChanges = false;
+    if (items.length !== initialItems.length) return {c:true,p:true};
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].id !== initialItems[i].id) return {c:true,p:true};
+      if ((items[i].price_cents||0) !== (initialItems[i].price_cents||0)) { priceChanged=true; hasChanges=true; }
+      if ((items[i].techId||null) !== (initialItems[i].techId||null)) hasChanges=true;
+    }
+    if (Object.keys(serviceOverrides).length > 0) { priceChanged=true; hasChanges=true; }
+    return {c:hasChanges,p:priceChanged};
+  }, [isReopened, items, initialItems, serviceOverrides]);
+  var reopenedHasChanges = _reopenChk.c; var reopenedPriceChanged = _reopenChk.p;
   const techs = useMemo(()=>{
     const map={};
     items.forEach(it=>{
@@ -65,12 +97,9 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
   const [showDiscountForm, setShowDiscountForm] = useState(false);
   const [discountType, setDiscountType] = useState('flat_total');
   const [discountValue, setDiscountValue] = useState('');
-  const [showTipForm, setShowTipForm] = useState(false);
-  const [tipInput, setTipInput] = useState('');
-  const [showClientLookup, setShowClientLookup] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [editPrice, setEditPrice] = useState('');
-  const [editMode, setEditMode] = useState('price'); // price | discount
+  const [showTipForm, setShowTipForm] = useState(false); const [tipInput, setTipInput] = useState('');
+  const [showClientLookup, setShowClientLookup] = useState(false); const [editingId, setEditingId] = useState(null);
+  const [editPrice, setEditPrice] = useState(''); const [editMode, setEditMode] = useState('price');
   const [editDiscType, setEditDiscType] = useState('flat'); // flat | pct
   const [itemDiscounts, setItemDiscounts] = useState(appointmentData?.originalTicket?.itemDiscounts || {});
   const [confirmRemove, setConfirmRemove] = useState(null); // {id, name}
@@ -78,11 +107,10 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
   const [showTipDist, setShowTipDist] = useState(false);
   const [pendingClose, setPendingClose] = useState(null); // {receiptMethod} — waiting for tip dist
   const [tipAutoRemoved, setTipAutoRemoved] = useState(false); // cash/zelle single-pay tip removal
-  var pkgHook = usePackageRedemption(items, serviceOverrides, setServiceOverrides, storeClients, storeServices);
+  var pkgHook = usePackageRedemption(items, storeClients, storeServices, client, isReopened, initialItemIds);
   var packageRedemptions = pkgHook.packageRedemptions;
   var pkgSessionsUsed = pkgHook.pkgSessionsUsed;
-  // ── TD-112: Auto-apply membership perks (percentage discount, free service, service credit) ──
-  useMembershipPerks(items, clientMembership, membershipBanner, storeServices, itemDiscounts, setItemDiscounts);
+  var drag = useCheckoutDrag(items, setItems, CHECKOUT_STAFF);
   const [payMethod, setPayMethod] = useState(null);
   const [payInput, setPayInput] = useState('');
   const [payments, setPayments] = useState([]);
@@ -103,10 +131,10 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
       : { id: 'vip-' + Date.now(), type: 'flat_total', value: vipCfg.amount, label: 'VIP Discount', desc: '👑 VIP Discount ($' + (vipCfg.amount / 100).toFixed(2) + ' off)' };
     setDiscounts(function(prev) { return prev.concat([vipDisc]); });
   }, [client?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  // ── Membership: check overdue on client load, renew or cancel at checkout ──
   var _memStore = useMembershipStore(function(s) { return { fetch: s.fetchClientMembership, enroll: s.enrollMember, renew: s.renewMember, update: s.updateMember }; });
   var [clientMembership, setClientMembership] = useState(null);
   var [membershipBanner, setMembershipBanner] = useState(null);
+  var [showChangePayment, setShowChangePayment] = useState(false);
   useEffect(function() {
     setClientMembership(null); setMembershipBanner(null);
     if (!client || !client.id) return;
@@ -122,6 +150,16 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
       setMembershipBanner({ cycles: missed, totalOwed: missed * mem.plan.price_cents, plan: mem.plan, membershipId: mem.id });
     });
   }, [client?.id]);
+  var _pkgFetch = usePackageStore(function(s) { return s.fetchClientPackages; });
+  var storeClientPkgItems = usePackageStore(function(s) { return s.clientPackageItems; });
+  var _pkgCleanup = usePackageStore(function(s) { return s.cleanupPackages; });
+  var _pkgClear = usePackageStore(function(s) { return s.clearClientPackages; });
+  useEffect(function() {
+    if (client && client.id) {
+      _pkgCleanup().then(function() { return _pkgFetch(client.id); });
+    } else { _pkgClear(); }
+  }, [client?.id]);
+  useMembershipPerks(items, clientMembership, membershipBanner, storeServices, itemDiscounts, setItemDiscounts, discounts, setDiscounts);
   function handleMembershipRenew() {
     if (!membershipBanner) return;
     var b = membershipBanner;
@@ -136,55 +174,28 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
   }
   var cashBlocked = !!(salonSettings && salonSettings.cashier_enabled && (!drawerSession || drawerSession.status !== 'open'));
   const outstandingCents = client?.outstanding_balance_cents || 0;
-  function getPrice(it){ return serviceOverrides[it.id] ?? it.price_cents; }
-  function getItemDiscAmt(it){
-    const d=itemDiscounts[it.id]; if(!d) return 0;
-    const base=getPrice(it)*(it.qty||1);
-    return d.type==='flat'?Math.min(d.value,base):Math.round(base*d.value/100);
-  }
-  const canAdjust = settings.price_adjust_permission !== 'disabled';
-  const serviceTotal = items.filter(i=>i.type==='service').reduce((s,it)=>s+getPrice(it),0);
-  const retailTotal = items.filter(i=>i.type==='retail').reduce((s,it)=>s+(getPrice(it)*(it.qty||1)),0);
-  const gcTotal = items.filter(i=>i.type==='giftcard').reduce((s,it)=>s+it.price_cents,0);
-  const pkgSaleTotal = items.filter(i=>i.type==='package_sale').reduce((s,it)=>s+getPrice(it),0);
-  const memSaleTotal = items.filter(i=>i.type==='membership_sale').reduce((s,it)=>s+getPrice(it),0);
-  const subtotalBefore = serviceTotal + retailTotal + gcTotal + pkgSaleTotal + memSaleTotal;
-  const itemDiscTotal = items.reduce((s,it)=>s+getItemDiscAmt(it),0);
-  const discountTotal = useMemo(()=>{
-    let t=0;
-    discounts.forEach(d=>{
-      if(d.type==='pct_total') t+=Math.round(subtotalBefore*d.value/100);
-      else if(d.type==='flat_total') t+=d.value;
-    });
-    return t;
-  },[discounts,subtotalBefore]);
-  const allDiscounts = discountTotal + itemDiscTotal;
-  const taxableAmount = Math.max(0, subtotalBefore - allDiscounts - depositCents);
-  const taxAmount = Math.round(taxableAmount * settings.tax_rate_percentage / 100);
-  const totalBeforeTip = Math.max(0, subtotalBefore - allDiscounts - depositCents + outstandingCents) + taxAmount;
-  const grandTotal = totalBeforeTip + tipAmount;
-  const paidTotal = payments.reduce((s,p)=>s+p.amount_cents,0);
-  // When cash rounding is on and cash payment was made, the sale total IS the rounded amount
-  const hasCashPayment = payments.some(p=>p.method==='cash');
-  const effectiveTotal = hasCashPayment && settings.cash_rounding ? roundToNickel(grandTotal) : grandTotal;
-  const remaining = effectiveTotal - paidTotal;
+  var calc = useCheckoutCalc({
+    items: items, serviceOverrides: serviceOverrides, itemDiscounts: itemDiscounts,
+    discounts: discounts, depositCents: depositCents, tipAmount: tipAmount,
+    payments: payments, settings: settings, isReopened: isReopened,
+    alreadyPaidCents: alreadyPaidCents, outstandingCents: outstandingCents,
+    packageRedemptions: packageRedemptions,
+  });
+  var getPrice = calc.getPrice; var getItemDiscAmt = calc.getItemDiscAmt; var getPkgRedeemAmt = calc.getPkgRedeemAmt;
+  var canAdjust = calc.canAdjust; var subtotalBefore = calc.subtotalBefore;
+  var itemDiscTotal = calc.itemDiscTotal; var pkgRedeemTotal = calc.pkgRedeemTotal;
+  var discountTotal = calc.discountTotal; var allDiscounts = calc.allDiscounts; var taxAmount = calc.taxAmount;
+  var totalBeforeTip = calc.totalBeforeTip; var grandTotal = calc.grandTotal;
+  var paidTotal = calc.paidTotal; var hasCashPayment = calc.hasCashPayment; var effectiveTotal = calc.effectiveTotal;
+  var reopenedBalanceDue = (isReopened && !reopenedPriceChanged) ? 0 : calc.reopenedBalanceDue;
+  var remaining = isReopened ? (reopenedBalanceDue - paidTotal) : calc.remaining;
+  var hasItems = calc.hasItems;
+  var hasUnpricedOpen = calc.hasUnpricedOpen;
+  var techGroups = calc.techGroups;
   const paymentsRef = useRef(payments);
   useEffect(function(){ paymentsRef.current = payments; }, [payments]);
   const effectiveTotalRef = useRef(effectiveTotal);
   useEffect(function(){ effectiveTotalRef.current = effectiveTotal; }, [effectiveTotal]);
-  const hasItems = items.length > 0;
-  // Check for open-price items that still need a price entered
-  var hasUnpricedOpen = items.some(function(it){ return it.open_price && getPrice(it) === 0 && !serviceOverrides[it.id]; });
-  // Group items by tech
-  const techGroups = useMemo(()=>{
-    const groups={};
-    items.forEach(it=>{
-      const key=it.techId||'__none__';
-      if(!groups[key])groups[key]={techId:it.techId,techName:it.tech,items:[]};
-      groups[key].items.push(it);
-    });
-    return Object.values(groups);
-  },[items]);
   function handleAddItem(item){
     if(item.type==='retail'){
       setItems(prev=>{
@@ -233,11 +244,9 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
   }
   var applyPackageToItem = pkgHook.applyPackageToItem;
   var removePackageFromItem = pkgHook.removePackageFromItem;
-  function getRedeemableForItem(item) { return pkgHook.getRedeemableForItem(item, client); }
   function removeItem(id){ if(packageRedemptions[id]) removePackageFromItem(id); setItems(prev=>prev.filter(i=>i.id!==id)); setConfirmRemove(null); }
   function handleAddTech(tech){ setActiveTechId(tech.id); }
   function handleClientSelect(c){ setClient(c); setShowClientLookup(false); }
-  // Price edit — numpad popup (RBAC gated: edit_prices_checkout or apply_discounts)
   function startEdit(it){
     if(!canAdjust)return;
     // Price edit mode uses edit_prices_checkout, discount mode uses apply_discounts
@@ -278,7 +287,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     }
     setEditingId(null); setEditPrice('');
   }
-  // Discounts (RBAC gated: apply_discounts)
   function openDiscount(){
     rbac.requirePermission(ACTIONS.APPLY_DISCOUNTS, function(){
       setDiscountType(settings.discount_default_type||'flat_total'); setDiscountValue(''); setShowDiscountForm(true);
@@ -305,7 +313,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     setShowDiscountForm(false);setDiscountValue('');
   }
   function removeDiscount(id){ setDiscounts(prev=>prev.filter(d=>d.id!==id)); }
-  // Payment
   function handlePayAmount(){
     const cents=numpadToCents(payInput,settings.numpad_mode);
     if(cents<=0)return;
@@ -315,7 +322,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     setPayMethod(null);setPayInput('');
   }
   function removePayment(idx){ setPayments(prev=>prev.filter((_,i)=>i!==idx)); }
-  // Tip
   function openTip(){ setTipInput(''); setShowTipForm(true); setTipAutoRemoved(false); }
   function applyTipPreset(pct){ setTipAmount(Math.round(totalBeforeTip*pct/100)); setShowTipForm(false); if(techs.length>1) setShowTipDist(true); }
   function applyTipCustom(){
@@ -325,47 +331,53 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     if(techs.length>1) setShowTipDist(true);
   }
   function clearTip(){ setTipAmount(0); setShowTipForm(false); setTipDistributions(null); }
-  // Combine ticket — merge items from an open ticket into current checkout
-  function handleCombine(ticketId){
-    if(!onCombineTicket) return;
-    const ticket = onCombineTicket(ticketId);
-    if(!ticket) return;
-    // Merge items
-    setItems(prev=>[...prev, ...ticket.items.map(it=>({...it, type:it.type||'service'}))]);
-    // Add deposit
-    if(ticket.depositCents) setDepositCents(prev=>prev+(ticket.depositCents||0));
-    // If no client yet, use the combined ticket's client
-    if(!client && ticket.client) setClient(ticket.client);
+  async function handleCombine(ticketId){
+    var currentId = appointmentData?.openTicketId;
+    if(!currentId || !ticketId) return;
+    try {
+      var mergedTicket = await useTicketStore.getState().mergeTickets([currentId, ticketId]);
+      // Refresh items from the merged result
+      setItems(mergedTicket.items.map(function(it){ return {...it, type: it.type || 'service'}; }));
+      if(mergedTicket.depositCents) setDepositCents(mergedTicket.depositCents || 0);
+      if(!client && mergedTicket.client_id) {
+        setClient({ id: mergedTicket.client_id, name: mergedTicket.clientName });
+      }
+    } catch(err) {
+      console.warn('[handleCombine] Merge failed:', err.message);
+    }
   }
   const clientName = client ? `${client.first_name} ${client.last_name}` : null;
-  const isMultiTech = techs.length > 1;
-  // Build ticket snapshot and close
+  const isMultiTech = techs.length > 1; var canDrag = isMultiTech || (activeTechId && !techs.some(function(t){return t.id===activeTechId;}));
   function buildAndClose(receiptMethod, dists){
     const now = new Date();
     const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
-    const tNum = nextTicketNumber ? nextTicketNumber() : 1;
+    const tNum = isReopened ? reopenedTicketNumber : (nextTicketNumber ? nextTicketNumber() : 1);
     const txnId = `${ymd}-${String(tNum).padStart(3,'0')}`;
     const ticket = {
-      id: appointmentData?.openTicketId || (`tkt-${Date.now()}`), ticketNumber: tNum, txnId,
-      clientName, client, items: items.map(it=>({...it, price_cents: getPrice(it)})),
+      id: isReopened ? reopenedTicketId : (appointmentData?.openTicketId || (`tkt-${Date.now()}`)),
+      reopenedTicketId: reopenedTicketId || null,
+      reopenedPaymentMethod: isReopened && originalPayments.length > 0 ? originalPayments[0].method : null,
+      ticketNumber: tNum, txnId,
+      clientName, client, items: items.map(function(it){ var p=getPrice(it); return Object.assign({},it,{price_cents:p,original_price_cents:it.original_price_cents||it.price_cents||p}); }),
       discounts: [...discounts], payments: [...payments], tipCents: tipAmount,
-      itemDiscounts: {...itemDiscounts}, itemDiscTotal,
+      itemDiscounts: {...itemDiscounts}, itemDiscTotal, pkgRedeemCents: pkgRedeemTotal,
       discountCents: allDiscounts,
       tipDistributions: dists || tipDistributions || null,
       tipDistributed: !!(dists || tipDistributions),
       tipAutoRemoved: tipAutoRemoved,
-      subtotalCents: subtotalBefore, depositCents,
+      subtotalCents: subtotalBefore, depositCents: isReopened ? alreadyPaidCents : depositCents,
       taxCents: taxAmount, totalCents: effectiveTotal, receiptMethod,
       createdBy: appointmentData?.createdBy || activeTechId,
       closedAt: Date.now(), closedBy: activeTechId,
       appointmentId: appointmentData?.appointmentId || null,
       serviceLineIds: appointmentData?.serviceLineIds || null,
       openTicketIds: appointmentData?.openTicketIds || null,
+      displayNumber: displayNumber || null,
+      packageRedemptions: Object.keys(packageRedemptions).length > 0 ? packageRedemptions : null,
     };
     if(onCloseTicket) onCloseTicket(ticket);
     onDone();
   }
-  // Barcode scanner — extracted to useBarcodeScanner hook (Session 63 split)
   var activeTechIdRef = useRef(activeTechId);
   activeTechIdRef.current = activeTechId;
   var handleAddItemRef = useRef(handleAddItem);
@@ -382,8 +394,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     var hash = await crypto.subtle.digest('SHA-256', buf);
     return Array.from(new Uint8Array(hash)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
   }
-  // PIN SCREEN — type PIN, hit OK to check
-  // Keyboard support for PIN entry
   useNumpadKeyboard(screen==='pin', function(d){ if(pinDigits.length<8){ var next=pinDigits+d; setPinDigits(next); setPinError(false); } }, function(){ setPinDigits(function(p){ return p.slice(0,-1); }); }, null, onDone, [screen, pinDigits]);
   if(screen==='pin'){
     function pinTap(d){ if(pinDigits.length>=8)return; setPinDigits(function(p){ return p+d; }); setPinError(false); }
@@ -415,7 +425,6 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
     }
     return <CheckoutPinScreen pinDigits={pinDigits} pinError={pinError} pinMatch={pinMatch} onPinTap={pinTap} onOk={pinOk} onClear={function(){setPinDigits('');setPinError(false);}} onBackspace={function(){setPinDigits(function(p){return p.slice(0,-1);});}} onDone={onDone} />;
   }
-  // TIP DISTRIBUTION — after tip entry (multi-tech) or after receipt before close
   if(showTipDist && isMultiTech && tipAmount > 0){
     return <TipDistribution
       tipAmount={tipAmount}
@@ -433,8 +442,9 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
       }}
     />;
   }
-  // PAID — receipt options + close ticket
-  if(remaining<=0 && paidTotal>0){
+  var depositCoversAll = !isReopened && depositCents > 0 && effectiveTotal <= 0 && hasItems;
+  var packageCoversAll = !isReopened && hasItems && effectiveTotal <= 0 && Object.keys(packageRedemptions).length > 0;
+  if((remaining<=0 && paidTotal>0) || depositCoversAll){
     const changeDue = hasCashPayment ? paidTotal - effectiveTotal : 0;
     function handleCloseTicket(receiptMethod){
       // Multi-tech + tip + undistributed → show distribution before close
@@ -465,7 +475,8 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
         <AreaTag id="CO-TICKET" />
         {/* Client */}
         <div style={{padding:'10px 12px',borderBottom:`1px solid ${C.borderLight}`,flexShrink:0}}>
-          <div style={{fontSize:10,color:C.textMuted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:5}}>Checkout</div>
+          <div style={{fontSize:10,color:C.textMuted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:5}}>{isReopened?'Reopened Ticket #'+reopenedTicketNumber:displayNumber?'Combined Ticket #'+displayNumber:'Checkout'}</div>
+          {isReopened&&!reopenedHasChanges&&<div style={{fontSize:10,color:C.warning,marginBottom:4}}>Add or change items to collect payment</div>}
           {clientName?(
             <div style={{display:'flex',alignItems:'center',gap:8}}>
               <Av name={clientName} size={26} index={0}/>
@@ -479,7 +490,7 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
               {!appointmentData&&<button onClick={()=>setClient(null)} style={{color:C.textMuted,background:'none',border:'none',fontSize:14,cursor:'pointer',padding:'2px'}}>×</button>}
             </div>
           ):(
-            <button onClick={()=>setShowClientLookup(true)} style={{width:'100%',height:34,background:C.blueTint,border:`1px dashed ${C.blue}`,borderRadius:6,color:C.blueLight,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>+ Add Client</button>
+            <button onClick={()=>setShowClientLookup(true)} style={{width:'100%',height:34,background:'#1E3A5F',border:'1px dashed #2D5A8E',borderRadius:6,color:'#93C5FD',fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>+ Add Client</button>
           )}
         </div>
         {/* Membership Renewal Banner */}
@@ -494,8 +505,24 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
           </div>
         )}
         {/* Items */}
-        <div style={{flex:1,overflow:'auto',padding:'6px 8px',position:'relative'}}>
+        <div style={{flex:1,overflow:'auto',padding:'6px 8px',position:'relative',userSelect:drag.dragItem?'none':'auto'}} onTouchMove={drag.onTouchMove} onTouchEnd={drag.onTouchEnd}>
           <AreaTag id="CO-ITEMS" pos="tr" />
+          {/* Show active tech even when no items yet */}
+          {!hasItems&&activeTechId&&(function(){
+            var techObj=CHECKOUT_STAFF.find(function(s){return s.id===activeTechId;});
+            var techName=techObj?techObj.display_name:(appointmentData?.cashierStaff?.display_name||null);
+            var techPhoto=techObj?techObj.photo_url:null;
+            if(!techName && activeTechId==='owner') techName='Owner';
+            if(!techName && activeTechId==='provider') techName='Provider';
+            if(!techName) return null;
+            return(
+              <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 6px',marginBottom:3,borderRadius:5,background:'#1E3A5F',border:'1px solid #2D5A8E'}}>
+                <Av name={techName} size={22} photo={techPhoto}/>
+                <span style={{color:'#93C5FD',fontSize:12,fontWeight:600}}>{techName}</span>
+                <span style={{color:'#93C5FD',fontSize:9,marginLeft:'auto'}}>active</span>
+              </div>
+            );
+          })()}
           {!hasItems&&(
             <div style={{padding:'30px 8px',textAlign:'center'}}>
               <div style={{color:C.textMuted,fontSize:28,marginBottom:6}}>🧾</div>
@@ -505,60 +532,59 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
           {techGroups.map(group=>{
             const isActive=activeTechId===group.techId;
             const techObj=group.techId?CHECKOUT_STAFF.find(s=>s.id===group.techId):null;
+            var isDropHere=drag.dropTarget&&drag.dropTarget===group.techId;
             return(
-              <div key={group.techId||'none'} style={{marginBottom:8}}>
+              <div key={group.techId||'none'} data-checkout-drop={group.techId||'none'} style={{marginBottom:8,borderRadius:6,border:isDropHere?'2px solid rgba(34,197,94,0.6)':'2px solid transparent',background:isDropHere?'rgba(34,197,94,0.08)':'transparent',transition:'all 120ms'}}>
                 {group.techName&&(
                   <div onClick={()=>{if(group.techId)setActiveTechId(group.techId);}}
-                    style={{display:'flex',alignItems:'center',gap:6,padding:'5px 6px',marginBottom:3,borderRadius:5,cursor:group.techId?'pointer':'default',background:isActive?C.blueTint:'transparent',border:isActive?`1px solid ${C.blue}`:'1px solid transparent'}}>
+                    style={{display:'flex',alignItems:'center',gap:6,padding:'5px 6px',marginBottom:3,borderRadius:5,cursor:group.techId?'pointer':'default',background:isDropHere?'rgba(34,197,94,0.15)':(isActive?'#1E3A5F':'transparent'),border:isActive&&!isDropHere?'1px solid #2D5A8E':'1px solid transparent'}}>
                     <Av name={group.techName} size={22} photo={techObj?.photo_url}/>
-                    <span style={{color:isActive?C.blueLight:C.textPrimary,fontSize:12,fontWeight:600}}>{group.techName}</span>
-                    {isActive&&<span style={{color:C.blueLight,fontSize:9,marginLeft:'auto'}}>active</span>}
+                    <span style={{color:isDropHere?'#22C55E':(isActive?'#93C5FD':C.textPrimary),fontSize:12,fontWeight:600}}>{group.techName}</span>
+                    {isDropHere&&<span style={{color:'#22C55E',fontSize:9,marginLeft:'auto'}}>drop here</span>}
+                    {!isDropHere&&isActive&&<span style={{color:'#93C5FD',fontSize:9,marginLeft:'auto'}}>active</span>}
                   </div>
                 )}
                 {group.items.map(it=>{
                   const price=getPrice(it)*(it.qty||1);
                   const wasAdj=serviceOverrides[it.id]!=null;
                   const iDisc=itemDiscounts[it.id];
-                  const iDiscAmt=getItemDiscAmt(it);
+                  const isMemberPct = iDisc && iDisc.membership && iDisc.type === 'pct' && iDisc.value < 100;
+                  const showItemDisc = iDisc && !isMemberPct;
+                  const iDiscAmt=showItemDisc ? getItemDiscAmt(it) : 0;
                   const pkgRed=packageRedemptions[it.id];
-                  const pkgMatches=!pkgRed ? getRedeemableForItem(it) : [];
-                  const hasPkgMatch=pkgMatches.length>0;
                   var isUnpriced = it.open_price && price === 0 && !wasAdj;
+                  var beingDragged = drag.dragItem && drag.dragItem.itemId === it.id;
                   return(
                     <div key={it.id}>
-                      <div style={{display:'flex',alignItems:'center',gap:5,padding:'5px 6px',marginBottom:(iDisc||pkgRed)?1:2,borderRadius:(iDisc||pkgRed)?'4px 4px 0 0':4,background:isUnpriced?'rgba(245,158,11,0.1)':(pkgRed?'rgba(139,92,246,0.08)':C.grid),border:isUnpriced?'1px solid rgba(245,158,11,0.3)':'1px solid transparent'}}>
+                      <div onMouseDown={function(e){if(canDrag)drag.onItemMouseDown(e,it);}} onTouchStart={function(e){if(canDrag)drag.onItemTouchStart(e,it);}}
+                        style={{display:'flex',alignItems:'center',gap:5,padding:'5px 6px',marginBottom:(showItemDisc||pkgRed)?1:2,borderRadius:(showItemDisc||pkgRed)?'4px 4px 0 0':4,background:isUnpriced?'rgba(245,158,11,0.1)':(pkgRed?'rgba(139,92,246,0.08)':C.grid),border:isUnpriced?'1px solid rgba(245,158,11,0.3)':'1px solid transparent',opacity:beingDragged?0.35:1,cursor:canDrag?'grab':'default'}}>
                         {it.color&&<div style={{width:4,height:22,borderRadius:2,background:it.color,flexShrink:0}}/>}
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{color:C.textPrimary,fontSize:12,fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{it.name}{it.qty>1?` ×${it.qty}`:''}</div>
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:4}}>
-                          {hasPkgMatch&&!pkgRed&&(
-                            <span onClick={function(){applyPackageToItem(it.id, pkgMatches[0]);}}
-                              title={'Apply package: '+pkgMatches[0].clientPackage.package_name+' ('+pkgMatches[0].clientPackageItem.remaining+' left)'}
-                              style={{fontSize:13,cursor:'pointer',padding:'1px 4px',borderRadius:3,background:'rgba(139,92,246,0.15)',lineHeight:1,userSelect:'none'}}
-                              onMouseEnter={function(e){e.currentTarget.style.background='rgba(139,92,246,0.3)';}}
-                              onMouseLeave={function(e){e.currentTarget.style.background='rgba(139,92,246,0.15)';}}
-                            >🎫</span>
-                          )}
                           {wasAdj&&!pkgRed&&<span style={{color:C.warning,fontSize:8}}>●</span>}
                           {isUnpriced?(
                             <span onClick={()=>startEdit(it)} style={{color:C.warning,fontSize:11,fontWeight:600,cursor:'pointer',padding:'2px 8px',borderRadius:4,background:'rgba(245,158,11,0.15)'}}>Price needed</span>
                           ):(
-                            <span onClick={canAdjust?()=>startEdit(it):undefined} style={{color:pkgRed?(price===0?'#8B5CF6':C.textPrimary):C.textPrimary,fontSize:12,fontWeight:500,cursor:canAdjust?'pointer':'default'}}>{fmt(price)}</span>
+                            <span onClick={canAdjust?()=>startEdit(it):undefined} style={{color:C.textPrimary,fontSize:12,fontWeight:500,cursor:canAdjust?'pointer':'default'}}>{fmt(price)}</span>
                           )}
                           <button onClick={()=>setConfirmRemove({id:it.id,name:it.name})} style={{color:C.danger,background:'none',border:'none',fontSize:20,fontWeight:700,cursor:'pointer',padding:'0 4px',lineHeight:1,minWidth:28,minHeight:28,display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
                         </div>
                       </div>
-                      {/* Package redemption label */}
-                      {pkgRed&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'2px 6px 4px',background:'rgba(139,92,246,0.08)',borderRadius:iDisc?0:'0 0 4px 4px',marginBottom:iDisc?0:2}}>
-                        <span style={{color:'#8B5CF6',fontSize:10,fontWeight:500}}>{pkgRed.isExact?'Package':'Package upgrade'} — {pkgRed.pkgName} ({(function(){var cpi=MOCK_CLIENT_PACKAGE_ITEMS.find(function(c){return c.id===pkgRed.cpiId;});return cpi?(cpi.remaining-(pkgSessionsUsed[cpi.id]||0))+'/'+cpi.total_quantity:'';})()})</span>
-                        <button onClick={function(){removePackageFromItem(it.id);}} style={{color:C.danger,background:'none',border:'none',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>×</button>
-                      </div>}
-                      {iDisc&&<div style={{display:'flex',justifyContent:'space-between',padding:'2px 6px 4px',background:iDisc.membership?'rgba(236,72,153,0.08)':'rgba(5,150,105,0.08)',borderRadius:'0 0 4px 4px',marginBottom:2}}>
-                        <span style={{color:iDisc.membership?'#F9A8D4':C.success,fontSize:10}}>{iDisc.desc}</span>
+                      {/* Package redemption deduction line */}
+                      {pkgRed&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'2px 6px 4px',background:'rgba(139,92,246,0.08)',borderRadius:showItemDisc?0:'0 0 4px 4px',marginBottom:showItemDisc?0:2}}>
+                        <span style={{color:'#8B5CF6',fontSize:10,fontWeight:500}}>📦 Pkg Redeem — {pkgRed.pkgName} ({(function(){var cpi=storeClientPkgItems.find(function(c){return c.id===pkgRed.cpiId;});return cpi?(cpi.remaining-(pkgSessionsUsed[cpi.id]||0))+'/'+cpi.total_quantity:'';})()})</span>
                         <div style={{display:'flex',alignItems:'center',gap:4}}>
-                          <span style={{color:iDisc.membership?'#F9A8D4':C.success,fontSize:10,fontWeight:500}}>−{fmt(iDiscAmt)}</span>
-                          {!iDisc.membership&&<button onClick={()=>setItemDiscounts(prev=>{const n={...prev};delete n[it.id];return n;})} style={{color:C.danger,background:'none',border:'none',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>×</button>}
+                          <span style={{color:'#8B5CF6',fontSize:11,fontWeight:600}}>−{fmt(pkgRed.redeemCents||0)}</span>
+                          <button onClick={function(){removePackageFromItem(it.id);}} style={{color:C.danger,background:'none',border:'none',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>×</button>
+                        </div>
+                      </div>}
+                      {showItemDisc&&<div style={{display:'flex',justifyContent:'space-between',padding:'2px 6px 4px',background:showItemDisc.membership?'rgba(236,72,153,0.08)':'rgba(5,150,105,0.08)',borderRadius:'0 0 4px 4px',marginBottom:2}}>
+                        <span style={{color:showItemDisc.membership?'#F9A8D4':C.success,fontSize:10}}>{showItemDisc.desc}</span>
+                        <div style={{display:'flex',alignItems:'center',gap:4}}>
+                          <span style={{color:showItemDisc.membership?'#F9A8D4':C.success,fontSize:10,fontWeight:500}}>−{fmt(iDiscAmt)}</span>
+                          {!showItemDisc.membership&&<button onClick={()=>setItemDiscounts(prev=>{const n={...prev};delete n[it.id];return n;})} style={{color:C.danger,background:'none',border:'none',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>×</button>}
                         </div>
                       </div>}
                     </div>
@@ -567,6 +593,13 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
               </div>
             );
           })}
+          {/* Drop target for active tech with no items — enables drag reassignment */}
+          {hasItems&&activeTechId&&!techGroups.some(function(g){return g.techId===activeTechId;})&&(function(){
+            var atObj=CHECKOUT_STAFF.find(function(s){return s.id===activeTechId;});
+            var atName=atObj?atObj.display_name:(activeTechId==='owner'?'Owner':activeTechId==='provider'?'Provider':null);
+            if(!atName) return null; var isDrop=drag.dropTarget&&drag.dropTarget===activeTechId;
+            return(<div data-checkout-drop={activeTechId} style={{marginBottom:8,borderRadius:6,border:isDrop?'2px solid rgba(34,197,94,0.6)':'2px dashed '+C.borderMedium,background:isDrop?'rgba(34,197,94,0.08)':'transparent',transition:'all 120ms'}}><div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 6px',borderRadius:5,background:isDrop?'rgba(34,197,94,0.15)':'#1E3A5F',border:'1px solid '+(isDrop?'rgba(34,197,94,0.4)':'#2D5A8E')}}><Av name={atName} size={22} photo={atObj?.photo_url}/><span style={{color:isDrop?'#22C55E':'#93C5FD',fontSize:12,fontWeight:600}}>{atName}</span><span style={{color:isDrop?'#22C55E':'#93C5FD',fontSize:9,marginLeft:'auto'}}>{isDrop?'drop here':'drag items here'}</span></div></div>);
+          })()}
           {/* Outstanding balance as line item */}
           {outstandingCents!==0&&(
             <div style={{display:'flex',alignItems:'center',gap:5,padding:'5px 6px',marginBottom:2,borderRadius:4,background:outstandingCents>0?'rgba(217,119,6,0.1)':'rgba(5,150,105,0.1)'}}>
@@ -576,27 +609,31 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
           )}
           {/* Discounts */}
           {discounts.map(d=>{
-            var isVipDisc=d.label==='VIP Discount';
-            return(
-            <div key={d.id} style={{display:'flex',alignItems:'center',gap:5,padding:'4px 6px',marginBottom:2,borderRadius:4,background:isVipDisc?'rgba(245,158,11,0.1)':'rgba(5,150,105,0.08)'}}>
-              <span style={{color:isVipDisc?'#F59E0B':C.success,fontSize:11,flex:1}}>{d.desc}</span>
-              <span style={{color:isVipDisc?'#F59E0B':C.success,fontSize:11,fontWeight:500}}>−{d.type==='flat_total'?fmt(d.value):fmt(Math.round(subtotalBefore*d.value/100))}</span>
-              <button onClick={()=>removeDiscount(d.id)} style={{color:C.danger,background:'none',border:'none',fontSize:18,fontWeight:700,cursor:'pointer',padding:'0 4px',lineHeight:1,minWidth:24,minHeight:24,display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
-            </div>
-            );})}
+            var isMem=d.membership; var discAmt=d.type==='flat_total'?d.value:Math.round((subtotalBefore-pkgRedeemTotal)*d.value/100);
+            if(isMem&&discAmt<=0) return null;
+            var clr=isMem?'#F9A8D4':(d.label==='VIP Discount'?'#F59E0B':C.success); var bg=isMem?'rgba(236,72,153,0.08)':(d.label==='VIP Discount'?'rgba(245,158,11,0.1)':'rgba(5,150,105,0.08)');
+            return(<div key={d.id} style={{display:'flex',alignItems:'center',gap:5,padding:'4px 6px',marginBottom:2,borderRadius:4,background:bg}}>
+              <span style={{color:clr,fontSize:11,flex:1}}>{d.desc}</span>
+              <span style={{color:clr,fontSize:11,fontWeight:500}}>−{fmt(discAmt)}</span>
+              {!isMem&&<button onClick={()=>removeDiscount(d.id)} style={{color:C.danger,background:'none',border:'none',fontSize:18,fontWeight:700,cursor:'pointer',padding:'0 4px',lineHeight:1,minWidth:24,minHeight:24,display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>}
+            </div>);})}
         </div>
         {/* Totals + actions + payment — always visible */}
+          {drag.dragItem&&<div style={{position:'fixed',left:drag.ghostPos.x-80,top:drag.ghostPos.y-16,pointerEvents:'none',zIndex:999,background:C.grid,border:'1px solid #2D5A8E',borderRadius:4,padding:'4px 10px',boxShadow:'0 4px 12px rgba(0,0,0,0.4)',opacity:0.9}}><span style={{color:C.textPrimary,fontSize:11,fontWeight:500}}>{drag.dragItem.name}</span></div>}
           <div style={{borderTop:`1px solid ${C.borderLight}`,flexShrink:0,position:'relative'}}>
             <AreaTag id="CO-TOTALS" pos="tr" />
             <div style={{padding:'6px 10px'}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.textMuted,fontSize:11}}>Subtotal</span><span style={{color:C.textPrimary,fontSize:11}}>{fmt(subtotalBefore)}</span></div>
               {itemDiscTotal>0&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.success,fontSize:11}}>Item discounts</span><span style={{color:C.success,fontSize:11}}>−{fmt(itemDiscTotal)}</span></div>}
               {discountTotal>0&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.success,fontSize:11}}>Discounts</span><span style={{color:C.success,fontSize:11}}>−{fmt(discountTotal)}</span></div>}
-              {depositCents>0&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.blueLight,fontSize:11}}>Deposit</span><span style={{color:C.blueLight,fontSize:11}}>−{fmt(depositCents)}</span></div>}
+              {pkgRedeemTotal>0&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:'#8B5CF6',fontSize:11}}>Pkg Redeemed</span><span style={{color:'#8B5CF6',fontSize:11}}>−{fmt(pkgRedeemTotal)}</span></div>}
+              {depositCents>0&&!isReopened&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.blueLight,fontSize:11}}>Deposit</span><span style={{color:C.blueLight,fontSize:11}}>−{fmt(depositCents)}</span></div>}
+              {isReopened&&alreadyPaidCents>0&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:2,padding:'2px 4px',borderRadius:3,background:'rgba(96,165,250,0.08)'}}><span style={{color:C.blueLight,fontSize:11}}>Paid ({originalPayments.map(function(p){return p.method;}).filter(Boolean).join(', ')||'credit'})</span><span style={{color:C.blueLight,fontSize:11}}>{fmt(alreadyPaidCents)}</span></div>}
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.textMuted,fontSize:11}}>Tax ({settings.tax_rate_percentage}%)</span><span style={{color:C.textPrimary,fontSize:11}}>{fmt(taxAmount)}</span></div>
               {tipAmount>0&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{color:C.textPrimary,fontSize:11}}>Tip</span><span style={{color:C.textPrimary,fontSize:11}}>{fmt(tipAmount)}</span></div>}
               <div style={{height:1,background:C.borderMedium,margin:'3px 0'}}/>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline'}}><span style={{color:C.textPrimary,fontSize:14,fontWeight:600}}>Total</span><span style={{color:C.textPrimary,fontSize:18,fontWeight:700}}>{fmt(grandTotal)}</span></div>
+              {isReopened&&reopenedHasChanges&&reopenedBalanceDue>0&&<div style={{display:'flex',justifyContent:'space-between',marginTop:3,padding:'3px 4px',borderRadius:3,background:'rgba(245,158,11,0.1)'}}><span style={{color:C.warning,fontSize:12,fontWeight:600}}>Balance Due</span><span style={{color:C.warning,fontSize:14,fontWeight:700}}>{fmt(reopenedBalanceDue)}</span></div>}
               {/* Payments made */}
               {payments.map((p,i)=>(
                 <div key={i} style={{display:'flex',justifyContent:'space-between',marginTop:2}}>
@@ -613,16 +650,16 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
             </div>
             {/* Action buttons — 2 col grid matching payment buttons */}
             <div style={{padding:'6px 8px',display:'grid',gridTemplateColumns:'1fr 1fr',gap:4}}>
-              <button onClick={openDiscount}
-                style={{height:38,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:discounts.length>0?C.success:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}
-                onMouseEnter={e=>{e.currentTarget.style.borderColor=C.success;e.currentTarget.style.color=C.success;}}
-                onMouseLeave={e=>{e.currentTarget.style.borderColor=C.borderMedium;e.currentTarget.style.color=discounts.length>0?C.success:C.textPrimary;}}>
+              <button onClick={function(){if(isReopened&&!reopenedHasChanges)return;openDiscount();}}
+                style={{height:38,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:(isReopened&&!reopenedHasChanges)?C.textDim:(discounts.length>0?C.success:C.textPrimary),fontSize:12,fontWeight:500,cursor:(isReopened&&!reopenedHasChanges)?'default':'pointer',fontFamily:'inherit',opacity:(isReopened&&!reopenedHasChanges)?0.4:1}}
+                onMouseEnter={e=>{if(isReopened&&!reopenedHasChanges)return;e.currentTarget.style.borderColor=C.success;e.currentTarget.style.color=C.success;}}
+                onMouseLeave={e=>{if(isReopened&&!reopenedHasChanges)return;e.currentTarget.style.borderColor=C.borderMedium;e.currentTarget.style.color=discounts.length>0?C.success:C.textPrimary;}}>
                 {discounts.length>0?`Discount ✓`:'Discount'}
               </button>
-              <button onClick={openTip}
-                style={{height:38,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:tipAmount>0?C.blueLight:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}
-                onMouseEnter={e=>{e.currentTarget.style.borderColor=C.blue;e.currentTarget.style.color=C.blueLight;}}
-                onMouseLeave={e=>{e.currentTarget.style.borderColor=C.borderMedium;e.currentTarget.style.color=tipAmount>0?C.blueLight:C.textPrimary;}}>
+              <button onClick={function(){if(isReopened&&!reopenedHasChanges)return;openTip();}}
+                style={{height:38,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:(isReopened&&!reopenedHasChanges)?C.textDim:(tipAmount>0?'#93C5FD':C.textPrimary),fontSize:12,fontWeight:500,cursor:(isReopened&&!reopenedHasChanges)?'default':'pointer',fontFamily:'inherit',opacity:(isReopened&&!reopenedHasChanges)?0.4:1}}
+                onMouseEnter={e=>{if(isReopened&&!reopenedHasChanges)return;e.currentTarget.style.borderColor='#2D5A8E';e.currentTarget.style.color='#93C5FD';}}
+                onMouseLeave={e=>{if(isReopened&&!reopenedHasChanges)return;e.currentTarget.style.borderColor=C.borderMedium;e.currentTarget.style.color=tipAmount>0?'#93C5FD':C.textPrimary;}}>
                 {tipAmount>0?`Tip ${fmt(tipAmount)}`:'Tip'}
               </button>
             </div>
@@ -638,12 +675,19 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
                 <div style={{color:C.warning,fontSize:11,lineHeight:1.4,textAlign:'center',fontWeight:500}}>Set price on open-price items before payment</div>
               </div>
             )}
-            {/* Payment buttons — only if station can process payments */}
-            {canPay && (
+            {/* Payment area — Complete button when package covers all, else payment methods */}
+            {canPay && packageCoversAll ? (
+            <div style={{padding:'10px 8px',borderTop:`1px solid ${C.borderLight}`,display:'flex',justifyContent:'center'}}>
+              <div onClick={function(){ if(isMultiTech&&tipAmount>0&&!tipDistributions){setPendingClose('none');setShowTipDist(true);return;} buildAndClose('none',tipDistributions); }}
+                style={{height:57,width:'70%',background:'#1a3a2a',border:'1px solid #2d5a3a',borderRadius:8,color:'#6ee7b7',fontSize:15,fontWeight:700,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',letterSpacing:'0.02em'}}
+                onMouseEnter={function(e){e.currentTarget.style.background='#224a34';e.currentTarget.style.borderColor='#3d7a5a';}}
+                onMouseLeave={function(e){e.currentTarget.style.background='#1a3a2a';e.currentTarget.style.borderColor='#2d5a3a';}}>✓ Complete</div>
+            </div>
+            ) : canPay && (
             <div style={{padding:'6px 8px',borderTop:`1px solid ${C.borderLight}`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:4,position:'relative'}}>
               <AreaTag id="CO-PAY" pos="tr" />
               {[{id:'cash',label:'💵 Cash'},{id:'credit',label:'💳 Credit'},{id:'giftcard',label:'🎁 Gift Card'},{id:'zelle',label:'⚡ Zelle'}].map(m=>{
-                var disabled=remaining<=0||!hasItems||hasUnpricedOpen;
+                var disabled=remaining<=0||!hasItems||hasUnpricedOpen||(isReopened&&!reopenedHasChanges);
                 var isCashDisabled = m.id==='cash' && cashBlocked;
                 if(isCashDisabled) disabled = true;
                 return(
@@ -668,32 +712,30 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
                   setPayMethod(m.id);setPayInput('');
                 }}
                   style={{height:38,background:disabled?C.chromeDark:C.grid,border:`1px solid ${C.borderLight}`,borderRadius:6,color:disabled?C.textDim:C.textPrimary,fontSize:12,fontWeight:500,cursor:disabled?'default':'pointer',fontFamily:'inherit',opacity:disabled?0.5:1}}
-                  onMouseEnter={e=>{if(!disabled){e.currentTarget.style.background=C.blueTint;e.currentTarget.style.borderColor=C.blue;}}}
+                  onMouseEnter={e=>{if(!disabled){e.currentTarget.style.background='#1E3A5F';e.currentTarget.style.borderColor='#2D5A8E';}}}
                   onMouseLeave={e=>{if(!disabled){e.currentTarget.style.background=C.grid;e.currentTarget.style.borderColor=C.borderLight;}}}>{m.label}</button>
                 );
               })}
             </div>
             )}
-            {/* Cancel + Hold + Print */}
-            <div style={{padding:'4px 8px 8px',display:'grid',gridTemplateColumns:items.length>0?'1fr 1fr 1fr':'1fr 1fr',gap:4}}>
-              <button onClick={onDone}
+            {/* Cancel + Hold + Print + Save */}
+            <div style={{padding:'4px 8px 8px',display:'grid',gridTemplateColumns:isReopened?((reopenedHasChanges&&reopenedBalanceDue<=0)?'1fr 1fr 1fr 1fr':'1fr 1fr 1fr'):(items.length>0?'1fr 1fr 1fr':'1fr 1fr'),gap:4}}>
+              <button onClick={handleCancel}
                 style={{height:38,background:'transparent',border:'1px solid '+C.danger,borderRadius:6,color:C.danger,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}
                 onMouseEnter={function(e){e.currentTarget.style.background=C.dangerBg;}}
                 onMouseLeave={function(e){e.currentTarget.style.background='transparent';}}>
                 Cancel
               </button>
-              {items.length>0 && (
+              {items.length>0 && !isReopened && (
               <button onClick={function(){
                 if(!onPrintHold) return;
                 var tNum = nextTicketNumber ? nextTicketNumber() : 1;
                 onPrintHold({
                   id: appointmentData && appointmentData.openTicketId ? appointmentData.openTicketId : ('hold-'+Date.now()),
-                  ticketNumber: tNum,
-                  client: client,
+                  ticketNumber: tNum, client: client,
                   clientName: client ? ((client.first_name||'')+' '+(client.last_name||'')).trim() : null,
                   items: items.map(function(it){ return Object.assign({}, it, { price_cents: getPrice(it) }); }),
-                  depositCents: depositCents || 0,
-                  activeTechId: activeTechId,
+                  depositCents: depositCents || 0, activeTechId: activeTechId,
                 });
                 onDone();
               }}
@@ -704,28 +746,30 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
               </button>
               )}
               <button onClick={function(){
-                var receiptData = {
-                  salonName: (salonSettings && salonSettings.salon_name) || 'Salon',
-                  salonAddress: salonSettings && salonSettings.address,
-                  salonPhone: salonSettings && salonSettings.phone,
-                  ticketNumber: nextTicketNumber ? nextTicketNumber() : 1,
-                  clientName: client ? client.name : null,
-                  techName: activeTechId ? (items[0] && items[0].tech) || null : null,
+                relayPrint('receipt', {
+                  salonName: (salonSettings && salonSettings.salon_name) || 'Salon', salonAddress: salonSettings && salonSettings.address, salonPhone: salonSettings && salonSettings.phone,
+                  ticketNumber: isReopened ? reopenedTicketNumber : (nextTicketNumber ? nextTicketNumber() : 1), clientName: client ? client.name : null, techName: activeTechId ? (items[0] && items[0].tech) || null : null,
                   items: items.map(function(it){ return { name: it.name, price_cents: it.price_cents || 0, tech: it.tech, qty: it.qty || 1, product_cost_cents: it.product_cost_cents || 0 }; }),
-                  subtotalCents: subtotalBefore || 0,
-                  discountCents: allDiscounts || 0,
-                  taxCents: taxAmount || 0,
-                  tipCents: 0,
-                  totalCents: totalBeforeTip || 0,
-                  payments: [],
-                };
-                relayPrint('receipt', receiptData);
+                  subtotalCents: subtotalBefore || 0, discountCents: allDiscounts || 0, taxCents: taxAmount || 0, tipCents: 0, totalCents: totalBeforeTip || 0, payments: [],
+                });
               }}
                 style={{height:38,background:'transparent',border:'1px solid '+C.borderMedium,borderRadius:6,color:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}
-                onMouseEnter={function(e){e.currentTarget.style.borderColor=C.blue;e.currentTarget.style.color=C.blueLight;}}
+                onMouseEnter={function(e){e.currentTarget.style.borderColor='#2D5A8E';e.currentTarget.style.color='#93C5FD';}}
                 onMouseLeave={function(e){e.currentTarget.style.borderColor=C.borderMedium;e.currentTarget.style.color=C.textPrimary;}}>
                 🖨 Print
               </button>
+              {isReopened && (
+              <button onClick={function(){ setShowChangePayment(true); }}
+                style={{height:38,background:'#4C1D95',border:'1px solid #7C3AED',borderRadius:6,color:'#A78BFA',fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                💱 Change Pay
+              </button>
+              )}
+              {isReopened && reopenedHasChanges && reopenedBalanceDue <= 0 && (
+              <button onClick={function(){ buildAndClose('none', tipDistributions); }}
+                style={{height:38,background:C.success,border:'none',borderRadius:6,color:'#fff',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                💾 Save
+              </button>
+              )}
             </div>
           </div>
       </div>
@@ -747,6 +791,7 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
         editingId, editMode, setEditMode, switchToDiscountMode, editDiscType, setEditDiscType, editPrice, setEditPrice,
         items, getPrice, itemDiscounts, cancelEdit, confirmEdit, applyEditPreset,
       }}/>
+      {showChangePayment && isReopened && <ChangePaymentPopup ticketId={reopenedTicketId} payments={originalPayments} totalCents={alreadyPaidCents} onDone={function(){ setShowChangePayment(false); onDone(); }} onCancel={function(){ setShowChangePayment(false); }} />}
     </div>
   );
 }

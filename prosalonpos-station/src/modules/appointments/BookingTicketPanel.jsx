@@ -16,7 +16,8 @@ export default function BookingTicketPanel({
   C, staff, bookingClients, setBookingClients, activeTechKey, activeClientIdx,
   setActivePointer, removeService, toggleRequested, clientLabel, salonSettings,
   autoRequestMode, initialHour, initialMin, totalDur, subtotal, taxAmount, total,
-  svcCount, handleCancel, handleSave, setNoteDraft, setShowNotePopup, F
+  svcCount, handleCancel, handleSave, setNoteDraft, setShowNotePopup, F,
+  checkInMode
 }){
   // ═══════════════════════════════════════
   // ── DRAG STATE ──
@@ -170,8 +171,8 @@ export default function BookingTicketPanel({
     <div style={{width:TICKET_W,minWidth:TICKET_W,background:C.chromeDark,borderRight:'1px solid '+C.borderLight,display:'flex',flexDirection:'column',flexShrink:0,position:'relative',userSelect:dragItem?'none':'auto'}}>
       {/* Booking header + time */}
       <div style={{padding:'10px 12px',borderBottom:'1px solid '+C.borderLight,flexShrink:0}}>
-        <div style={{fontSize:10,color:C.textMuted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:5}}>Booking</div>
-        <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+        <div style={{fontSize:10,color:C.textMuted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:5}}>{checkInMode?'Check In':'Booking'}</div>
+        {!checkInMode&&<div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
           <span style={{color:C.textPrimary,fontSize:12,fontWeight:500}}>{ft(initialHour,initialMin)}</span>
           {totalDur>0&&<>
             <span style={{color:C.textMuted,fontSize:11}}>→</span>
@@ -179,7 +180,7 @@ export default function BookingTicketPanel({
             <span style={{color:C.textMuted,fontSize:11}}>·</span>
             <span style={{color:C.textPrimary,fontSize:11}}>{totalDur} min</span>
           </>}
-        </div>
+        </div>}
       </div>
       {/* Client → Tech → Services tree */}
       <div ref={scrollRef} style={{flex:1,overflow:'auto',padding:'6px 8px'}}
@@ -312,10 +313,10 @@ export default function BookingTicketPanel({
       </div>
       {/* Cancel + Save */}
       <div style={{padding:'10px 10px',borderTop:'1px solid '+C.borderLight,flexShrink:0,display:'flex',gap:6}}>
-        <button onClick={handleCancel} style={{flex:1,height:44,background:'transparent',border:'1px solid '+C.danger,borderRadius:6,color:C.danger,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:F,boxSizing:'border-box'}}>Cancel Booking</button>
+        <button onClick={handleCancel} style={{flex:1,height:44,background:'transparent',border:'1px solid '+C.danger,borderRadius:6,color:C.danger,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:F,boxSizing:'border-box'}}>{checkInMode?'Cancel':'Cancel Booking'}</button>
         <button onClick={handleSave} disabled={svcCount===0}
           style={{flex:1,height:44,background:svcCount===0?C.gridHover:C.success,color:'#fff',border:'1px solid '+(svcCount===0?C.gridHover:C.success),borderRadius:6,fontSize:13,fontWeight:600,cursor:svcCount===0?'not-allowed':'pointer',fontFamily:F,opacity:svcCount===0?0.5:1,boxSizing:'border-box'}}>
-          Save Appointment
+          {checkInMode?'Check In':'Save Appointment'}
         </button>
       </div>
       {/* ═══ DRAG GHOST ═══ */}

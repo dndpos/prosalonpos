@@ -10,6 +10,7 @@ import { useToast } from '../../lib/ToastContext';
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 import { STATUS_COLORS, cycleName } from './membershipBridge';
 import { useMembershipStore } from '../../lib/stores/membershipStore';
 import { useServiceStore } from '../../lib/stores/serviceStore';
@@ -151,6 +152,8 @@ export default function MembershipPlans({ catalogLayout }) {
   useEffect(function() { if (!storeInitialized) fetchPlans(); }, []);
   var [editingPlan, setEditingPlan] = useState(null);    // null = list, object = editing
   var [editingPerks, setEditingPerks] = useState([]);     // perks for the plan being edited
+  var [originalSnapshot, setOriginalSnapshot] = useState(null); // snapshot for dirty detection
+  var [showUnsavedPopup, setShowUnsavedPopup] = useState(false);
   var [activeNumpad, setActiveNumpad] = useState(null);   // which numpad is open
   var [numStr, setNumStr] = useState('');
 
@@ -169,6 +172,26 @@ export default function MembershipPlans({ catalogLayout }) {
     setter(function(p) { if (key === 'C') return ''; if (key === '⌫') return p.slice(0, -1); if (/\d/.test(key)) return p + key; return p; });
   }
 
+  // Keyboard support for main numpad
+  useNumpadKeyboard(
+    !!activeNumpad && !perkNumpad,
+    function(d) { handleNumKey(d, setNumStr); },
+    function() { handleNumKey('⌫', setNumStr); },
+    function() { setActiveNumpad(null); },
+    function() { setActiveNumpad(null); setNumStr(''); },
+    [activeNumpad, numStr]
+  );
+
+  // Keyboard support for perk numpad
+  useNumpadKeyboard(
+    !!perkNumpad && !activeNumpad,
+    function(d) { handleNumKey(d, setPerkNumStr); },
+    function() { handleNumKey('⌫', setPerkNumStr); },
+    function() { setPerkNumpad(null); },
+    function() { setPerkNumpad(null); setPerkNumStr(''); },
+    [perkNumpad, perkNumStr]
+  );
+
   function openNumpad(field, currentValue) {
     setActiveNumpad(field);
     setNumStr(String(currentValue || ''));
@@ -185,6 +208,20 @@ export default function MembershipPlans({ catalogLayout }) {
     setEditingPlan(function(prev) { var next = Object.assign({}, prev); next[key] = val; return next; });
   }
 
+  function checkHasChanges() {
+    if (!originalSnapshot || !editingPlan) return false;
+    var current = JSON.stringify({ plan: editingPlan, perks: editingPerks });
+    return current !== originalSnapshot;
+  }
+
+  function discardEdits() {
+    setEditingPlan(null); setEditingPerks([]); setActiveNumpad(null); setPerkNumpad(null); setShowUnsavedPopup(false); setOriginalSnapshot(null);
+  }
+
+  function handleBack() {
+    if (checkHasChanges()) { setShowUnsavedPopup(true); } else { discardEdits(); }
+  }
+
   // ── PLAN LIST ──
   if (!editingPlan) {
     var activePlans = plans.filter(function(p) { return p.active; });
@@ -192,7 +229,7 @@ export default function MembershipPlans({ catalogLayout }) {
 
     function newPlan() {
       setEditingPerks([]);
-      setEditingPlan({
+      var np = {
         id: 'mp-new-' + Date.now(),
         location_id: 'loc-01',
         name: '',
@@ -210,14 +247,16 @@ export default function MembershipPlans({ catalogLayout }) {
         active: true,
         position: plans.length + 1,
         _isNew: true,
-      });
+      };
+      setOriginalSnapshot(JSON.stringify({ plan: np, perks: [] }));
+      setEditingPlan(np);
     }
 
     function renderPlanCard(plan) {
       var planPerks = plan.perks || [];
       return (
         <div key={plan.id}
-          onClick={function() { setEditingPerks((plan.perks || []).map(function(pk) { return Object.assign({}, pk); })); setEditingPlan(Object.assign({}, plan)); }}
+          onClick={function() { var perks = (plan.perks || []).map(function(pk) { return Object.assign({}, pk); }); var planCopy = Object.assign({}, plan); setEditingPerks(perks); setEditingPlan(planCopy); setOriginalSnapshot(JSON.stringify({ plan: planCopy, perks: perks })); }}
           style={{ backgroundColor: T.grid, borderRadius: 8, padding: '14px 16px', marginBottom: 6, cursor: 'pointer', transition: 'background-color 150ms', border: '1px solid ' + T.border }}
           onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#3B4A63'; }}
           onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.grid; }}
@@ -292,6 +331,7 @@ export default function MembershipPlans({ catalogLayout }) {
   var planPerks = editingPerks;
 
   function savePlan() {
+    console.log('[MembershipPlans] savePlan CALLED — ep.active:', ep.active, 'ep.name:', ep.name);
     if (!ep.name.trim()) { toast.show('Plan name is required.', 'error'); return; }
     if (ep.price_cents <= 0) { toast.show('Price must be greater than $0.', 'error'); return; }
 
@@ -309,7 +349,7 @@ export default function MembershipPlans({ catalogLayout }) {
       credit_rollover: ep.credit_rollover === true,
       perk_apply_mode: ep.perk_apply_mode || 'auto',
       freeze_allowed: ep.freeze_allowed !== false,
-      active: ep.active !== false,
+      active: ep.active === true ? true : false,
       position: ep.position || 0,
       perks: editingPerks.map(function(pk) {
         return {
@@ -323,28 +363,31 @@ export default function MembershipPlans({ catalogLayout }) {
       }),
     };
 
+    console.log('[MembershipPlans] savePlan — isNew:', !!ep._isNew, 'id:', ep.id, 'active:', payload.active, 'payload:', JSON.stringify(payload));
+
     if (ep._isNew) {
-      storeCreatePlan(payload).then(function() {
+      storeCreatePlan(payload).then(function(plan) {
+        console.log('[MembershipPlans] Plan created OK:', plan);
         toast.show('Plan created', 'success');
-        setEditingPlan(null);
-        setEditingPerks([]);
-      }).catch(function(err) { toast.show('Save failed: ' + err.message, 'error'); });
+        setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
+      }).catch(function(err) { console.error('[MembershipPlans] Create FAILED:', err); toast.show('Save failed: ' + err.message, 'error'); });
     } else {
-      storeUpdatePlan(ep.id, payload).then(function() {
+      storeUpdatePlan(ep.id, payload).then(function(plan) {
+        console.log('[MembershipPlans] Plan updated OK:', plan);
         toast.show('Plan updated', 'success');
-        setEditingPlan(null);
-        setEditingPerks([]);
-      }).catch(function(err) { toast.show('Save failed: ' + err.message, 'error'); });
+        setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
+      }).catch(function(err) { console.error('[MembershipPlans] Update FAILED:', err); toast.show('Save failed: ' + err.message, 'error'); });
     }
   }
 
   function deletePlan() {
     toast.confirm('Delete this plan? This cannot be undone.', function() {
+      console.log('[MembershipPlans] Deleting plan:', ep.id);
       storeDeletePlan(ep.id).then(function() {
+        console.log('[MembershipPlans] Plan deleted OK');
         toast.show('Plan deleted', 'success');
-        setEditingPlan(null);
-        setEditingPerks([]);
-      }).catch(function(err) { toast.show('Delete failed: ' + err.message, 'error'); });
+        setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
+      }).catch(function(err) { console.error('[MembershipPlans] Delete FAILED:', err); toast.show('Delete failed: ' + err.message, 'error'); });
     });
   }
 
@@ -493,7 +536,7 @@ export default function MembershipPlans({ catalogLayout }) {
       <AreaTag id="MB-PLAN" />
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-        <div onClick={function() { setEditingPlan(null); setEditingPerks([]); setActiveNumpad(null); setPerkNumpad(null); }}
+        <div onClick={handleBack}
           onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#3E4C5E'; e.currentTarget.style.borderColor = T.textMuted; }}
           onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.chrome; e.currentTarget.style.borderColor = T.border; }}
           style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid ' + T.border, backgroundColor: T.chrome, color: T.textSecondary, fontSize: 11, fontWeight: 500, cursor: 'pointer', transition: 'background-color 150ms' }}
@@ -507,12 +550,40 @@ export default function MembershipPlans({ catalogLayout }) {
             style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid ' + T.danger, backgroundColor: T.chrome, color: T.danger, fontSize: 11, fontWeight: 500, cursor: 'pointer', transition: 'background-color 150ms' }}
           >Delete plan</div>
         )}
+        {checkHasChanges() && <span style={{ fontSize: 11, color: T.warning, fontWeight: 500 }}>Unsaved changes</span>}
         <div onClick={savePlan}
-          onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#1D4FD7'; }}
-          onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.primary; }}
-          style={{ padding: '6px 18px', borderRadius: 6, backgroundColor: T.primary, color: '#fff', fontSize: 12, fontWeight: 500, cursor: 'pointer', transition: 'background-color 150ms' }}
-        >Save plan</div>
+          onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = checkHasChanges() ? '#15803D' : '#1D4FD7'; }}
+          onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = checkHasChanges() ? T.success : T.primary; }}
+          style={{ padding: checkHasChanges() ? '8px 24px' : '6px 18px', borderRadius: 6, backgroundColor: checkHasChanges() ? T.success : T.primary, color: '#fff', fontSize: checkHasChanges() ? 14 : 12, fontWeight: 600, cursor: 'pointer', transition: 'all 150ms', boxShadow: checkHasChanges() ? '0 0 12px rgba(34,197,94,0.4)' : 'none' }}
+        >{checkHasChanges() ? '💾 Save plan' : 'Save plan'}</div>
       </div>
+
+      {/* Unsaved changes popup */}
+      {showUnsavedPopup && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: T.surface, border: '1px solid ' + T.border, borderRadius: 12, padding: 24, width: 340, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: T.text, marginBottom: 12 }}>Unsaved changes</div>
+            <div style={{ fontSize: 13, color: T.textSecondary, marginBottom: 20, lineHeight: '1.5' }}>You have unsaved changes to this plan. Would you like to save before leaving?</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div onClick={discardEdits}
+                onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#3E4C5E'; }}
+                onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.chrome; }}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: '1px solid ' + T.danger, backgroundColor: T.chrome, color: T.danger, fontSize: 13, fontWeight: 500, cursor: 'pointer', textAlign: 'center' }}
+              >Discard</div>
+              <div onClick={function() { setShowUnsavedPopup(false); }}
+                onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#3E4C5E'; }}
+                onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.chrome; }}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: '1px solid ' + T.border, backgroundColor: T.chrome, color: T.textSecondary, fontSize: 13, fontWeight: 500, cursor: 'pointer', textAlign: 'center' }}
+              >Keep editing</div>
+              <div onClick={function() { setShowUnsavedPopup(false); savePlan(); }}
+                onMouseEnter={function(e) { e.currentTarget.style.backgroundColor = '#15803D'; }}
+                onMouseLeave={function(e) { e.currentTarget.style.backgroundColor = T.success; }}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 6, border: 'none', backgroundColor: T.success, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'center' }}
+              >Save</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Three-column layout: basics | perks | rules */}
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>

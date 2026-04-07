@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 import { getWaitColor, AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
 import AreaTag from '../../components/ui/AreaTag';
 
-const QUICK_SERVICES=["Women's Cut",'Blowout','Full Color','Highlights','Balayage','Updo','Deep Cond.',"Men's Cut",'Beard Trim','Manicure','Pedicure','Gel Mani','Facial','Waxing'];
+
 
 function Av({name,size=30,index=0,photo=null}){
   var C = useTheme();
@@ -17,18 +17,13 @@ function Av({name,size=30,index=0,photo=null}){
   return(<div style={{width:size,height:size,borderRadius:'50%',background:AVATAR_COLORS[index%AVATAR_COLORS.length],display:'flex',alignItems:'center',justifyContent:'center',color:C.textPrimary,fontSize:size<28?9:11,fontWeight:500,flexShrink:0}}>{getInitials(name)}</div>);
 }
 
-function autoCap(v){return v.replace(/(^|\s)\S/g,c=>c.toUpperCase());}
+
 
 export default function WaitlistPanel({waitlist, techTurn, onStartWorking, onRemove, onCheckIn}){
   var C = useTheme();
   const[expandedId,setExpandedId]=useState(null);
   const[pendingConfirm,setPendingConfirm]=useState(null);
   const[now,setNow]=useState(Date.now());
-  const[showForm,setShowForm]=useState(false);
-  const[formName,setFormName]=useState('');
-  const[formService,setFormService]=useState(QUICK_SERVICES[0]);
-  const[formRequested,setFormRequested]=useState('');
-  const[formIsWalkIn,setFormIsWalkIn]=useState(true);
   const[pendingRemove,setPendingRemove]=useState(null);
 
   useEffect(()=>{const iv=setInterval(()=>setNow(Date.now()),15000);return()=>clearInterval(iv);},[]);
@@ -57,68 +52,22 @@ export default function WaitlistPanel({waitlist, techTurn, onStartWorking, onRem
     setPendingConfirm(null);setExpandedId(null);
   }
 
-  function handleFormSave(){
-    if(!formName.trim())return;
-    const entry={
-      id:'w-'+Date.now(),
-      client:formName.trim(),
-      service:formService,
-      walk_in:formIsWalkIn,
-      requested:formRequested||null,
-      checked_in_at:Date.now(),
-    };
-    if(onCheckIn)onCheckIn(entry);
-    setFormName('');setFormService(QUICK_SERVICES[0]);setFormRequested('');setFormIsWalkIn(true);setShowForm(false);
-  }
-  function handleFormCancel(){
-    setFormName('');setFormService(QUICK_SERVICES[0]);setFormRequested('');setFormIsWalkIn(true);setShowForm(false);
-  }
-
-  const INP={width:'100%',height:38,background:'#283548',border:`1px solid ${C.borderMedium}`,borderRadius:6,padding:'0 10px',color:C.textPrimary,fontSize:13,fontFamily:'inherit',outline:'none',boxSizing:'border-box'};
-  const techNames=techTurn.map(t=>t.name).sort();
 
   return(
     <div style={{position:'relative'}}>
       <AreaTag id="WAITLIST" />
-      {!showForm?(
-        <button onClick={()=>setShowForm(true)} style={{width:'100%',padding:'10px 0',marginBottom:12,background:C.blueTint,border:`1px dashed ${C.blue}`,borderRadius:8,color:C.blueLight,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}
-          onMouseEnter={e=>e.currentTarget.style.background=C.accentBg}
-          onMouseLeave={e=>e.currentTarget.style.background=C.blueTint}>
-          + Check In
-        </button>
-      ):(
-        <div style={{marginBottom:12,padding:12,background:C.chromeDark,borderRadius:8,border:`1px solid ${C.borderMedium}`}}>
-          <div style={{fontSize:12,fontWeight:600,color:C.textPrimary,marginBottom:10}}>Check In Client</div>
-          {/* Name */}
-          <input value={formName} onChange={e=>setFormName(autoCap(e.target.value))} placeholder="Client name" autoCapitalize="words" autoComplete="off" style={{...INP,marginBottom:8}}/>
-          {/* Service */}
-          <select value={formService} onChange={e=>setFormService(e.target.value)} style={{...INP,marginBottom:8,appearance:'auto'}}>
-            {QUICK_SERVICES.map(s=><option key={s} value={s}>{s}</option>)}
-          </select>
-          {/* Walk-in / Appointment toggle */}
-          <div style={{display:'flex',gap:6,marginBottom:8}}>
-            <button onClick={()=>setFormIsWalkIn(true)} style={{flex:1,height:34,background:formIsWalkIn?'rgba(217,151,6,0.2)':'transparent',border:formIsWalkIn?'1px solid rgba(217,151,6,0.5)':`1px solid ${C.borderMedium}`,borderRadius:6,color:formIsWalkIn?C.warning:C.textMuted,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Walk-in</button>
-            <button onClick={()=>setFormIsWalkIn(false)} style={{flex:1,height:34,background:!formIsWalkIn?C.accentBg:'transparent',border:!formIsWalkIn?`1px solid ${C.blue}`:`1px solid ${C.borderMedium}`,borderRadius:6,color:!formIsWalkIn?C.blueLight:C.textMuted,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Appointment</button>
-          </div>
-          {/* Requested tech (optional) */}
-          <select value={formRequested} onChange={e=>setFormRequested(e.target.value)} style={{...INP,marginBottom:10,appearance:'auto'}}>
-            <option value="">No tech preference</option>
-            {techNames.map(n=><option key={n} value={n}>{n}</option>)}
-          </select>
-          {/* Save / Cancel */}
-          <div style={{display:'flex',gap:6}}>
-            <button onClick={handleFormCancel} style={{flex:1,height:36,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
-            <button onClick={handleFormSave} disabled={!formName.trim()} style={{flex:1,height:36,background:formName.trim()?C.blue:'#334155',border:'none',borderRadius:6,color:formName.trim()?'#fff':C.textMuted,fontSize:12,fontWeight:500,cursor:formName.trim()?'pointer':'default',fontFamily:'inherit'}}>Check In</button>
-          </div>
-        </div>
-      )}
+      <button onClick={()=>{if(onCheckIn)onCheckIn();}} style={{width:'100%',padding:'10px 0',marginBottom:12,background:C.blueTint,border:`1px dashed ${C.blue}`,borderRadius:8,color:C.blueLight,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}
+        onMouseEnter={e=>e.currentTarget.style.background=C.accentBg}
+        onMouseLeave={e=>e.currentTarget.style.background=C.blueTint}>
+        + Check In
+      </button>
 
       {/* HEADER */}
       <div style={{fontSize:11,color:C.textMuted,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
         <span>Waiting ({waitlist.length})</span>
       </div>
 
-      {waitlist.length===0&&!showForm&&(
+      {waitlist.length===0&&(
         <div style={{padding:'12px 8px',textAlign:'center',color:C.textMuted,fontSize:13}}>No one waiting</div>
       )}
 

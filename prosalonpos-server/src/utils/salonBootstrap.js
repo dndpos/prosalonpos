@@ -288,7 +288,6 @@ async function seedDefaultData(salonId) {
         turn_counting_mode: 'simple',
         turn_price_minimum_cents: 2000,
         tax_rate_percent: 7,
-        tax_rate_percentage: 7.5,
         tip_presets: '18,20,25',
         tip_presets_array: [18, 20, 25],
         tip_distribution_mode: 'proportional',

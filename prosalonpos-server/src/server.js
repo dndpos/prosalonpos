@@ -9,6 +9,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { existsSync } from 'fs';
@@ -56,8 +58,34 @@ var app = express();
 // Gzip compression — reduces response sizes by 60-80% over the wire
 app.use(compression());
 
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false,  // frontend serves its own CSP
+  crossOriginEmbedderPolicy: false
+}));
+
 // Parse JSON bodies
 app.use(express.json({ limit: '10mb' }));
+
+// Rate limiting — protect login endpoint from brute-force PIN attempts
+var loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,                  // 100 attempts per window per IP
+  message: { error: 'Too many login attempts. Please wait 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// General API rate limiter — generous for normal use, prevents abuse
+var apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 300,            // 300 requests per minute per IP
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use('/api/', apiLimiter);
 
 // CORS — allow frontend on localhost (dev), Railway, or configured domain
 app.use(cors({
@@ -67,7 +95,9 @@ app.use(cors({
     if (origin.indexOf('localhost') !== -1 || origin.indexOf('127.0.0.1') !== -1) return callback(null, true);
     if (origin.indexOf('.railway.app') !== -1) return callback(null, true);
     if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return callback(null, true);
-    // In production with no FRONTEND_URL set, allow all (single-origin deploy)
+    // Reject unknown origins in production when FRONTEND_URL is set
+    if (process.env.FRONTEND_URL) return callback(new Error('CORS not allowed'));
+    // Allow all only when FRONTEND_URL is not configured (single-origin deploy)
     callback(null, true);
   },
   credentials: true
@@ -80,7 +110,7 @@ app.get('/api/health', function(req, res) {
 });
 
 // ── Public routes (no auth required) ──
-app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
 
 // ── Protected routes (JWT required) ──
@@ -309,5 +339,14 @@ httpServer.listen(PORT, async function() {
   } catch (err) {
     console.error('[Bootstrap] ❌ Auto-bootstrap failed:', err.message);
     console.error(err.stack);
+  }
+
+  // ── Diagnostic: count tickets in DB ──
+  try {
+    var ticketCount = await prisma.ticket.count();
+    var paidCount = await prisma.ticket.count({ where: { status: 'paid' } });
+    console.log('[Diagnostic] Total tickets in DB:', ticketCount, '| Paid:', paidCount);
+  } catch (diagErr) {
+    console.error('[Diagnostic] Could not count tickets:', diagErr.message);
   }
 });

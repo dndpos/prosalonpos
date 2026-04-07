@@ -27,16 +27,39 @@ function fromDb(val) {
 var router = Router();
 
 /**
+ * Get Eastern Time offset for a given date (handles DST).
+ * Returns minutes behind UTC: 300 for EST, 240 for EDT.
+ */
+function getEasternOffset(date) {
+  var str = date.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+  if (str.indexOf('EDT') >= 0) return 240;
+  return 300;
+}
+
+/**
  * Parse date range from query params.
- * Returns { startDate, endDate } as Date objects.
+ * Returns { startDate, endDate } as Date objects in Eastern time boundaries.
+ * Must match checkout.js dayBounds logic so tickets land on the same day in reports.
  */
 function parseDateRange(query) {
   var startStr = query.start || new Date().toISOString().split('T')[0];
   var endStr = query.end || startStr;
-  return {
-    startDate: new Date(startStr + 'T00:00:00.000Z'),
-    endDate: new Date(endStr + 'T23:59:59.999Z'),
-  };
+
+  var startParts = startStr.split('-');
+  var sy = parseInt(startParts[0]), sm = parseInt(startParts[1]) - 1, sd = parseInt(startParts[2]);
+  var startProbe = new Date(Date.UTC(sy, sm, sd, 12, 0, 0));
+  var startOffset = getEasternOffset(startProbe);
+  var startDate = new Date(Date.UTC(sy, sm, sd, 0, 0, 0, 0));
+  startDate.setUTCMinutes(startDate.getUTCMinutes() + startOffset);
+
+  var endParts = endStr.split('-');
+  var ey = parseInt(endParts[0]), em = parseInt(endParts[1]) - 1, ed = parseInt(endParts[2]);
+  var endProbe = new Date(Date.UTC(ey, em, ed, 12, 0, 0));
+  var endOffset = getEasternOffset(endProbe);
+  var endDate = new Date(Date.UTC(ey, em, ed, 23, 59, 59, 999));
+  endDate.setUTCMinutes(endDate.getUTCMinutes() + endOffset);
+
+  return { startDate: startDate, endDate: endDate };
 }
 
 // ── GET /daily-summary — Overview numbers for a date range ──
@@ -44,7 +67,7 @@ router.get('/daily-summary', async function(req, res, next) {
   try {
     var range = parseDateRange(req.query);
 
-    // Tickets in range (paid + refunded, not voided)
+    // Tickets SOLD in range (paid + refunded, not voided)
     var tickets = await prisma.ticket.findMany({
       where: {
         salon_id: req.salon_id,
@@ -54,11 +77,20 @@ router.get('/daily-summary', async function(req, res, next) {
       include: { items: true, payments: true }
     });
 
+    // Tickets REFUNDED in range (by refund_at date, regardless of when sold)
+    var refundedInRange = await prisma.ticket.findMany({
+      where: {
+        salon_id: req.salon_id,
+        refund_cents: { gt: 0 },
+        refund_at: { gte: range.startDate, lte: range.endDate },
+      },
+      select: { id: true, refund_cents: true }
+    });
+
     var totalRevenue = 0;
     var totalTax = 0;
     var totalTips = 0;
     var totalDiscount = 0;
-    var totalRefunds = 0;
     var serviceCount = 0;
     var productCount = 0;
 
@@ -67,11 +99,16 @@ router.get('/daily-summary', async function(req, res, next) {
       totalTax += t.tax_cents;
       totalTips += t.tip_cents;
       totalDiscount += t.discount_cents;
-      totalRefunds += t.refund_cents;
       t.items.forEach(function(item) {
         if (item.type === 'service') serviceCount++;
         else if (item.type === 'product') productCount++;
       });
+    });
+
+    // Refunds attributed to THIS date range (when refund was issued)
+    var totalRefunds = 0;
+    refundedInRange.forEach(function(r) {
+      totalRefunds += r.refund_cents;
     });
 
     // Appointments in range
@@ -125,7 +162,17 @@ router.get('/sales', async function(req, res, next) {
       orderBy: { created_at: 'asc' }
     });
 
-    // Group by date
+    // Refunds issued in this date range (attributed to refund day)
+    var refundedInRange = await prisma.ticket.findMany({
+      where: {
+        salon_id: req.salon_id,
+        refund_cents: { gt: 0 },
+        refund_at: { gte: range.startDate, lte: range.endDate },
+      },
+      select: { id: true, refund_cents: true, refund_at: true }
+    });
+
+    // Group sales by date (revenue only, no refunds from sale tickets)
     var byDate = {};
     tickets.forEach(function(t) {
       var date = t.created_at.toISOString().split('T')[0];
@@ -137,7 +184,15 @@ router.get('/sales', async function(req, res, next) {
       byDate[date].tax_cents += t.tax_cents;
       byDate[date].tip_cents += t.tip_cents;
       byDate[date].discount_cents += t.discount_cents;
-      byDate[date].refund_cents += t.refund_cents;
+    });
+
+    // Attribute refunds to the day they were issued
+    refundedInRange.forEach(function(r) {
+      var date = r.refund_at.toISOString().split('T')[0];
+      if (!byDate[date]) {
+        byDate[date] = { date: date, ticket_count: 0, revenue_cents: 0, tax_cents: 0, tip_cents: 0, discount_cents: 0, refund_cents: 0 };
+      }
+      byDate[date].refund_cents += r.refund_cents;
     });
 
     var sales = Object.values(byDate).sort(function(a, b) {
@@ -170,9 +225,12 @@ router.get('/staff-performance', async function(req, res, next) {
     var staffMap = {};
     allStaff.forEach(function(s) { staffMap[s.id] = s.display_name; });
 
-    // Aggregate by tech
+    // Aggregate by tech (adjust for refunds proportionally)
     var byTech = {};
     tickets.forEach(function(t) {
+      var refundRatio = (t.refund_cents > 0 && t.subtotal_cents > 0)
+        ? Math.min(t.refund_cents / t.subtotal_cents, 1) : 0;
+
       t.items.forEach(function(item) {
         if (!item.tech_id) return;
         if (!byTech[item.tech_id]) {
@@ -188,14 +246,15 @@ router.get('/staff-performance', async function(req, res, next) {
           };
         }
         var entry = byTech[item.tech_id];
+        var netPrice = Math.round(item.price_cents * (1 - refundRatio));
         if (item.type === 'service') {
-          entry.service_revenue_cents += item.price_cents;
+          entry.service_revenue_cents += netPrice;
           entry.service_count++;
         } else if (item.type === 'product') {
-          entry.product_revenue_cents += item.price_cents;
+          entry.product_revenue_cents += netPrice;
           entry.product_count++;
         }
-        entry.total_revenue_cents += item.price_cents;
+        entry.total_revenue_cents += netPrice;
       });
 
       // Count unique tickets per tech

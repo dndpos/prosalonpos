@@ -13,6 +13,7 @@ import { MOCK_SERVICE_PACKAGES, MOCK_SERVICE_PACKAGE_ITEMS } from './packageBrid
 import { usePackageStore } from '../../lib/stores/packageStore';
 import { isProduction } from '../../lib/apiClient';
 import { useServiceStore } from '../../lib/stores/serviceStore';
+import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 import CategoryGrid from '../../components/domain/CategoryGrid';
 import ServiceGrid from '../../components/domain/ServiceGrid';
 
@@ -260,6 +261,15 @@ export default function PackageList({ services: propServices, categories: propCa
     }
     setShowNumpad(null);
   }
+
+  useNumpadKeyboard(
+    !!showNumpad,
+    function(d) { setNumpadValue(function(p) { return (p || '') + d; }); },
+    function() { setNumpadValue(function(p) { return (p || '').slice(0, -1); }); },
+    closeNumpad,
+    function() { setShowNumpad(null); },
+    [showNumpad, numpadValue]
+  );
 
   // ═══════════════════════════════════
   // CATALOG PRICE TOTAL (for comparison)

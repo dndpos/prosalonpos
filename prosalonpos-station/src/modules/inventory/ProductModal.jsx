@@ -13,6 +13,7 @@ import { useTheme } from '../../lib/ThemeContext';
 import React, { useState } from 'react';
 import { dollars } from '../../lib/formatUtils';
 import AreaTag from '../../components/ui/AreaTag';
+import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 
 
 // ═══════════════════════════════════════
@@ -74,8 +75,8 @@ export default function ProductModal({ product, categories, activeCat, suppliers
   var [sku, setSku] = useState(isEdit ? (product.sku || '') : '');
   var [priceCents, setPriceCents] = useState(isEdit ? String(product.price_cents || '') : '');
   var [costCents, setCostCents] = useState(isEdit ? String(product.cost_cents || '') : '');
-  var [stockQty, setStockQty] = useState(isEdit ? String(product.stock_quantity || '0') : '0');
-  var [threshold, setThreshold] = useState(isEdit ? String(product.low_stock_threshold || '') : '');
+  var [stockQty, setStockQty] = useState(isEdit ? String(product.stock_qty || '0') : '0');
+  var [threshold, setThreshold] = useState(isEdit ? String(product.low_stock_qty || '') : '');
   var [supplierId, setSupplierId] = useState(isEdit ? (product.supplier_id || '') : '');
   var [description, setDescription] = useState(isEdit ? (product.description || '') : '');
   var [active, setActive] = useState(isEdit ? product.active : true);
@@ -110,6 +111,15 @@ export default function ProductModal({ product, categories, activeCat, suppliers
     setActiveField(activeField === field ? null : field);
   }
 
+  useNumpadKeyboard(
+    !!activeField,
+    function(d) { handleNumKey(d); },
+    function() { handleNumKey('⌫'); },
+    function() { setActiveField(null); },
+    function() { setActiveField(null); },
+    [activeField, priceCents, costCents, stockQty, threshold]
+  );
+
   function formatCents(raw) {
     if (!raw) return '$0.00';
     var n = parseInt(raw, 10);
@@ -128,8 +138,8 @@ export default function ProductModal({ product, categories, activeCat, suppliers
       sku: sku.trim() || null,
       price_cents: parseInt(priceCents, 10) || 0,
       cost_cents: parseInt(costCents, 10) || 0,
-      stock_quantity: parseInt(stockQty, 10) || 0,
-      low_stock_threshold: threshold ? (parseInt(threshold, 10) || null) : null,
+      stock_qty: parseInt(stockQty, 10) || 0,
+      low_stock_qty: threshold ? (parseInt(threshold, 10) || null) : null,
       supplier_id: supplierId || null,
       description: description.trim() || null,
       active: active,

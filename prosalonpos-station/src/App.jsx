@@ -174,6 +174,8 @@ export default function App() {
   var handleAddTicketTip = ticketHandlers.handleAddTicketTip;
   var handleVoidTicket = ticketHandlers.handleVoidTicket;
   var handleRefundTicket = ticketHandlers.handleRefundTicket;
+  var checkoutError = ticketHandlers.checkoutError;
+  var clearCheckoutError = ticketHandlers.clearCheckoutError;
 
   // ── Bootstrap + Socket effects ──
   useEffect(function() {
@@ -206,7 +208,7 @@ export default function App() {
     onSocketEvent('ticket:updated', function() { fetchTickets(); });
     onSocketEvent('ticket:closed', function() { fetchTickets(); });
     onSocketEvent('ticket:voided', function() { fetchTickets(); });
-    onSocketEvent('ticket:refunded', function() { fetchTickets(); });
+    onSocketEvent('ticket:refunded', function() { fetchTickets(); fetchGiftCards(); });
     onSocketEvent('ticket:payment', function() { fetchTickets(); });
     onSocketEvent('ticket:tip_updated', function() { fetchTickets(); });
     onSocketEvent('giftcard:created', function() { fetchGiftCards(); });
@@ -266,7 +268,7 @@ export default function App() {
 
   function handleNavClick(id, rbacStaff) {
     if (id === 'online-notifs') { setShowOnlinePopup(true); }
-    else { if (id === 'checkout') setCheckoutData(rbacStaff ? { cashierStaff: rbacStaff } : null); setActivePage(id); }
+    else { if (id === 'checkout') setCheckoutData(rbacStaff ? { cashierStaff: rbacStaff } : { skipPin: true }); setActivePage(id); }
   }
 
   function handleCheckout(data, rbacStaff) {
@@ -320,27 +322,46 @@ export default function App() {
     setActivePage(stationConfig.id_method === 'pin' ? 'tech-pin' : 'tech-select');
   }
 
-  function handleOpenTicketCheckout(ticketIds) {
+  async function handleOpenTicketCheckout(ticketIds) {
     var selected = openTickets.filter(function(t){ return ticketIds.includes(t.id); });
     if (selected.length === 0) return;
-    var primary = selected[0];
-    var enrichedClient = enrichClientBalance(primary.client);
-    var allItems = []; var totalDeposit = 0;
-    selected.forEach(function(t){ t.items.forEach(function(it){ allItems.push(it); }); totalDeposit += (t.depositCents || 0); });
-    setCheckoutData({ client: enrichedClient, services: allItems, depositCents: totalDeposit, openTicketIds: ticketIds, openTicketId: primary.id });
-    setActivePage('checkout');
+
+    if (selected.length >= 2) {
+      // Merge on server — absorber gets all items, absorbed get status='merged'
+      try {
+        var mergedTicket = await useTicketStore.getState().mergeTickets(ticketIds);
+        var enrichedClient = enrichClientBalance(mergedTicket.client_id ? { id: mergedTicket.client_id, name: mergedTicket.clientName } : null);
+        setCheckoutData({
+          client: enrichedClient,
+          services: mergedTicket.items,
+          depositCents: mergedTicket.depositCents || 0,
+          openTicketIds: [mergedTicket.id],
+          openTicketId: mergedTicket.id,
+          displayNumber: mergedTicket.displayNumber || null,
+        });
+        setActivePage('checkout');
+      } catch (err) {
+        alert('Merge failed: ' + err.message);
+      }
+    } else {
+      // Single ticket — no merge needed
+      var primary = selected[0];
+      var enrichedClient = enrichClientBalance(primary.client);
+      setCheckoutData({
+        client: enrichedClient,
+        services: primary.items,
+        depositCents: primary.depositCents || 0,
+        openTicketIds: ticketIds,
+        openTicketId: primary.id,
+        displayNumber: primary.displayNumber || null,
+      });
+      setActivePage('checkout');
+    }
   }
 
-  function handleCombineTicket(ticketId) {
-    var ticket = openTickets.find(function(t){ return t.id === ticketId; });
-    if (!ticket) return;
-    useTicketStore.getState().removeOpenTicket(ticketId);
-    return ticket;
-  }
-
-  function handleReopenTicket(ticket) {
-    var reopenData = ticketHandlers.handleReopenTicket(ticket);
-    setCheckoutData(reopenData); setActivePage('checkout');
+  async function handleReopenTicket(ticket) {
+    var reopenData = await ticketHandlers.handleReopenTicket(ticket);
+    if (reopenData) { setCheckoutData(reopenData); setActivePage('checkout'); }
   }
 
   function handleMarkAllViewed() { setOnlineBookings([]); setShowOnlinePopup(false); }
@@ -358,8 +379,8 @@ export default function App() {
 
   function renderPage() {
     switch (activePage) {
-      case 'calendar':       return <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} />;
-      case 'checkout':       return <CheckoutScreen appointmentData={checkoutData} onDone={function(){ setCheckoutData(null); if(activeTech){ handleBackToTechSelect(); } else { setActivePage('calendar'); } }} onCloseTicket={handleCloseTicket} onPrintHold={handlePrintHold} openTickets={openTickets} onCombineTicket={handleCombineTicket} nextTicketNumber={nextTicketNumber} catalogLayout={grid.catalogLayout} drawerSession={drawer.drawerSession} salonSettings={salonSettings} onCashPayment={drawer.handleCashPaymentTracked} canProcessPayments={activeTech ? stationConfig.can_process_payments : true} />;
+      case 'calendar':       return <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} />;
+      case 'checkout':       return <CheckoutScreen appointmentData={checkoutData} onDone={function(){ setCheckoutData(null); if(activeTech){ handleBackToTechSelect(); } else { setActivePage('calendar'); } }} onCloseTicket={handleCloseTicket} onPrintHold={handlePrintHold} openTickets={openTickets} nextTicketNumber={nextTicketNumber} catalogLayout={grid.catalogLayout} drawerSession={drawer.drawerSession} salonSettings={salonSettings} onCashPayment={drawer.handleCashPaymentTracked} canProcessPayments={activeTech ? stationConfig.can_process_payments : true} />;
       case 'tickets':        return <TicketViewer closedTickets={closedTickets} openTickets={openTickets} onBack={function(){ setActivePage('calendar'); }} onReopen={handleReopenTicket} onOpenTicketCheckout={handleOpenTicketCheckout} onNewSale={function(){ setCheckoutData(null); setActivePage('checkout'); }} onUpdateTicketTips={handleUpdateTicketTips} onAddTicketTip={handleAddTicketTip} onVoid={handleVoidTicket} onRefund={handleRefundTicket} />;
       case 'clients':        return <ClientList onBack={function(){ setActivePage('calendar'); }} />;
       case 'gift-cards':     return <GiftCardModule />;
@@ -367,13 +388,13 @@ export default function App() {
       case 'membership':     return <MembershipModule />;
       case 'inventory':      return <InventoryModule />;
       case 'messaging':      return <MessagingModule />;
-      case 'payroll':        return <PayrollModule clockPunches={timeClock.clockPunches} onAddPunch={timeClock.handleAddManualPunch} onDeletePunch={timeClock.handleDeletePunch} />;
+      case 'payroll':        return <PayrollModule clockPunches={timeClock.clockPunches} onAddPunch={timeClock.handleAddManualPunch} onEditPunch={timeClock.handleEditPunch} onDeletePunch={timeClock.handleDeletePunch} />;
       case 'online-booking': return <OnlineBookingPortal />;
       case 'kiosk':             return <KioskApp />;
       case 'customer-display':  return <CustomerDisplayApp />;
       case 'tech-select':       return <TechSelectApp onTechSelected={handleTechSelected} onExit={function(){ setActiveTech(null); setActivePage('calendar'); }} stationMode={stationConfig.station_mode} canProcessPayments={stationConfig.can_process_payments} activeAppointments={(function(){ var m={}; storeServiceLines.filter(function(sl){ return sl.status==='in_progress'||sl.status==='checked_in'; }).forEach(function(sl){ if(!m[sl.staff_id]) m[sl.staff_id]={clientName:sl.client,services:[]}; m[sl.staff_id].services.push({name:sl.service,price_cents:sl.price_cents||0}); }); return m; })()} />;
       case 'tech-pin':          return <TechPinApp onTechSelected={handleTechSelected} onExit={function(){ setActiveTech(null); setActivePage('calendar'); }} stationMode={stationConfig.station_mode} activeAppointments={(function(){ var m={}; storeServiceLines.filter(function(sl){ return sl.status==='in_progress'||sl.status==='checked_in'; }).forEach(function(sl){ if(!m[sl.staff_id]) m[sl.staff_id]={clientName:sl.client,services:[]}; m[sl.staff_id].services.push({name:sl.service,price_cents:sl.price_cents||0}); }); return m; })()} />;
-      case 'dashboard':      return <OwnerDashboard salonSettings={salonSettings} onSettingsUpdate={handleSettingsUpdate} onBack={function(){ setShowOwner(false); setActivePage('calendar'); }} onLaunchStation={handleLaunchStation} onProviderAdmin={function(){ setActivePage('provider-admin'); }} employees={grid.empStaff} setEmployees={grid.setEmpStaff} empColumns={grid.empColumns} setEmpColumns={grid.setEmpColumns} empRows={grid.empRows} setEmpRows={grid.setEmpRows} empSlots={grid.empSlots} setEmpSlots={grid.setEmpSlots} catalogLayout={grid.catalogLayout} categories={grid.svcCatCategories} setCategories={grid.setSvcCatCategories} services={grid.svcCatServices} setServices={grid.setSvcCatServices} catColumns={grid.svcCatColumns} setCatColumns={grid.setSvcCatColumns} catRows={grid.svcCatRows} setCatRows={grid.setSvcCatRows} svcColumns={grid.svcGridColumns} setSvcColumns={grid.setSvcGridColumns} svcRows={grid.svcGridRows} setSvcRows={grid.setSvcGridRows} catSlots={grid.svcCatSlots} setCatSlots={grid.setSvcCatSlots} svcSlots={grid.svcSlots} setSvcSlots={grid.setSvcSlots} />;
+      case 'dashboard':      return <OwnerDashboard salonSettings={salonSettings} onSettingsUpdate={handleSettingsUpdate} onBack={function(){ setShowOwner(false); setActivePage('calendar'); }} onLaunchStation={handleLaunchStation} onProviderAdmin={function(){ setActivePage('provider-admin'); }} employees={grid.empStaff} setEmployees={grid.setEmpStaff} empColumns={grid.empColumns} setEmpColumns={grid.setEmpColumns} empRows={grid.empRows} setEmpRows={grid.setEmpRows} empSlots={grid.empSlots} setEmpSlots={grid.setEmpSlots} catalogLayout={grid.catalogLayout} categories={grid.svcCatCategories} setCategories={grid.setSvcCatCategories} services={grid.svcCatServices} setServices={grid.setSvcCatServices} catColumns={grid.svcCatColumns} setCatColumns={grid.setSvcCatColumns} catRows={grid.svcCatRows} setCatRows={grid.setSvcCatRows} svcColumns={grid.svcGridColumns} setSvcColumns={grid.setSvcGridColumns} svcRows={grid.svcGridRows} setSvcRows={grid.setSvcGridRows} catSlots={grid.svcCatSlots} setCatSlots={grid.setSvcCatSlots} svcSlots={grid.svcSlots} setSvcSlots={grid.setSvcSlots} clockPunches={timeClock.clockPunches} onAddPunch={timeClock.handleAddManualPunch} onEditPunch={timeClock.handleEditPunch} onDeletePunch={timeClock.handleDeletePunch} />;
       case 'reports':        return <ReportsModule />;
       case 'provider-admin': return <ProviderAdminPanel onBack={function(){ setActivePage('dashboard'); }} />;
       default:               return <CalendarDayView />;
@@ -420,6 +441,12 @@ export default function App() {
           ⚠ Server not connected{_staffError ? ' — ' + _staffError : ''}. Data will not load until the server is running.
         </div>
       )}
+      {checkoutError && (
+        <div style={{ background: '#92400E', color: '#FDE68A', textAlign: 'center', padding: '8px 16px', fontSize: 13, fontWeight: 600, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <span>⚠ Ticket #{checkoutError.ticketNumber}: {checkoutError.message}. Saved locally — will sync when server reconnects.</span>
+          <span onClick={clearCheckoutError} style={{ cursor: 'pointer', padding: '2px 10px', borderRadius: 4, border: '1px solid #FDE68A', fontSize: 11, flexShrink: 0 }}>Dismiss</span>
+        </div>
+      )}
       <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {renderPage()}
       </main>
@@ -435,7 +462,7 @@ export default function App() {
         />
       )}
       {timeClock.showTimeClockModal && (
-        <TimeClockPopup show={true} clockPunches={timeClock.clockPunches} onPunch={timeClock.handleClockPunch} onDismiss={function() { timeClock.setShowTimeClockModal(false); }} />
+        <TimeClockPopup show={true} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} onPunch={timeClock.handleClockPunch} onPresencePunch={timeClock.handlePresencePunch} onDismiss={function() { timeClock.setShowTimeClockModal(false); }} />
       )}
       <VirtualKeyboard />
       <div style={{ position: 'fixed', bottom: 4, right: 8, fontSize: 10, fontWeight: 600, color: 'rgba(148,163,184,0.4)', fontFamily: "'JetBrains Mono', monospace", pointerEvents: 'none', zIndex: 99999 }}>S110</div>

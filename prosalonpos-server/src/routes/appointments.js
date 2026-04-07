@@ -197,6 +197,15 @@ router.put('/:id', async function(req, res, next) {
 // ── PUT /service-line/:id — Update single service line (drag on calendar) ──
 router.put('/service-line/:id', async function(req, res, next) {
   try {
+    // Verify service line belongs to this salon via its appointment
+    var existing = await prisma.serviceLine.findFirst({
+      where: { id: req.params.id },
+      include: { appointment: { select: { salon_id: true } } }
+    });
+    if (!existing || existing.appointment.salon_id !== req.salon_id) {
+      return res.status(404).json({ error: 'Service line not found' });
+    }
+
     var data = req.body;
     var updateData = {};
     var fields = ['staff_id', 'starts_at', 'duration_minutes', 'calendar_color',
@@ -223,6 +232,11 @@ router.put('/service-line/:id', async function(req, res, next) {
 // ── DELETE /:id — Soft cancel (never hard delete) ──
 router.delete('/:id', async function(req, res, next) {
   try {
+    var existing = await prisma.appointment.findFirst({
+      where: { id: req.params.id, salon_id: req.salon_id }
+    });
+    if (!existing) return res.status(404).json({ error: 'Appointment not found' });
+
     var appt = await prisma.appointment.update({
       where: { id: req.params.id },
       data: { status: 'cancelled', version: { increment: 1 } }

@@ -122,6 +122,11 @@ router.put('/:id', async function(req, res, next) {
 // ── DELETE /:id — Soft delete ──
 router.delete('/:id', async function(req, res, next) {
   try {
+    var existing = await prisma.client.findFirst({
+      where: { id: req.params.id, salon_id: req.salon_id }
+    });
+    if (!existing) return res.status(404).json({ error: 'Client not found' });
+
     var c = await prisma.client.update({
       where: { id: req.params.id },
       data: { active: false, version: { increment: 1 } }

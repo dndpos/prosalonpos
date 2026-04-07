@@ -28,7 +28,7 @@ export default function CalendarOverlays({
   // Blocked time
   selectedBlock, setSelectedBlock, setBlockedTimes, rbac,
   // Booking flow
-  bookingCtx, techTurn, handleBookingSave, handleBookingCancel, catalogLayout, salonSettings,
+  bookingCtx, techTurn, handleBookingSave, handleBookingCancel, handleCheckInSave, catalogLayout, salonSettings,
   // Activity log
   showLogPopup, setShowLogPopup, activityLog,
   // Copy/paste
@@ -119,11 +119,12 @@ export default function CalendarOverlays({
             <BookingFlow
               staff={STAFF} techTurn={techTurn}
               initialStaffId={bookingCtx.staffId}
-              initialHour={Math.floor(bookingCtx.startMin/60)}
-              initialMin={bookingCtx.startMin%60}
-              onSave={handleBookingSave} onCancel={handleBookingCancel}
+              initialHour={bookingCtx.checkIn ? Math.floor(new Date().getHours()) : Math.floor(bookingCtx.startMin/60)}
+              initialMin={bookingCtx.checkIn ? new Date().getMinutes() : bookingCtx.startMin%60}
+              onSave={bookingCtx.checkIn ? handleCheckInSave : handleBookingSave} onCancel={handleBookingCancel}
               catalogLayout={catalogLayout} autoRequestMode={!!salonSettings?.auto_request_mode}
               salonSettings={salonSettings}
+              checkInMode={!!bookingCtx.checkIn}
             />
           </div>
         </div>

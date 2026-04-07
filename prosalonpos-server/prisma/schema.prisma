@@ -89,7 +89,7 @@ model Staff {
   active                    Boolean  @default(true)
   status                    String   @default("active")     // active | deactivated | deleted
   tech_turn_eligible        Boolean  @default(true)
-  // show_on_calendar Boolean @default(true) — add column to DB first, then uncomment
+  show_on_calendar          Boolean  @default(true)
   pay_type                  String   @default("commission") // commission | hourly | salary
   commission_pct            Int      @default(0)
   daily_guarantee_cents     Int      @default(0)
@@ -322,13 +322,16 @@ model Ticket {
   appointment_id    String?
   client_id         String?
   client_name       String?
-  status            String   @default("open")  // open | paid | voided | refunded
+  status            String   @default("open")  // open | paid | voided | refunded | merged
+  merged_into       String?                    // ticket_id of absorber (set when status='merged')
+  display_number    String?                    // combined display like '4&6' (set on absorber)
   subtotal_cents    Int      @default(0)
   tax_cents         Int      @default(0)
   discount_cents    Int      @default(0)
   tip_cents         Int      @default(0)
   surcharge_cents   Int      @default(0)
   deposit_cents     Int      @default(0)       // deposit applied from booking
+  pkg_redeemed_cents Int     @default(0)       // package redemption deduction total
   total_cents       Int      @default(0)
   payment_method    String?                    // cash | credit | giftcard | zelle | split
   cashier_id        String?
@@ -341,6 +344,7 @@ model Ticket {
   refund_reason     String?
   refund_by         String?                    // staff_id who refunded
   refund_at         DateTime?
+  refund_history    Json?                      // [{items:[{itemId,name,amount_cents}],reason,method,by,at,tax_cents,tip_cents,pkgCreditsRestored}]
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
   version           Int      @default(1)
@@ -361,6 +365,7 @@ model TicketItem {
   name                 String
   price_cents          Int    @default(0)
   original_price_cents Int    @default(0)         // price before adjustment
+  client_id            String?                    // set during merge for multi-client tickets
   tech_id              String?
   tech_name            String?
   service_id           String?
@@ -588,7 +593,7 @@ model MembershipAccount {
   updated_at  DateTime @updatedAt
   version     Int      @default(1)
 
-  plan   MembershipPlan @relation(fields: [plan_id], references: [id])
+  plan   MembershipPlan @relation(fields: [plan_id], references: [id], onDelete: Cascade)
   client Client         @relation(fields: [client_id], references: [id])
 }
 
@@ -602,6 +607,7 @@ model ProductCategory {
   name     String
   position Int     @default(0)
   active   Boolean @default(true)
+  taxable  Boolean @default(true)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   version    Int      @default(1)
@@ -707,8 +713,38 @@ model ClockPunch {
   created_at DateTime @default(now())
 
   staff Staff @relation(fields: [staff_id], references: [id])
+  audit_logs PunchAuditLog[]
 
   @@index([staff_id, timestamp])
+}
+
+model PunchAuditLog {
+  id          String   @id @default(uuid())
+  punch_id    String?
+  staff_id    String   // the staff whose punch was changed
+  action      String   // created | edited | deleted
+  old_value   String?  // JSON: { type, timestamp } before change
+  new_value   String?  // JSON: { type, timestamp } after change
+  changed_by  String?  // staff_id of person who made the change
+  changed_by_name String?
+  created_at  DateTime @default(now())
+
+  punch ClockPunch? @relation(fields: [punch_id], references: [id], onDelete: SetNull)
+
+  @@index([staff_id, created_at])
+  @@index([punch_id])
+}
+
+model StaffPresence {
+  id         String   @id @default(uuid())
+  staff_id   String
+  salon_id   String
+  status     String   // in | out
+  timestamp  DateTime @default(now())
+  created_at DateTime @default(now())
+
+  @@unique([staff_id, salon_id])
+  @@index([salon_id, status])
 }
 
 // ════════════════════════════════════════════
@@ -896,9 +932,9 @@ model PackageRedemption {
   client_package_id         String
   client_package_item_id    String
   ticket_id                 String?
-  service_redeemed_id       String
+  service_redeemed_id       String?
   service_redeemed_name     String
-  package_service_id        String
+  package_service_id        String?
   package_service_name      String
   upgrade_difference_cents  Int      @default(0)
   redeemed_at               DateTime @default(now())

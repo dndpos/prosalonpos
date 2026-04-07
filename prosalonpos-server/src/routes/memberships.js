@@ -47,7 +47,7 @@ router.post('/plans', async function(req, res, next) {
         credit_rollover: d.credit_rollover === true,
         perk_apply_mode: d.perk_apply_mode || 'auto',
         freeze_allowed: d.freeze_allowed !== false,
-        active: d.active !== false,
+        active: d.active === true ? true : false,
         position: d.position || 0,
         perks: d.perks && d.perks.length > 0 ? {
           create: d.perks.map(function(pk, idx) {
@@ -123,7 +123,7 @@ router.put('/plans/:id', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── DELETE /plans/:id — Delete a plan and its perks ──
+// ── DELETE /plans/:id — Delete a plan, its perks, and any member enrollments ──
 router.delete('/plans/:id', async function(req, res, next) {
   try {
     var existing = await prisma.membershipPlan.findFirst({
@@ -131,6 +131,8 @@ router.delete('/plans/:id', async function(req, res, next) {
     });
     if (!existing) return res.status(404).json({ error: 'Plan not found' });
 
+    // Delete member enrollments first (cascade handles this, but be explicit)
+    await prisma.membershipAccount.deleteMany({ where: { plan_id: req.params.id } });
     // Perks cascade-delete via schema
     await prisma.membershipPlan.delete({ where: { id: req.params.id } });
 
@@ -201,7 +203,7 @@ router.put('/members/:id/renew', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── POST /members — Enroll a client in a plan ──
+// ── POST /members — Enroll a client in a plan (or re-enroll if already exists) ──
 router.post('/members', async function(req, res, next) {
   try {
     var d = req.body;
@@ -219,16 +221,39 @@ router.post('/members', async function(req, res, next) {
       nextBilling.setDate(nextBilling.getDate() + plan.billing_cycle_days);
     }
 
-    var membership = await prisma.membershipAccount.create({
-      data: {
-        plan_id: d.plan_id,
-        client_id: d.client_id,
-        status: 'active',
-        start_date: now,
-        next_billing: nextBilling,
-      },
-      include: { plan: true, client: true },
+    // Check if client already has a membership (client_id is unique)
+    var existing = await prisma.membershipAccount.findUnique({
+      where: { client_id: d.client_id },
     });
+
+    var membership;
+    if (existing) {
+      // Re-enroll: update plan, reset status, reset billing
+      membership = await prisma.membershipAccount.update({
+        where: { id: existing.id },
+        data: {
+          plan_id: d.plan_id,
+          status: 'active',
+          start_date: now,
+          next_billing: nextBilling,
+          frozen_at: null,
+          cancelled_at: null,
+          version: { increment: 1 },
+        },
+        include: { plan: true, client: true },
+      });
+    } else {
+      membership = await prisma.membershipAccount.create({
+        data: {
+          plan_id: d.plan_id,
+          client_id: d.client_id,
+          status: 'active',
+          start_date: now,
+          next_billing: nextBilling,
+        },
+        include: { plan: true, client: true },
+      });
+    }
 
     emit(req, 'membership:updated');
     res.status(201).json({ member: membership });

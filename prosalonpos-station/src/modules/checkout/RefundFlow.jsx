@@ -17,19 +17,19 @@ function dateStr(ts){ if(!ts)return''; const d=new Date(ts); return `${d.getMont
 
 const STEPS = { ITEMS:'items', REASON:'reason', TIP:'tip', METHOD:'method', CONFIRM:'confirm', PRINT_ASK:'print_ask', RECEIPT:'receipt' };
 const REFUND_METHODS = ['Original payment method','Cash','Store credit'];
-const TAX_RATE = CHECKOUT_SETTINGS.tax_rate_percentage;
-const npMode = CHECKOUT_SETTINGS.numpad_mode;
-function npDisplay(raw){ return npMode==='cash_register' ? (!raw?'0.00':(parseInt(raw,10)/100).toFixed(2)) : (raw||'0.00'); }
+function getNpMode(){ return CHECKOUT_SETTINGS.numpad_mode || 'cash_register'; }
+function npDisplay(raw){ var m=getNpMode(); return m==='cash_register' ? (!raw?'0.00':(parseInt(raw,10)/100).toFixed(2)) : (raw||'0.00'); }
 function npTap(d,prev){
   if(d==='⌫') return prev.slice(0,-1);
-  if(npMode==='cash_register'){ if(d==='.'||d==='00') return prev+'00'; if(!/\d/.test(d)) return prev; return prev+d; }
+  var m=getNpMode(); if(m==='cash_register'){ if(d==='.'||d==='00') return prev+'00'; if(!/\d/.test(d)) return prev; return prev+d; }
   if(d==='.'&&prev.includes('.')) return prev; return prev+d;
 }
-function npCents(raw){ return npMode==='cash_register' ? (parseInt(raw,10)||0) : Math.round(parseFloat(raw)*100)||0; }
-function npKeys(){ return npMode==='cash_register' ? ['7','8','9','4','5','6','1','2','3','00','0','⌫'] : ['7','8','9','4','5','6','1','2','3','.','0','⌫']; }
+function npCents(raw){ var m=getNpMode(); return m==='cash_register' ? (parseInt(raw,10)||0) : Math.round(parseFloat(raw)*100)||0; }
+function npKeys(){ var m=getNpMode(); return m==='cash_register' ? ['7','8','9','4','5','6','1','2','3','00','0','⌫'] : ['7','8','9','4','5','6','1','2','3','.','0','⌫']; }
 
 export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
   var C = useTheme();
+  var TAX_RATE = CHECKOUT_SETTINGS.tax_rate_percentage;
   const [step, setStep] = useState(STEPS.ITEMS);
   const [selections, setSelections] = useState({});
   const [editingItemId, setEditingItemId] = useState(null);
@@ -41,17 +41,53 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
   const [tipInput, setTipInput] = useState('');
   const [refundMethod, setRefundMethod] = useState('Original payment method');
   const [cashAlertDismissed, setCashAlertDismissed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // ── Keyboard → numpad bridge ──
   useNumpadKeyboard(!!editingItemId, function(d){ setEditInput(function(p){ return npTap(d,p); }); }, function(){ setEditInput(function(p){ return npTap('⌫',p); }); }, null, function(){ setEditingItemId(null); setEditInput(''); }, [editingItemId]);
   useNumpadKeyboard(showTipNumpad, function(d){ setTipInput(function(p){ return npTap(d,p); }); }, function(){ setTipInput(function(p){ return npTap('⌫',p); }); }, null, function(){ setShowTipNumpad(false); }, [showTipNumpad]);
 
-  const presets = CHECKOUT_SETTINGS.void_reason_presets || ['Wrong client','Duplicate ticket','Rang up incorrectly','Other'];
+  const presets = ['Customer Complaint', 'Other'];
   const hasTip = (ticket.tipCents || 0) > 0;
   const isOther = selectedPreset === 'Other';
   const reasonValid = selectedPreset && (!isOther || otherText.trim().length > 0);
   const otherRef = useRef(null);
   useEffect(function(){ if(isOther && otherRef.current) otherRef.current.focus(); }, [isOther]);
+
+  var pkgRedeemCents = ticket.pkgRedeemCents || ticket.pkg_redeemed_cents || 0;
+  // Build a map of which items were package-redeemed and how much
+  var pkgRedeemedItemIds = {};
+  var pkgRedeemedAmounts = {};
+  if (pkgRedeemCents > 0 && ticket.pkgRedemptions && ticket.pkgRedemptions.length > 0) {
+    // Best case: per-item redemption data available — match by service name
+    var redeemNames = {};
+    ticket.pkgRedemptions.forEach(function(r) { redeemNames[r.service_redeemed_name] = (redeemNames[r.service_redeemed_name] || 0) + 1; });
+    (ticket.items || []).forEach(function(it) {
+      if (redeemNames[it.name] && redeemNames[it.name] > 0) {
+        pkgRedeemedItemIds[it.id] = true;
+        pkgRedeemedAmounts[it.id] = it.price_cents * (it.qty || 1);
+        redeemNames[it.name]--;
+      }
+    });
+  } else if (pkgRedeemCents > 0) {
+    // Fallback: distribute pkg_redeemed_cents across service items greedily
+    var remaining = pkgRedeemCents;
+    (ticket.items || []).forEach(function(it) {
+      if (remaining <= 0) return;
+      if (it.type !== 'service') return;
+      var price = it.price_cents * (it.qty || 1);
+      if (remaining >= price) {
+        pkgRedeemedItemIds[it.id] = true;
+        pkgRedeemedAmounts[it.id] = price;
+        remaining -= price;
+      }
+    });
+  }
+
+  function getRefundableAmount(item) {
+    if (pkgRedeemedItemIds[item.id]) return 0; // fully package-redeemed — no money to refund
+    return item.price_cents * (item.qty || 1);
+  }
 
   function refundItemsTotal(){
     let sum = 0;
@@ -59,7 +95,7 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
       if(!sel.checked) return;
       const item = ticket.items.find(it=>it.id===id);
       if(!item) return;
-      sum += sel.customAmount_cents !== null ? sel.customAmount_cents : item.price_cents * (item.qty||1);
+      sum += sel.customAmount_cents !== null ? sel.customAmount_cents : getRefundableAmount(item);
     });
     return sum;
   }
@@ -87,14 +123,19 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
   function buildRefItems(){
     return Object.entries(selections).filter(([,s])=>s.checked).map(([id,s])=>{
       const item = ticket.items.find(it=>it.id===id);
-      return { itemId:id, name:item?.name||'Unknown', refundAmount_cents: s.customAmount_cents!==null&&s.customAmount_cents!==undefined ? s.customAmount_cents : item.price_cents*(item?.qty||1) };
+      return { itemId:id, name:item?.name||'Unknown', refundAmount_cents: s.customAmount_cents!==null&&s.customAmount_cents!==undefined ? s.customAmount_cents : getRefundableAmount(item), isPkgRedeemed: !!pkgRedeemedItemIds[id] };
     });
   }
+  var hasPkgRedeemed = (ticket.pkgRedeemCents || ticket.pkg_redeemed_cents || 0) > 0;
+  var isPkgOnly = ticket.paymentMethod === 'package' || (hasPkgRedeemed && (!ticket.payments || ticket.payments.length === 0));
+
   // Resolve "Original payment method" to the actual method(s) from ticket
   function displayMethod(){
     if(refundMethod === 'Original payment method'){
-      var methods = ticket.payments.map(function(p){ return p.method.charAt(0).toUpperCase() + p.method.slice(1); });
-      return [...new Set(methods)].join(' + ');
+      var methods = (ticket.payments || []).map(function(p){ return p.method.charAt(0).toUpperCase() + p.method.slice(1); });
+      var unique = [...new Set(methods)];
+      if(hasPkgRedeemed) unique.unshift('Package');
+      return unique.length > 0 ? unique.join(' + ') : 'Package';
     }
     return refundMethod;
   }
@@ -166,30 +207,45 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
       <div style={wrap}><div style={card}>
         <div style={titleS}>Refund — Ticket #{ticket.ticketNumber}</div>
         <div style={sub}>{ticket.clientName||'Walk-in'} · Total paid: {fmt(ticket.totalCents)}</div>
+        {ticket.payments && ticket.payments.length > 1 && (
+          <div style={{display:'flex',gap:6,justifyContent:'center',flexWrap:'wrap',marginBottom:12}}>
+            {ticket.payments.map(function(p,i){ var m=p.method||'credit'; var icons={credit:'💳',cash:'💵',giftcard:'🎁',zelle:'📱'}; return(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:4,padding:'4px 10px',background:'rgba(255,255,255,0.04)',borderRadius:6,border:'1px solid '+C.borderLight}}>
+                <span style={{fontSize:14}}>{icons[m]||'💰'}</span>
+                <span style={{fontSize:12,color:C.textPrimary,fontWeight:500}}>{m==='giftcard'?'Gift Card':m.charAt(0).toUpperCase()+m.slice(1)}</span>
+                <span style={{fontSize:12,color:C.textMuted}}>{fmt(p.amount_cents)}</span>
+              </div>
+            );})}
+          </div>
+        )}
         <div style={{fontSize:12,fontWeight:600,color:C.textPrimary,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:10}}>Select items to refund</div>
         <div style={{display:'flex',flexDirection:'column',gap:6}}>
           {ticket.items.map(it=>{
+            const alreadyRefunded = ticket.refundedItemIds && ticket.refundedItemIds[it.id];
             const sel = selections[it.id];
             const checked = sel?.checked;
             const custom = sel?.customAmount_cents;
-            const fullPrice = it.price_cents*(it.qty||1);
+            const isPkgRedeemed = !!pkgRedeemedItemIds[it.id];
+            const fullPrice = getRefundableAmount(it);
             const displayAmt = custom !== null && custom !== undefined ? custom : fullPrice;
             return(
-              <div key={it.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:checked?'rgba(217,119,6,0.08)':C.chromeDark,border:checked?'1px solid '+C.warning:'1px solid '+C.borderMedium,borderRadius:8}}>
-                <button onClick={()=>toggleItem(it.id)} style={{width:24,height:24,borderRadius:4,border:checked?'2px solid '+C.warning:'2px solid '+C.borderMedium,background:checked?C.warning:'transparent',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,padding:0}}>
-                  {checked&&<span style={{color:'#fff',fontSize:14,fontWeight:700}}>✓</span>}
+              <div key={it.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:alreadyRefunded?'rgba(100,100,100,0.08)':(checked?'rgba(217,119,6,0.08)':C.chromeDark),border:alreadyRefunded?'1px solid '+C.borderLight:(checked?'1px solid '+C.warning:'1px solid '+C.borderMedium),borderRadius:8,opacity:alreadyRefunded?0.5:1}}>
+                <button onClick={alreadyRefunded?undefined:()=>toggleItem(it.id)} disabled={alreadyRefunded} style={{width:24,height:24,borderRadius:4,border:alreadyRefunded?'2px solid '+C.textMuted:(checked?'2px solid '+C.warning:'2px solid '+C.borderMedium),background:alreadyRefunded?C.textMuted:(checked?C.warning:'transparent'),display:'flex',alignItems:'center',justifyContent:'center',cursor:alreadyRefunded?'default':'pointer',flexShrink:0,padding:0}}>
+                  {(checked||alreadyRefunded)&&<span style={{color:'#fff',fontSize:14,fontWeight:700}}>✓</span>}
                 </button>
                 {it.color&&<div style={{width:4,height:28,borderRadius:2,background:it.color,flexShrink:0}}/>}
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{color:C.textPrimary,fontSize:13,fontWeight:500}}>{it.name}{it.qty>1?' ×'+it.qty:''}</div>
+                  <div style={{color:alreadyRefunded?C.textMuted:C.textPrimary,fontSize:13,fontWeight:500,textDecoration:alreadyRefunded?'line-through':'none'}}>{it.name}{it.qty>1?' ×'+it.qty:''}</div>
                   {it.tech&&<div style={{color:C.textMuted,fontSize:11}}>{it.tech}</div>}
+                  {alreadyRefunded&&<div style={{color:C.textMuted,fontSize:10,fontWeight:500}}>Already refunded</div>}
+                  {!alreadyRefunded&&isPkgRedeemed&&<div style={{color:'#8B5CF6',fontSize:10,fontWeight:500}}>📦 Pkg redeemed — credits will be restored</div>}
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
-                  {checked && custom !== null && custom !== undefined && (
+                  {checked && !alreadyRefunded && custom !== null && custom !== undefined && (
                     <span style={{color:C.warning,fontSize:11,fontWeight:500}}>Custom</span>
                   )}
-                  <span style={{color:checked?C.warning:C.textPrimary,fontSize:14,fontWeight:600}}>{fmt(displayAmt)}</span>
-                  {checked&&(
+                  <span style={{color:alreadyRefunded?C.textMuted:(isPkgRedeemed?'#8B5CF6':(checked?C.warning:C.textPrimary)),fontSize:14,fontWeight:600}}>{isPkgRedeemed&&!alreadyRefunded?'$0.00':fmt(displayAmt)}</span>
+                  {checked&&!isPkgRedeemed&&!alreadyRefunded&&(
                     <button onClick={()=>{setEditingItemId(it.id);setEditInput('');}}
                       style={{height:28,padding:'0 8px',background:'transparent',border:'1px solid '+C.borderMedium,borderRadius:4,color:C.textMuted,fontSize:11,cursor:'pointer',fontFamily:'inherit'}}
                       onMouseEnter={e=>e.currentTarget.style.borderColor=C.warning}
@@ -328,8 +384,9 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
 
   // -- STEP: METHOD --
   if(step === STEPS.METHOD){
-    var origPayments = ticket.payments.map(function(p){ return { method: p.method.charAt(0).toUpperCase() + p.method.slice(1), amount: p.amount_cents }; });
-    var methodIcons = { 'Credit':'💳', 'Cash':'💵', 'Zelle':'📱', 'Gift card':'🎁', 'Gift Card':'🎁' };
+    var origPayments = (ticket.payments || []).map(function(p){ return { method: p.method.charAt(0).toUpperCase() + p.method.slice(1), amount: p.amount_cents }; });
+    if(hasPkgRedeemed) origPayments.unshift({ method: 'Package', amount: ticket.pkgRedeemCents || ticket.pkg_redeemed_cents || 0, isPackage: true });
+    var methodIcons = { 'Credit':'💳', 'Cash':'💵', 'Zelle':'📱', 'Gift card':'🎁', 'Gift Card':'🎁', 'Package':'📦' };
     var isOriginal = refundMethod === 'Original payment method';
     return(
       <div style={wrap}><div style={card}>
@@ -349,11 +406,12 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
           <div style={{display:'flex',flexDirection:'column',gap:6,paddingLeft:32}}>
             {origPayments.map(function(op,i){
               var icon = methodIcons[op.method] || '💰';
+              var label = op.isPackage ? 'Package — credits restored' : op.method;
               return(
-                <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:isOriginal?'rgba(217,119,6,0.08)':'rgba(255,255,255,0.03)',borderRadius:8,border:isOriginal?'1px solid rgba(217,119,6,0.25)':'1px solid '+C.borderLight}}>
+                <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:isOriginal?(op.isPackage?'rgba(139,92,246,0.08)':'rgba(217,119,6,0.08)'):'rgba(255,255,255,0.03)',borderRadius:8,border:isOriginal?(op.isPackage?'1px solid rgba(139,92,246,0.3)':'1px solid rgba(217,119,6,0.25)'):'1px solid '+C.borderLight}}>
                   <span style={{fontSize:22}}>{icon}</span>
-                  <span style={{color:C.textPrimary,fontSize:15,fontWeight:600,flex:1}}>{op.method}</span>
-                  <span style={{color:isOriginal?C.warning:C.textPrimary,fontSize:15,fontWeight:700}}>{fmt(op.amount)}</span>
+                  <span style={{color:op.isPackage?'#8B5CF6':C.textPrimary,fontSize:15,fontWeight:600,flex:1}}>{label}</span>
+                  <span style={{color:isOriginal?(op.isPackage?'#8B5CF6':C.warning):C.textPrimary,fontSize:15,fontWeight:700}}>{fmt(op.amount)}</span>
                 </div>
               );
             })}
@@ -447,10 +505,12 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
   if(step === STEPS.PRINT_ASK){
     var resolvedMethod = displayMethod();
     var methodLower = resolvedMethod.toLowerCase();
-    var isCash = methodLower.indexOf('cash') !== -1;
-    var methodIcons = { 'credit':'💳', 'cash':'💵', 'zelle':'📱', 'gift card':'🎁', 'store credit':'🏷️' };
+    var isCash = methodLower.indexOf('cash') !== -1 && refundMethod !== 'Original payment method';
+    var hasPackage = methodLower.indexOf('package') !== -1;
+    var methodIcons = { 'credit':'💳', 'cash':'💵', 'zelle':'📱', 'gift card':'🎁', 'store credit':'🏷️', 'package':'📦' };
     var icon = '💰';
     Object.keys(methodIcons).forEach(function(k){ if(methodLower.indexOf(k) !== -1) icon = methodIcons[k]; });
+    if(hasPackage) icon = '📦';
     var cashMsg = isCash ? 'Hand ' + fmt(refundGrandTotal()) + ' cash to the client now.' : null;
     // Cash popup — must dismiss before proceeding
     if(isCash && !cashAlertDismissed){
@@ -470,7 +530,9 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
       );
     }
     function doConfirm(showReceipt){
+      if(submitting) return;
       if(showReceipt){ setStep(STEPS.RECEIPT); return; }
+      setSubmitting(true);
       onConfirm(buildResult());
     }
     return(
@@ -488,15 +550,18 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
         {isCash&&(
           <div style={{color:C.warning,fontSize:12,fontWeight:500,marginBottom:12}}>💵 Cash given to client ✓</div>
         )}
+        {hasPackage&&(
+          <div style={{color:'#8B5CF6',fontSize:12,fontWeight:500,marginBottom:12}}>📦 Package credits will be restored ✓</div>
+        )}
         <div style={{fontSize:14,fontWeight:500,color:C.textPrimary,marginBottom:16}}>Print refund receipt?</div>
         <div style={{display:'flex',gap:10,justifyContent:'center'}}>
-          <button onClick={()=>doConfirm(true)}
-            style={{height:48,padding:'0 28px',background:C.chromeDark,border:'1px solid '+C.borderMedium,borderRadius:8,color:C.textPrimary,fontSize:14,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}}>
+          <button onClick={()=>doConfirm(true)} disabled={submitting}
+            style={{height:48,padding:'0 28px',background:C.chromeDark,border:'1px solid '+C.borderMedium,borderRadius:8,color:submitting?C.textMuted:C.textPrimary,fontSize:14,fontWeight:500,cursor:submitting?'default':'pointer',fontFamily:'inherit'}}>
             🧾 View Receipt
           </button>
-          <button onClick={()=>doConfirm(false)}
-            style={{height:48,padding:'0 28px',background:C.blue,border:'none',borderRadius:8,color:'#fff',fontSize:14,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
-            Done
+          <button onClick={()=>doConfirm(false)} disabled={submitting}
+            style={{height:48,padding:'0 28px',background:submitting?'#334155':C.blue,border:'none',borderRadius:8,color:submitting?C.textMuted:'#fff',fontSize:14,fontWeight:600,cursor:submitting?'default':'pointer',fontFamily:'inherit'}}>
+            {submitting?'Processing...':'Done'}
           </button>
         </div>
       </div></div>
@@ -556,9 +621,9 @@ export default function RefundFlow({ ticket, staffName, onConfirm, onCancel }){
           <div>Processed by: {staffName||'Staff'}</div>
           <div>Processed at: {timeStr(now.getTime())} {dateStr(now.getTime())}</div>
         </div>
-        <button onClick={()=>onConfirm(buildResult())}
-          style={{width:'100%',height:48,marginTop:12,background:C.blue,border:'none',borderRadius:8,color:'#fff',fontSize:14,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
-          Done
+        <button onClick={function(){ if(submitting) return; setSubmitting(true); onConfirm(buildResult()); }}
+          style={{width:'100%',height:48,marginTop:12,background:submitting?'#334155':C.blue,border:'none',borderRadius:8,color:submitting?C.textMuted:'#fff',fontSize:14,fontWeight:600,cursor:submitting?'default':'pointer',fontFamily:'inherit'}}>
+          {submitting?'Processing...':'Done'}
         </button>
       </div></div>
     );

@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { useTheme } from '../../lib/ThemeContext';
 import { api, getPairedSalonId } from '../../lib/apiClient';
+import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 
 export default function OwnerCodeSection() {
   var T = useTheme();
@@ -18,10 +19,19 @@ export default function OwnerCodeSection() {
   var [msg, setMsg] = useState('');
 
   function handleDigit(d) {
-    if (pin.length < 8) setPin(pin + d);
+    if (pin.length < 4) setPin(pin + d);
   }
   function handleClear() { setPin(''); }
   function handleBack() { setPin(pin.slice(0, -1)); }
+
+  useNumpadKeyboard(
+    mode === 'edit',
+    handleDigit,
+    handleBack,
+    function() { if (pin.length >= 2) handleSave(); },
+    function() { setMode('view'); setPin(''); setMsg(''); },
+    [pin, mode]
+  );
 
   function handleSave() {
     if (pin.length < 2) { setMsg('PIN must be at least 2 digits'); return; }
@@ -39,7 +49,7 @@ export default function OwnerCodeSection() {
       })
       .catch(function(err) {
         console.error('[OwnerCode] save error:', err);
-        setMsg('Error saving — check server');
+        setMsg('Error saving: ' + (err.message || 'check server'));
       })
       .finally(function() { setSaving(false); });
   }

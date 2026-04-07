@@ -40,6 +40,37 @@ var router = Router();
 // ════════════════════════════════════════════
 
 /**
+ * Get Eastern Time offset for a given date (handles DST).
+ */
+function getEasternOffset(date) {
+  var str = date.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+  if (str.indexOf('EDT') >= 0) return 240;
+  return 300;
+}
+
+/**
+ * Parse a YYYY-MM-DD string into Eastern-time midnight boundary.
+ */
+function easternDayStart(dateStr) {
+  var parts = dateStr.split('-');
+  var y = parseInt(parts[0]), m = parseInt(parts[1]) - 1, d = parseInt(parts[2]);
+  var probe = new Date(Date.UTC(y, m, d, 12, 0, 0));
+  var offset = getEasternOffset(probe);
+  var dt = new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
+  dt.setUTCMinutes(dt.getUTCMinutes() + offset);
+  return dt;
+}
+function easternDayEnd(dateStr) {
+  var parts = dateStr.split('-');
+  var y = parseInt(parts[0]), m = parseInt(parts[1]) - 1, d = parseInt(parts[2]);
+  var probe = new Date(Date.UTC(y, m, d, 12, 0, 0));
+  var offset = getEasternOffset(probe);
+  var dt = new Date(Date.UTC(y, m, d, 23, 59, 59, 999));
+  dt.setUTCMinutes(dt.getUTCMinutes() + offset);
+  return dt;
+}
+
+/**
  * Compute payroll data for a date range.
  * This aggregates:
  *   - Ticket items per tech → service revenue → commission
@@ -47,8 +78,22 @@ var router = Router();
  *   - Daily guarantee comparison
  */
 async function computePayroll(salonId, periodStart, periodEnd) {
-  var startDate = new Date(periodStart + 'T00:00:00.000Z');
-  var endDate = new Date(periodEnd + 'T23:59:59.999Z');
+  var startDate = easternDayStart(periodStart);
+  var endDate = easternDayEnd(periodEnd);
+
+  // Get salon settings (for advanced_commission_enabled)
+  var salonSettingsRow = await prisma.salonSettings.findUnique({ where: { salon_id: salonId } });
+  var salonSettings = (salonSettingsRow && salonSettingsRow.settings) ? (typeof salonSettingsRow.settings === 'string' ? JSON.parse(salonSettingsRow.settings) : salonSettingsRow.settings) : {};
+  var advCommEnabled = !!salonSettings.advanced_commission_enabled;
+
+  // Get service catalog with category links (for per-category commission lookup)
+  var serviceCatalog = [];
+  if (advCommEnabled) {
+    serviceCatalog = await prisma.serviceCatalog.findMany({
+      where: { salon_id: salonId },
+      select: { id: true, name: true, category_links: { select: { category_id: true } } }
+    });
+  }
 
   // Get all staff for this salon
   var staff = await prisma.staff.findMany({
@@ -90,20 +135,112 @@ async function computePayroll(salonId, periodStart, periodEnd) {
   // Build per-staff paycheck summaries
   var paychecks = staff.map(function(s) {
     // Sum service revenue for this tech from ticket items
+    // Subtract proportional refund amount from refunded tickets
     var techItems = [];
+    var serviceRevenue = 0;
     tickets.forEach(function(t) {
+      var ticketItemsForTech = [];
       t.items.forEach(function(item) {
         if (item.tech_id === s.id && item.type === 'service') {
+          ticketItemsForTech.push(item);
           techItems.push(item);
         }
       });
+      // If ticket was refunded, reduce revenue proportionally
+      if (t.refund_cents > 0 && t.subtotal_cents > 0 && ticketItemsForTech.length > 0) {
+        var refundRatio = Math.min(t.refund_cents / t.subtotal_cents, 1);
+        ticketItemsForTech.forEach(function(item) {
+          serviceRevenue += Math.round((item.original_price_cents || item.price_cents) * (1 - refundRatio));
+        });
+      } else {
+        ticketItemsForTech.forEach(function(item) {
+          serviceRevenue += item.original_price_cents || item.price_cents;
+        });
+      }
     });
-    var serviceRevenue = techItems.reduce(function(sum, item) {
-      return sum + item.price_cents;
-    }, 0);
 
-    // Commission calculation
-    var commissionCents = Math.round(serviceRevenue * (s.commission_pct / 100));
+    // Commission calculation (on net revenue after refunds)
+    // ── Min daily hours gating ──
+    // If min_daily_hours_for_commission is set, exclude items from days where
+    // this tech's punch hours are below the threshold.
+    var minDailyHrs = parseFloat(salonSettings.min_daily_hours_for_commission) || 0;
+    var commissionItems = techItems;
+    var commissionRevenue = serviceRevenue;
+    if (minDailyHrs > 0) {
+      var staffPunches = punches.filter(function(p) { return p.staff_id === s.id; });
+      var punchDayMap = {};
+      staffPunches.forEach(function(p) {
+        var d = p.timestamp;
+        var dayKey = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+        if (!punchDayMap[dayKey]) punchDayMap[dayKey] = [];
+        punchDayMap[dayKey].push(p);
+      });
+      var disqualifiedDays = {};
+      Object.keys(punchDayMap).forEach(function(dayKey) {
+        var dp = punchDayMap[dayKey].sort(function(a, b) { return a.timestamp.getTime() - b.timestamp.getTime(); });
+        var dayMins = 0;
+        for (var di = 0; di < dp.length - 1; di++) {
+          if (dp[di].type === 'in' && dp[di + 1].type === 'out') {
+            dayMins += (dp[di + 1].timestamp.getTime() - dp[di].timestamp.getTime()) / 60000;
+          }
+        }
+        if ((dayMins / 60) < minDailyHrs) disqualifiedDays[dayKey] = true;
+      });
+      // Filter items: only keep items from tickets on qualifying days
+      if (Object.keys(disqualifiedDays).length > 0) {
+        commissionItems = techItems.filter(function(item) {
+          var ticket = tickets.find(function(tk) { return tk.id === item.ticket_id; });
+          if (!ticket) return true;
+          var td = ticket.created_at;
+          var tdKey = td.getFullYear() + '-' + (td.getMonth() + 1) + '-' + td.getDate();
+          return !disqualifiedDays[tdKey];
+        });
+        commissionRevenue = 0;
+        commissionItems.forEach(function(item) {
+          var ticket = tickets.find(function(tk) { return tk.id === item.ticket_id; });
+          if (ticket && ticket.refund_cents > 0 && ticket.subtotal_cents > 0) {
+            var ratio = Math.min(ticket.refund_cents / ticket.subtotal_cents, 1);
+            commissionRevenue += Math.round((item.original_price_cents || item.price_cents) * (1 - ratio));
+          } else {
+            commissionRevenue += item.original_price_cents || item.price_cents;
+          }
+        });
+      }
+    }
+
+    // When advanced_commission_enabled is ON, use per-category rates from staff profile.
+    // Look up each service item's category, check staff.category_commission_rates for a
+    // custom rate, fall back to flat commission_pct for categories without a custom rate.
+    var commissionCents = 0;
+    var catRates = (s.category_commission_rates && typeof s.category_commission_rates === 'object') ? s.category_commission_rates : {};
+    if (advCommEnabled && Object.keys(catRates).length > 0) {
+      // Per-item commission using category rates
+      commissionItems.forEach(function(item) {
+        var priceCents = item.original_price_cents || item.price_cents;
+        // Look up category from service catalog — ID match first, name fallback for older tickets
+        var catEntry = item.service_id ? serviceCatalog.find(function(sc) { return sc.id === item.service_id; }) : null;
+        if (!catEntry && item.name) {
+          catEntry = serviceCatalog.find(function(sc) { return sc.name === item.name; });
+        }
+        var catIds = catEntry ? catEntry.category_links.map(function(cl) { return cl.category_id; }) : [];
+        var pct = s.commission_pct || 0; // fallback to flat
+        for (var ci = 0; ci < catIds.length; ci++) {
+          if (catRates[catIds[ci]] !== undefined && catRates[catIds[ci]] !== '') {
+            pct = parseInt(catRates[catIds[ci]], 10) || 0;
+            break;
+          }
+        }
+        // Apply refund ratio if ticket was refunded
+        var ticket = tickets.find(function(tk) { return tk.id === item.ticket_id; });
+        if (ticket && ticket.refund_cents > 0 && ticket.subtotal_cents > 0) {
+          var ratio = Math.min(ticket.refund_cents / ticket.subtotal_cents, 1);
+          priceCents = Math.round(priceCents * (1 - ratio));
+        }
+        commissionCents += Math.round(priceCents * pct / 100);
+      });
+    } else {
+      commissionCents = Math.round(commissionRevenue * (s.commission_pct / 100));
+    }
 
     // Hourly calculation (for hourly staff)
     var hourlyPay = 0;

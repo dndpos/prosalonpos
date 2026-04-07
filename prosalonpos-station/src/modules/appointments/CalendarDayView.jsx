@@ -18,9 +18,8 @@ import TechTurnList from './TechTurnList';
 import MovePopup from './MovePopup';
 import AppointmentBlocks from './AppointmentBlocks';
 import { Avatar, MiniMonth } from './CalendarComponents';
-import { STATUS_CONFIG } from './AppointmentDetailPopup';
 import { today, timeToMinutes, minutesToTime, formatHour, formatMinLabel, formatTimeFull, snapTo15, getGroup, ROW_H, TIME_COL_W, LEFT_PANEL_W, COL_MAX_W, COL_MIN_W } from '../../lib/calendarHelpers';
-import { SETTINGS, SERVICE_PRICES } from './calendarBridge';
+import { SETTINGS } from './calendarBridge';
 import { useAppointmentStore } from '../../lib/stores/appointmentStore';
 import { useStaffStore } from '../../lib/stores/staffStore';
 import * as TurnEngine from '../../lib/techTurnEngine';
@@ -30,24 +29,46 @@ import { useToast } from '../../lib/ToastContext';
 import { ACTIONS } from '../../lib/rbac';
 import useCalendarDrag from './useCalendarDrag';
 import useCalendarPersist from './useCalendarPersist';
+import useCalendarHandlers from './useCalendarHandlers';
 import CalendarOverlays from './CalendarOverlays';
-
 import AreaTag from '../../components/ui/AreaTag';
-
-export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout, catalogLayout, salonSettings, onNavClick, onOwnerClick, unviewedCount, openTicketCount, drawerSession, onCashierClick, hasHourlyStaff, onTimeClockClick }){
+export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout, catalogLayout, salonSettings, onNavClick, onOwnerClick, unviewedCount, openTicketCount, drawerSession, onCashierClick, hasHourlyStaff, onTimeClockClick, clockPunches, presenceRecords }){
   var C = useTheme();
   var rbac = useRBAC();
   var toast = useToast();
   var _settings = salonSettings || {};
 
-  // ── Staff: use store in production, mock data in dev ──
   var _storeStaff = useStaffStore(function(s) { return s.staff; });
-  var STAFF = useMemo(function() {
-    return (_storeStaff || [])
-      .filter(function(s) { return s.status === 'active' && s.role === 'technician' && s.show_on_calendar !== false; })
-      .map(function(s) { return { id: s.id, display_name: s.display_name, photo_url: s.photo_url || null }; });
-  }, [_storeStaff]);
+  var DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const[selectedDate,setSelectedDate]=useState(today);
+  var _clockedInIds = useMemo(function() {
+    var punches = clockPunches || []; var last = {};
+    punches.forEach(function(p) {
+      var ts = typeof p.timestamp === 'number' ? p.timestamp : new Date(p.timestamp).getTime();
+      if (!last[p.staff_id] || ts > last[p.staff_id].ts) last[p.staff_id] = { ts: ts, type: p.type };
+    });
+    var ids = {};
+    Object.keys(last).forEach(function(sid) { if (last[sid].type === 'in') ids[sid] = true; });
+    // Presence records: one per staff, status is current state — no date filter needed.
+    // If status is 'in', the person is signed in until they sign out.
+    (presenceRecords || []).forEach(function(r) {
+      if (r.status === 'in') ids[r.staff_id] = true;
+      else if (r.status === 'out') delete ids[r.staff_id];
+    });
+    return ids;
+  }, [clockPunches, presenceRecords, selectedDate]);
+
+  var STAFF = useMemo(function() {
+    var dayKey = DAY_KEYS[selectedDate.getDay()];
+    return (_storeStaff || [])
+      .filter(function(s) {
+        if (s.status !== 'active' || s.show_on_calendar === false) return false;
+        if (_clockedInIds[s.id]) return true;
+        if (s.schedule && s.schedule[dayKey] && s.schedule[dayKey].enabled === false) return false;
+        return true;
+      })
+      .map(function(s) { return { id: s.id, display_name: s.display_name, photo_url: s.photo_url || null }; });
+  }, [_storeStaff, selectedDate, _clockedInIds]);
   const[activeTab,setActiveTab]=useState('waitlist');
   const[visibleCols,setVisibleCols]=useState(STAFF.length);
   const[now,setNow]=useState(new Date());
@@ -62,40 +83,43 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     return STAFF.map(function(s){return s.id;});
   });
 
-  // ── Re-sync when STAFF loads from API (fixes empty columns on refresh) ──
+  // ── Re-sync when STAFF loads from API or sign-in changes ──
   useEffect(function() {
     if (STAFF.length > 0) {
-      setVisibleCols(function(prev) { return prev === 0 ? STAFF.length : prev; });
+      setVisibleCols(function(prev) { return prev === 0 ? STAFF.length : Math.max(prev, STAFF.length); });
       setStaffOrder(function(prev) {
         if (prev.length === 0) return STAFF.map(function(s) { return s.id; });
-        // Append any new staff not already in order
         var newIds = STAFF.filter(function(s) { return !prev.includes(s.id); }).map(function(s) { return s.id; });
-        return newIds.length > 0 ? prev.concat(newIds) : prev;
+        if (newIds.length === 0) return prev;
+        var byId={}; STAFF.forEach(function(s){byId[s.id]=s;}); var merged=prev.slice();
+        newIds.forEach(function(nid){var nN=(byId[nid]&&byId[nid].display_name||'').toLowerCase();var idx=merged.findIndex(function(eid){return(byId[eid]&&byId[eid].display_name||'').toLowerCase()>nN;});if(idx>=0)merged.splice(idx,0,nid);else merged.push(nid);});
+        return merged;
       });
     }
   }, [STAFF]);
-  const[colDrag,setColDrag]=useState(null); // {fromIdx, overIdx}
+  const[colDrag,setColDrag]=useState(null);
   const orderedStaff=useMemo(function(){
     var byId={};STAFF.forEach(function(s){byId[s.id]=s;});
     var result=staffOrder.map(function(id){return byId[id];}).filter(Boolean);
-    // Append any new staff not in saved order
-    STAFF.forEach(function(s){if(!staffOrder.includes(s.id))result.push(s);});
+    // Insert any staff not yet in staffOrder alphabetically (instead of appending to end)
+    STAFF.forEach(function(s){
+      if(!staffOrder.includes(s.id)){
+        var nN=(s.display_name||'').toLowerCase();
+        var idx=result.findIndex(function(r){return(r.display_name||'').toLowerCase()>nN;});
+        if(idx>=0)result.splice(idx,0,s);else result.push(s);
+      }
+    });
     return result;
-  },[staffOrder]);
-
-  // ── Service lines from appointment store (Session 48) ──
-  // Store provides normalized data (dur, client, service, color, starts_at as Date).
-  // We use local state for optimistic updates (drag, status change, add service)
-  // and sync back to the store via refetch after mutations.
+  },[staffOrder, STAFF]);
+  // ── Service lines from appointment store ──
   var storeServiceLines = useAppointmentStore(function(s){ return s.serviceLines; });
   var storeLoading = useAppointmentStore(function(s){ return s.loading; });
   var storeSource = useAppointmentStore(function(s){ return s.source; });
-  var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; });
-  var persist = useCalendarPersist();
+  var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
-  // Sync from store → local state whenever store data changes (fetch completes, socket refetch, etc.)
+  // Sync from store → local state
   useEffect(function(){ setServiceLines(storeServiceLines); },[storeServiceLines]);
-  // Fetch service lines when selected date changes
+  // Fetch service lines when date changes
   useEffect(function(){
     var d = selectedDate;
     var dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
@@ -103,18 +127,37 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   },[selectedDate, fetchServiceLines]);
 
   const[waitlist,setWaitlist]=useState([]);
-  // Tech Turn — derive busy/available from service lines (TD-063)
-  // Techs with an in_progress appointment are busy; everyone else is available
   const _initTechs=useMemo(function(){
     var busyIds={};
     storeServiceLines.forEach(function(sl){ if(sl.status==='in_progress') busyIds[sl.staff_id]=true; });
+    var eligible = STAFF.filter(function(t) { return _clockedInIds[t.id] || busyIds[t.id]; });
     var pos=1;
-    return STAFF.map(function(t,i){
+    return eligible.map(function(t,i){
       var isBusy=!!busyIds[t.id];
       return{id:t.id,name:t.display_name||t.name||'',photo_url:t.photo_url||null,status:isBusy?'busy':'available',position:isBusy?null:pos++,clockedInAt:Date.now()+i,dailyServiceCount:0,preservedPosition:null,lastFreeAt:Date.now()+i};
     });
-  },[storeServiceLines]);
+  },[storeServiceLines, _clockedInIds, STAFF]);
   const[turnState,setTurnState]=useState({techs:_initTechs,turnLog:[]});
+  useEffect(function() {
+    setTurnState(function(prev) {
+      var s = prev;
+      var ids = {}; prev.techs.forEach(function(t) { ids[t.id] = t.status; });
+      var busyIds = {}; storeServiceLines.forEach(function(sl) { if (sl.status === 'in_progress') busyIds[sl.staff_id] = true; });
+      Object.keys(_clockedInIds).forEach(function(sid) {
+        if (!ids[sid] || ids[sid] === 'off') {
+          var st = STAFF.find(function(x) { return x.id === sid; });
+          if (st) s = TurnEngine.clockIn(s, sid, st.display_name || st.name || '').state;
+        }
+      });
+      // Clock out techs no longer punched in (unless busy with service)
+      prev.techs.forEach(function(t) {
+        if (t.status !== 'off' && !_clockedInIds[t.id] && !busyIds[t.id]) {
+          s = TurnEngine.clockOut(s, t.id).state;
+        }
+      });
+      return s;
+    });
+  }, [_clockedInIds, STAFF, storeServiceLines]);
   // Derive flat techTurn array with mode-aware positions for UI
   const techTurn=useMemo(function(){
     var sorted=TurnEngine.getAvailableQueue(turnState,_settings);
@@ -140,8 +183,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
 
   useEffect(()=>{const iv=setInterval(()=>setNow(new Date()),60000);return()=>clearInterval(iv);},[]);
 
-  // Register tech turn bus handlers so App.jsx can trigger markAvailable/markBusy
-  // when a ticket closes (checkout complete or print & hold)
+  // Register tech turn bus handlers for ticket close
   useEffect(function(){
     registerTurnBus(
       function(staffIds){ // markAvailable
@@ -244,285 +286,35 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     popupProps={sl,newStaffName:newStaff?.display_name||'Unknown',newTime:minutesToTime(newStartMin),oldStaffName:oldStaff?.display_name||'Unknown',isRequestedWarning:sl.requested&&newStaffId!==sl.staff_id,groupCount:getGroup(sl.id,serviceLines).length,onConfirm:confirmMove,onCancel:cancelMove};
   }
 
-  // ── Status / Tech / Service changes ──
-  function handleStatusChange(sl,newStatus){
-    // Gate cancel/no_show with RBAC
-    if(newStatus==='cancelled'||newStatus==='no_show'){
-      rbac.requirePermission(ACTIONS.DELETE_CANCEL_APPOINTMENTS, function(){
-        applyStatusChange(sl,newStatus);
-      });
-      return;
-    }
-    // Gate create/edit for other status changes
-    rbac.requirePermission(ACTIONS.CREATE_EDIT_APPOINTMENTS, function(){
-      applyStatusChange(sl,newStatus);
-    });
-  }
-  function applyStatusChange(sl,newStatus){
-    const oldLabel=STATUS_CONFIG[sl.status]?.label||sl.status,newLabel=STATUS_CONFIG[newStatus]?.label||newStatus;
-    setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'status_change',client:sl.client,service:sl.service,techName:(STAFF.find(function(s){return s.id===sl.staff_id;})||{}).display_name||'—',description:`Status changed: ${oldLabel} → ${newLabel}`,requested:sl.requested,changedTech:false},...prev]);
-    setServiceLines(prev=>prev.map(s=>s.id!==sl.id?s:{...s,status:newStatus}));
-    persist.saveStatus(sl, newStatus);
-    setSelectedAppt(prev=>prev&&prev.id===sl.id?{...prev,status:newStatus}:prev);
-    if(newStatus==='completed'||newStatus==='cancelled'||newStatus==='no_show'){
-      setTurnState(prev=>TurnEngine.markAvailable(prev,sl.staff_id,_settings).state);
-    }else if(newStatus==='in_progress'||newStatus==='checked_in'){
-      // checked_in = client arrived, tech is now committed — mark busy
-      setTurnState(prev=>TurnEngine.markBusy(prev,sl.staff_id).state);
-    }
-  }
-  function handleChangeTech(serviceLineIds,newStaffId,timing,remainingOnSource){
-    rbac.requirePermission(ACTIONS.MOVE_APPOINTMENTS, function(){
-      const newStaff=STAFF.find(s=>s.id===newStaffId);
-      serviceLineIds.forEach(slId=>{
-        const sl=serviceLines.find(s=>s.id===slId);if(!sl)return;
-        const oldStaff=STAFF.find(s=>s.id===sl.staff_id);
-        setActivityLog(prev=>[{id:Date.now()+Math.random(),timestamp:new Date(),action:'tech_change',client:sl.client,service:sl.service,techName:(newStaff||{}).display_name||'—',description:`Reassigned from ${oldStaff?.display_name||'—'} to ${newStaff?.display_name||'—'} (${timing||'sequential'})`,requested:sl.requested,changedTech:true},...prev]);
-      });
-      setServiceLines(prev=>{
-        var updated=prev.map(s=>s);
-        // 1. Find the moved lines (still have old staff_id in prev)
-        var movedLines=updated.filter(s=>serviceLineIds.includes(s.id)).sort((a,b)=>a.starts_at-b.starts_at);
-        if(movedLines.length===0)return updated;
-        // 2. Find the appointment start time (earliest of all related lines for this client)
-        var clientName=movedLines[0].client;
-        var allClientLines=updated.filter(s=>s.client===clientName).sort((a,b)=>a.starts_at-b.starts_at);
-        var apptStartTime=allClientLines[0].starts_at;
-        // 3. Figure out remaining lines on source tech (not being moved)
-        var sourceStaffId=movedLines[0].staff_id;
-        var remainIds=(remainingOnSource||[]).map(r=>r.id);
-        var remainOnSrc=updated.filter(s=>s.client===clientName&&s.staff_id===sourceStaffId&&!serviceLineIds.includes(s.id)).sort((a,b)=>a.starts_at-b.starts_at);
-        // 4. Collapse remaining source lines — stack sequentially from appt start
-        var runTime=apptStartTime.getTime();
-        remainOnSrc.forEach(function(rl){
-          var idx=updated.findIndex(s=>s.id===rl.id);
-          if(idx>=0){
-            updated[idx]={...updated[idx],starts_at:new Date(runTime)};
-            runTime+=updated[idx].dur*60000;
-          }
-        });
-        // 5. Calculate destination start time based on timing mode
-        var destStartMs;
-        if(timing==='same_time'||!remainOnSrc.length){
-          destStartMs=apptStartTime.getTime();
-        } else {
-          // Sequential: start after source tech's remaining services end
-          destStartMs=runTime; // runTime is already the end of the last remaining source line
-        }
-        // 6. Place moved lines on new tech, stacked sequentially from destStartMs
-        movedLines.forEach(function(ml){
-          var idx=updated.findIndex(s=>s.id===ml.id);
-          if(idx>=0){
-            updated[idx]={...updated[idx],staff_id:newStaffId,starts_at:new Date(destStartMs)};
-            destStartMs+=updated[idx].dur*60000;
-          }
-        });
-        return updated;
-      });
-      setSelectedAppt(prev=>{if(!prev||!serviceLineIds.includes(prev.id))return prev;return{...prev,staff_id:newStaffId};});
-      // Persist each moved line to server
-      serviceLineIds.forEach(function(slId){persist.saveMove(slId,{staff_id:newStaffId});});
-    });
-  }
-  function handleAddTime(sl,extraMinutes){
-    setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'add_time',client:sl.client,service:sl.service,techName:(STAFF.find(function(s){return s.id===sl.staff_id;})||{}).display_name||'—',description:`Added ${extraMinutes} min extra time (${sl.dur} → ${sl.dur+extraMinutes} min)`,requested:sl.requested,changedTech:false},...prev]);
-    setServiceLines(prev=>prev.map(s=>s.id!==sl.id?s:{...s,dur:s.dur+extraMinutes}));
-    persist.saveAddTime(sl, sl.dur+extraMinutes);
-    setSelectedAppt(prev=>prev&&prev.id===sl.id?{...prev,dur:prev.dur+extraMinutes}:prev);
-  }
-  function handleAddService(sl,svc){
-    const clientLines=serviceLines.filter(s=>s.client===sl.client&&s.staff_id===sl.staff_id).sort((a,b)=>a.starts_at-b.starts_at);
-    const lastLine=clientLines[clientLines.length-1]||sl;
-    const newStart=new Date(lastLine.starts_at.getTime()+lastLine.dur*60000);
-    const newId='sl-new-'+Date.now();
-    const newLine={id:newId,staff_id:sl.staff_id,starts_at:newStart,dur:svc.dur,color:svc.color,client:sl.client,service:svc.name,status:sl.status,requested:sl.requested,price_cents:svc.price,open_price:!!svc.open_price};
-    setServiceLines(prev=>[...prev,newLine]);
-    persist.saveBooking([newLine], sl.client, sl.client_id);
-    setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'add_service',client:sl.client,service:svc.name,techName:(STAFF.find(function(s){return s.id===sl.staff_id;})||{}).display_name||'—',description:`Added ${svc.name} (${svc.dur} min) at ${formatTimeFull(newStart)}`,requested:sl.requested,changedTech:false},...prev]);
-  }
-
-  // ── Booking flow ──
-  function handleBookingSave(data){
-    const{services,startHour,startMin:sMin}=data;
-    // ── Block Time: separate entry, not an appointment ──
-    if(services[0]&&services[0].name==='Blocked'){
-      var svc=services[0];var bStartMin=startHour*60+sMin;
-      setBlockedTimes(prev=>[...prev,{id:'blk-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),staff_id:svc.techId,startMin:bStartMin,endMin:bStartMin+svc.dur,starts_at:minutesToTime(bStartMin),dur:svc.dur}]);
-      setBookingCtx(null);return;
-    }
-    // ── Reserve Time: stays in serviceLines (soft hold, overlappable) ──
-    // ── Regular booking ──
-    const byClient={};const clientOrder=[];
-    services.forEach(svc=>{
-      const key=svc.clientName+'__'+svc.techId;
-      if(!byClient[key]){byClient[key]={clientName:svc.clientName,techId:svc.techId,requested:svc.requested,timing:svc.timing,note:svc.note||'',svcs:[]};clientOrder.push(key);}
-      byClient[key].svcs.push(svc);
-    });
-    const newLines=[];
-    const bookingId='bk-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
-    let prevClientTechEnd={};
-    var blocked=false;
-    clientOrder.forEach(key=>{
-      const group=byClient[key];
-      let runMin;
-      if(group.timing==='sequential'){
-        runMin=prevClientTechEnd[group.clientName]||startHour*60+sMin;
-      } else {
-        runMin=startHour*60+sMin;
-      }
-      group.svcs.forEach((svc,i)=>{
-        var endMin=runMin+svc.dur;
-        if(isBlockedSlot(svc.techId,runMin,endMin))blocked=true;
-        const start=minutesToTime(runMin);
-        newLines.push({id:`sl-book-${Date.now()}-${group.techId}-${i}-${Math.random().toString(36).slice(2,6)}`,staff_id:svc.techId,starts_at:start,dur:svc.dur,color:svc.color,client:svc.clientName,service:svc.name,status:'pending',requested:!!svc.requested,price_cents:svc.price||0,open_price:!!svc.open_price,note:group.note||'',bookingId});
-        runMin+=svc.dur;
-      });
-      if(!prevClientTechEnd[group.clientName]||runMin>prevClientTechEnd[group.clientName]){
-        prevClientTechEnd[group.clientName]=runMin;
-      }
-    });
-    if(blocked){setBookingCtx(null);toast.show('This time slot is blocked. Choose a different time.', 'error');return;}
-    setServiceLines(prev=>[...prev,...newLines]);
-    persist.saveBooking(newLines);
-    const clients=[...new Set(services.map(s=>s.clientName))];
-    const anyRequested=services.some(s=>s.requested);
-    // Build detailed breakdown: client → tech → services
-    var logDetails=[];
-    clientOrder.forEach(function(key){
-      var group=byClient[key];
-      var techObj=STAFF.find(function(s){return s.id===group.techId;});
-      logDetails.push({client:group.clientName,tech:techObj?techObj.display_name:'—',services:group.svcs.map(function(s){return{name:s.name,dur:s.dur};})});
-    });
-    setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'booked',client:clients.join(', '),service:services.map(s=>s.name).join(', '),description:`New ${services.length}-service booking for ${clients.length} client${clients.length>1?'s':''} at ${formatTimeFull(minutesToTime(startHour*60+sMin))}`,requested:anyRequested,changedTech:false,details:logDetails},...prev]);
-    setBookingCtx(null);
-    if(services[0]&&services[0].name!=='Reserved'){
-      var techNames=[...new Set(services.map(function(s){var st=STAFF.find(function(x){return x.id===s.techId;});return st?st.display_name:'?';}))];
-      setBookingConfirm({clients:clients,services:services.map(function(s){return{name:s.name,dur:s.dur,price:s.price||0};}),techs:techNames,time:formatTimeFull(minutesToTime(startHour*60+sMin))});
-      setTimeout(function(){setBookingConfirm(null);},5000);
-    }
-  }
-  function handleBookingCancel(){setBookingCtx(null);}
-
-  // ── Copy / Paste ──
-  function handleContextMenu(e){
-    e.preventDefault();
-    if(!gridRef.current) return;
-    // Compute grid-relative position
-    var rect=gridRef.current.getBoundingClientRect();
-    var scrollTop=gridRef.current.scrollTop;
-    var scrollLeft=gridRef.current.scrollLeft;
-    var relY=e.clientY-rect.top+scrollTop;
-    var relX=e.clientX-rect.left+scrollLeft;
-    if(relX<0||relY<0) return;
-    var staffIdx=Math.max(0,Math.min(visibleStaff.length-1,Math.floor(relX/colW)));
-    var startMin=snapTo15(gridStartMin+(relY/ROW_H)*15);
-    var staffId=visibleStaff[staffIdx]?.id;
-    if(!staffId) return;
-    // Check if right-clicking on an appointment block
-    var target=e.target;
-    var blockEl=target.closest('[data-block="1"]');
-    if(blockEl){
-      // Find which service line was clicked
-      var slId=blockEl.getAttribute('data-sl-id');
-      var sl=slId?serviceLines.find(function(s){return s.id===slId;}):null;
-      if(!sl){
-        // Fall back: find appointment at this time+staff
-        sl=serviceLines.find(function(s){
-          var slStart=timeToMinutes(s.starts_at);
-          return s.staff_id===staffId&&startMin>=slStart&&startMin<slStart+s.dur;
-        });
-      }
-      if(sl) setCtxMenu({x:e.clientX,y:e.clientY,type:'copy',sl});
-      return;
-    }
-    // Empty slot — show paste if clipboard has data
-    if(copiedAppt) setCtxMenu({x:e.clientX,y:e.clientY,type:'paste',staffId,startMin});
-  }
-
-  function handleCopyAppt(sl){
-    setCopiedAppt({
-      client:sl.client,
-      client_id:sl.client_id||null,
-      service:sl.service,
-      dur:sl.dur,
-      color:sl.color,
-      price_cents:sl.price_cents||0,
-      open_price:sl.open_price||false,
-      requested:sl.requested||false,
-    });
-    setCtxMenu(null);
-  }
-
-  function handlePasteAppt(staffId,startMin){
-    if(!copiedAppt) return;
-    var newLine={
-      id:'sl-paste-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),
-      staff_id:staffId,
-      starts_at:minutesToTime(startMin),
-      dur:copiedAppt.dur,
-      color:copiedAppt.color,
-      client:copiedAppt.client,
-      client_id:copiedAppt.client_id,
-      service:copiedAppt.service,
-      status:'pending',
-      requested:copiedAppt.requested,
-      price_cents:copiedAppt.price_cents,
-      open_price:copiedAppt.open_price,
-    };
-    setServiceLines(function(prev){return prev.concat([newLine]);});
-    persist.saveBooking([newLine], copiedAppt.client, copiedAppt.client_id);
-    var tech=visibleStaff.find(function(s){return s.id===staffId;});
-    setActivityLog(function(prev){return[{id:Date.now(),timestamp:new Date(),action:'booked',client:copiedAppt.client,service:copiedAppt.service,description:'Copied appointment pasted for '+copiedAppt.client+' at '+formatTimeFull(minutesToTime(startMin)),requested:copiedAppt.requested,changedTech:false},...prev];});
-    setCtxMenu(null);
-  }
-
-  // ── Waitlist ──
-  function handleWaitlistStart(entry,tech){
-    const nowMin=timeToMinutes(new Date());
-    const snappedMin=Math.max(gridStartMin,Math.min(gridEndMin-15,snapTo15(nowMin)));
-    const snappedTime=minutesToTime(snappedMin);
-    const existing=serviceLines.find(sl=>sl.client===entry.client&&sl.service===entry.service&&(sl.status==='pending'||sl.status==='confirmed'||sl.status==='checked_in'));
-    if(existing){
-      setServiceLines(prev=>prev.map(sl=>{if(sl.id!==existing.id)return sl;return{...sl,staff_id:tech.id,status:'in_progress',starts_at:snappedTime};}));
-      persist.saveMove(existing.id, {staff_id:tech.id, starts_at:snappedTime});
-      persist.saveStatus(existing, 'in_progress');
-      setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'start_working',client:entry.client,service:entry.service,description:`Started working with ${tech.display_name} (updated existing appointment)`,requested:!!entry.requested,changedTech:existing.staff_id!==tech.id},...prev]);
-    }else{
-      const color={'Blowout':'#EC4899',"Women's Cut":'#EF4444','Beard Trim':'#78716C','Full Color':'#8B5CF6','Manicure':'#06B6D4','Facial':'#10B981'}[entry.service]||'#3B82F6';
-      const dur={Blowout:30,"Women's Cut":45,'Beard Trim':15,'Full Color':90,'Manicure':30,'Facial':60}[entry.service]||30;
-      const newSl={id:`sl-wl-${Date.now()}`,staff_id:tech.id,starts_at:snappedTime,dur,color,client:entry.client,service:entry.service,status:'in_progress',requested:!!entry.requested,price_cents:SERVICE_PRICES[entry.service]||0,is_vip:!!entry.is_vip};
-      setServiceLines(prev=>[...prev,newSl]);
-      persist.saveBooking([newSl], entry.client);
-      setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'start_working',client:entry.client,service:entry.service,description:`Started working with ${tech.display_name} (walk-in)`,requested:!!entry.requested,changedTech:false},...prev]);
-    }
-    setWaitlist(prev=>prev.filter(w=>w.id!==entry.id));
-    setTurnState(prev=>TurnEngine.markBusy(prev,tech.id).state);
-    setTimeout(()=>{if(gridRef.current){const blockY=((snappedMin-gridStartMin)/15)*ROW_H;gridRef.current.scrollTop=Math.max(0,blockY-150);}},50);
-  }
-  function handleWaitlistRemove(entry){
-    setWaitlist(prev=>prev.filter(w=>w.id!==entry.id));
-    setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'waitlist_remove',client:entry.client,service:entry.service,description:`Removed from waitlist`,requested:false,changedTech:false},...prev]);
-  }
-  function handleCheckIn(entry){
-    setWaitlist(prev=>[...prev,entry]);
-    setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'check_in',client:entry.client,service:entry.service,description:`Checked in (${entry.walk_in?'walk-in':'appointment'})${entry.requested?' — requested '+entry.requested:''}`,requested:!!entry.requested,changedTech:false},...prev]);
-    // VIP check-in alert
-    if(entry.is_vip){
-      setVipCheckInAlert({client:entry.client,service:entry.service,requested:entry.requested||null});
-    }
-  }
-
-  // ── Tech Turn: Break / End Break (engine-driven) ──
-  function handleTechBreak(techId){
-    const tech=turnState.techs.find(t=>t.id===techId);
-    setTurnState(prev=>TurnEngine.goOnBreak(prev,techId).state);
-    setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'break',client:'—',service:'—',description:`${tech?.name||'Tech'} went on break`,requested:false,changedTech:false},...prev]);
-  }
-  function handleTechEndBreak(techId){
-    const tech=turnState.techs.find(t=>t.id===techId);
-    setTurnState(prev=>TurnEngine.returnFromBreak(prev,techId,_settings).state);
-    setActivityLog(prev=>[{id:Date.now(),timestamp:new Date(),action:'end_break',client:'—',service:'—',description:`${tech?.name||'Tech'} returned from break`,requested:false,changedTech:false},...prev]);
-  }
+  // ── Handlers extracted to useCalendarHandlers (Session V18) ──
+  var handlers = useCalendarHandlers({
+    rbac: rbac, toast: toast, STAFF: STAFF, persist: persist, _settings: _settings,
+    serviceLines: serviceLines, setServiceLines: setServiceLines,
+    setActivityLog: setActivityLog, setTurnState: setTurnState,
+    setSelectedAppt: setSelectedAppt, setBookingCtx: setBookingCtx,
+    setBookingConfirm: setBookingConfirm, setBlockedTimes: setBlockedTimes,
+    setWaitlist: setWaitlist, setVipCheckInAlert: setVipCheckInAlert,
+    copiedAppt: copiedAppt, setCopiedAppt: setCopiedAppt, setCtxMenu: setCtxMenu,
+    gridRef: gridRef, visibleStaff: visibleStaff, colW: colW,
+    gridStartMin: gridStartMin, gridEndMin: gridEndMin,
+    turnState: turnState, blockedTimes: blockedTimes, isBlockedSlot: isBlockedSlot,
+    ROW_H: ROW_H,
+  });
+  var handleStatusChange = handlers.handleStatusChange;
+  var handleChangeTech = handlers.handleChangeTech;
+  var handleAddTime = handlers.handleAddTime;
+  var handleAddService = handlers.handleAddService;
+  var handleBookingSave = handlers.handleBookingSave;
+  var handleBookingCancel = handlers.handleBookingCancel;
+  var handleContextMenu = handlers.handleContextMenu;
+  var handleCopyAppt = handlers.handleCopyAppt;
+  var handlePasteAppt = handlers.handlePasteAppt;
+  var handleWaitlistStart = handlers.handleWaitlistStart;
+  var handleWaitlistRemove = handlers.handleWaitlistRemove;
+  var handleCheckIn = handlers.handleCheckIn;
+  var handleCheckInSave = handlers.handleCheckInSave;
+  var handleTechBreak = handlers.handleTechBreak;
+  var handleTechEndBreak = handlers.handleTechEndBreak;
   return(
     <div style={{width:'100%',height:'100%',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif",display:'flex',flexDirection:'column',overflow:'hidden',userSelect:dragging?'none':'auto'}}>
       {/* TOP BAR — Nav + Date Controls */}
@@ -543,7 +335,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
           </button>
         )}
         {/* Nav tabs: Clients > Tickets > Checkout */}
-        {onNavClick && [{id:'clients',label:'Clients',action:ACTIONS.VIEW_EDIT_CLIENTS},{id:'tickets',label:'Tickets',badge:openTicketCount,badgeColor:'#D97706',action:ACTIONS.PROCESS_CHECKOUT},{id:'checkout',label:'Checkout',action:ACTIONS.PROCESS_CHECKOUT}].map(function(item){
+        {onNavClick && [{id:'clients',label:'Clients',action:ACTIONS.VIEW_EDIT_CLIENTS},{id:'tickets',label:'View Tickets',badge:openTicketCount,badgeColor:'#D97706',action:ACTIONS.VIEW_TICKETS},{id:'checkout',label:'Checkout',action:ACTIONS.PROCESS_CHECKOUT}].map(function(item){
           return(
             <button key={item.id} onClick={function(){
               rbac.requirePermission(item.action, function(staff){
@@ -575,7 +367,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         </button>
         <div style={{flex:1}}/>
         {/* Right — Clock In/Out + Cashier + Online Bookings + Appointment Log + Column Count */}
-        {hasHourlyStaff && onTimeClockClick && (
+        {onTimeClockClick && (
           <button onClick={function(){ onTimeClockClick(); }}
             style={{display:'flex',alignItems:'center',justifyContent:'center',height:34,padding:'0 14px',borderRadius:7,fontSize:13,fontWeight:600,cursor:'pointer',border:'1px solid '+C.borderMedium,outline:'none',whiteSpace:'nowrap',gap:5,background:C.gridHover,color:C.text}}
             onMouseEnter={function(e){e.currentTarget.style.background=C.borderMedium;e.currentTarget.style.color='#FFFFFF';}}
@@ -629,7 +421,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
           <div style={{flex:1,overflow:'auto',padding:12}}>
             {activeTab==='calendar'&&<div><MiniMonth monthOffset={0} selectedDate={selectedDate} onDateClick={setSelectedDate}/><MiniMonth monthOffset={1} selectedDate={selectedDate} onDateClick={setSelectedDate}/><MiniMonth monthOffset={2} selectedDate={selectedDate} onDateClick={setSelectedDate}/></div>}
             {activeTab==='turn'&&<TechTurnList techTurn={techTurn} onReorder={r=>{const ids=r.sort((a,b)=>(a.position||0)-(b.position||0)).map(t=>t.id);setTurnState(prev=>TurnEngine.manualReorder(prev,ids,'Manager').state);}} onBreak={handleTechBreak} onEndBreak={handleTechEndBreak}/>}
-            {activeTab==='waitlist'&&<WaitlistPanel waitlist={waitlist} techTurn={techTurn} onStartWorking={handleWaitlistStart} onRemove={handleWaitlistRemove} onCheckIn={handleCheckIn}/>}
+            {activeTab==='waitlist'&&<WaitlistPanel waitlist={waitlist} techTurn={techTurn} onStartWorking={handleWaitlistStart} onRemove={handleWaitlistRemove} onCheckIn={function(){setBookingCtx({checkIn:true});}}/>}
           </div>
         </div>
         {/* CALENDAR GRID */}
@@ -752,7 +544,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         handleAddTime={handleAddTime} handleAddService={handleAddService} onCheckout={onCheckout}
         selectedBlock={selectedBlock} setSelectedBlock={setSelectedBlock} setBlockedTimes={setBlockedTimes} rbac={rbac}
         bookingCtx={bookingCtx} techTurn={techTurn} handleBookingSave={handleBookingSave}
-        handleBookingCancel={handleBookingCancel} catalogLayout={catalogLayout} salonSettings={salonSettings}
+        handleBookingCancel={handleBookingCancel} handleCheckInSave={handleCheckInSave} catalogLayout={catalogLayout} salonSettings={salonSettings}
         showLogPopup={showLogPopup} setShowLogPopup={setShowLogPopup} activityLog={activityLog}
         ctxMenu={ctxMenu} setCtxMenu={setCtxMenu} copiedAppt={copiedAppt} setCopiedAppt={setCopiedAppt}
         handleCopyAppt={handleCopyAppt} handlePasteAppt={handlePasteAppt}

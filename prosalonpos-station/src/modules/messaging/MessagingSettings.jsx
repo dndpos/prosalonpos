@@ -12,6 +12,7 @@ import { useTheme } from '../../lib/ThemeContext';
 import React, { useState } from 'react';
 import { MESSAGE_TYPES, MESSAGE_TYPE_META, CHANNELS } from '../../lib/messagingService';
 import { MSG_TYPE_COLORS } from './messagingBridge';
+import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 
 
 // ── Reusable small components ──
@@ -102,6 +103,15 @@ function ReminderTimesEditor({ times, onChange }) {
     }
     if (addStr.length < 3) setAddStr(addStr + key);
   }
+
+  useNumpadKeyboard(
+    showAdd,
+    function(d) { if (addStr.length < 3) setAddStr(addStr + d); },
+    function() { setAddStr(addStr.slice(0, -1)); },
+    function() { var val = parseInt(addStr, 10); if (val > 0 && val <= 168) addTime(val); },
+    function() { setShowAdd(false); setAddStr(''); },
+    [showAdd, addStr]
+  );
 
   return (
     <div>
@@ -349,6 +359,15 @@ function InactivityDaysEditor({ days, onChange }) {
     }
     if (str.length < 3) setStr(str + k);
   }
+
+  useNumpadKeyboard(
+    editing,
+    function(d) { if (str.length < 3) setStr(str + d); },
+    function() { setStr(str.slice(0, -1)); },
+    function() { var val = parseInt(str, 10); if (val > 0 && val <= 365) { onChange(val); setEditing(false); } },
+    function() { setEditing(false); },
+    [editing, str]
+  );
 
   if (!editing) {
     return (

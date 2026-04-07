@@ -3,6 +3,7 @@ import { useTheme } from '../../lib/ThemeContext';
 import { useState, useMemo, useEffect } from "react";
 import { phoneToDigits, fmt, fp } from '../../lib/formatUtils';
 import { useClientStore } from '../../lib/stores/clientStore';
+import { useAppointmentStore } from '../../lib/stores/appointmentStore';
 import CategoryGrid from '../../components/domain/CategoryGrid';
 import ServiceGrid from '../../components/domain/ServiceGrid';
 import { AVATAR_COLORS, getInitials } from '../../lib/calendarHelpers';
@@ -21,9 +22,10 @@ function Av({name,size=32,i=0,photo=null}){
   if(photo)return(<img src={photo} alt={name} style={{width:size,height:size,borderRadius:'50%',objectFit:'cover',flexShrink:0}}/>);
   return(<div style={{width:size,height:size,borderRadius:'50%',background:AVATAR_COLORS[i%AVATAR_COLORS.length],display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:size<34?11:13,fontWeight:500,flexShrink:0}}>{getInitials(name)}</div>);
 }
-export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initialHour=11,initialMin=0,onSave,onCancel,catalogLayout,autoRequestMode=false,salonSettings}){
+export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initialHour=11,initialMin=0,onSave,onCancel,catalogLayout,autoRequestMode=false,salonSettings,checkInMode=false}){
   var C = useTheme();
   var storeClients = useClientStore(function(s) { return s.clients; });
+  var storeServiceLines = useAppointmentStore(function(s) { return s.serviceLines; });
   var CLIENTS = useMemo(function() { return [...storeClients].sort(function(a,b) { return a.first_name.localeCompare(b.first_name); }); }, [storeClients]);
   var BP={height:44,padding:'0 24px',background:C.blue,color:'#fff',border:'none',borderRadius:6,fontSize:14,fontWeight:500,cursor:'pointer',fontFamily:'inherit'};
   var BS={height:44,padding:'0 24px',background:'transparent',color:C.textPrimary,border:`1px solid ${C.borderMedium}`,borderRadius:6,fontSize:14,fontWeight:500,cursor:'pointer',fontFamily:'inherit'};
@@ -53,6 +55,7 @@ export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initial
   const[newEmail,setNewEmail]=useState('');
   const[showNewForm,setShowNewForm]=useState(false);
   const[balanceAlert,setBalanceAlert]=useState(null);
+  const[apptFoundPopup,setApptFoundPopup]=useState(null); // {client, appointments[]}
   // Booking data — array of clients, each with techs, each with services
   const[bookingClients,setBookingClients]=useState([]);
   // Active pointers — which client and which tech we're currently adding services to
@@ -116,6 +119,45 @@ export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initial
   // ── INITIAL CLIENT SELECTION ──
   // ══════════════════════════════════════
   function selectClient(c){
+    // In check-in mode, check for today's appointments before proceeding
+    if(checkInMode){
+      var clientName=(c.first_name+' '+c.last_name.charAt(0)+'.').trim();
+      var matching=storeServiceLines.filter(function(sl){
+        if(sl.client_id&&c.id&&sl.client_id===c.id) return true;
+        if(sl.client&&sl.client===clientName) return true;
+        return false;
+      });
+      if(matching.length>0){
+        setApptFoundPopup({client:c,appointments:matching});
+        return;
+      }
+    }
+    var bal=getBalance(c);
+    if(bal>0){setBalanceAlert({client:c,amount:bal});}
+    else{finishInitialClient(c);}
+  }
+  function handleApptCheckIn(){
+    if(!apptFoundPopup)return;
+    var c=apptFoundPopup.client;
+    var appts=apptFoundPopup.appointments;
+    // Build service names and find requested tech
+    var serviceNames=[];
+    var techId=null;var techName=null;var anyRequested=false;
+    appts.forEach(function(sl){
+      if(serviceNames.indexOf(sl.service)===-1)serviceNames.push(sl.service);
+      if(sl.staff_id&&!techId){techId=sl.staff_id;var st=staff.find(function(s){return s.id===sl.staff_id;});if(st)techName=st.display_name;}
+      if(sl.requested)anyRequested=true;
+    });
+    var clientName=c.first_name+' '+c.last_name.charAt(0)+'.';
+    var matchedSlIds=appts.map(function(sl){return sl.id;});
+    // Save directly as check-in — builds the same data shape handleCheckInSave expects
+    if(onSave)onSave({services:[{clientName:clientName,name:serviceNames.join(', '),dur:appts.reduce(function(sum,sl){return sum+sl.dur;},0),color:appts[0].color||'#3B82F6',price:appts.reduce(function(sum,sl){return sum+(sl.price_cents||0);},0),open_price:false,techId:techId||initTech?.id,requested:anyRequested,timing:'parallel',note:''}],startHour:initialHour,startMin:initialMin,matchedSlIds:matchedSlIds});
+    setApptFoundPopup(null);
+  }
+  function handleApptWalkIn(){
+    if(!apptFoundPopup)return;
+    var c=apptFoundPopup.client;
+    setApptFoundPopup(null);
     var bal=getBalance(c);
     if(bal>0){setBalanceAlert({client:c,amount:bal});}
     else{finishInitialClient(c);}
@@ -402,8 +444,8 @@ export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initial
         <div style={{...wrap, position:'absolute', top:0, left:0, right:0, bottom:'45%', borderRadius:'0 0 12px 12px', overflow:'hidden'}}>
           <div style={{height:52,background:'#283848',display:'flex',alignItems:'center',padding:'0 20px',gap:12,borderBottom:`1px solid ${C.borderMedium}`,flexShrink:0}}>
             <button onClick={handleCancel} style={{...BS,height:36,padding:'0 14px',fontSize:13,color:C.danger,borderColor:C.danger}}>Cancel</button>
-            <span style={{color:C.textPrimary,fontSize:16,fontWeight:500}}>Select client</span>
-            <span style={{color:C.textPrimary,fontSize:13}}>for {initTech?.display_name} at {ft(initialHour,initialMin)}</span>
+            <span style={{color:C.textPrimary,fontSize:16,fontWeight:500}}>{checkInMode ? 'Check in client' : 'Select client'}</span>
+            {!checkInMode && <span style={{color:C.textPrimary,fontSize:13}}>for {initTech?.display_name} at {ft(initialHour,initialMin)}</span>}
           </div>
           <div style={{flex:1,display:'flex',overflow:'hidden'}}>
             <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
@@ -413,12 +455,12 @@ export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initial
                 <button onClick={skipWalkIn} style={{flex:1,marginTop:8,height:40,background:'rgba(217,119,6,0.12)',border:`1px dashed ${C.warning}`,borderRadius:6,color:C.warning,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:F}}
                   onMouseEnter={e=>{e.currentTarget.style.background='rgba(217,119,6,0.2)';}}
                   onMouseLeave={e=>{e.currentTarget.style.background='rgba(217,119,6,0.12)';}}>Walk-in</button>
-                <div onClick={function(){setShowBlockTime(true);}} style={{flex:1,marginTop:8,height:40,background:'rgba(245,158,11,0.12)',border:'1px dashed #F59E0B',borderRadius:6,color:'#F59E0B',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:F,display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}}
+                {!checkInMode&&<div onClick={function(){setShowBlockTime(true);}} style={{flex:1,marginTop:8,height:40,background:'rgba(245,158,11,0.12)',border:'1px dashed #F59E0B',borderRadius:6,color:'#F59E0B',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:F,display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}}
                   onMouseEnter={function(e){e.currentTarget.style.background='rgba(245,158,11,0.25)';}}
-                  onMouseLeave={function(e){e.currentTarget.style.background='rgba(245,158,11,0.12)';}}>Reserve</div>
-                <div onClick={function(){setShowBlockTime('block');setBlockFrom(String(initialHour*60+initialMin));}} style={{flex:1,marginTop:8,height:40,background:'rgba(239,68,68,0.12)',border:'1px dashed #EF4444',borderRadius:6,color:'#EF4444',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:F,display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}}
+                  onMouseLeave={function(e){e.currentTarget.style.background='rgba(245,158,11,0.12)';}}>Reserve</div>}
+                {!checkInMode&&<div onClick={function(){setShowBlockTime('block');setBlockFrom(String(initialHour*60+initialMin));}} style={{flex:1,marginTop:8,height:40,background:'rgba(239,68,68,0.12)',border:'1px dashed #EF4444',borderRadius:6,color:'#EF4444',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:F,display:'flex',alignItems:'center',justifyContent:'center',userSelect:'none'}}
                   onMouseEnter={function(e){e.currentTarget.style.background='rgba(239,68,68,0.25)';}}
-                  onMouseLeave={function(e){e.currentTarget.style.background='rgba(239,68,68,0.12)';}}>Block</div>
+                  onMouseLeave={function(e){e.currentTarget.style.background='rgba(239,68,68,0.12)';}}>Block</div>}
                 </div>
               </div>
               <div style={{flex:1,overflow:'auto',padding:'0 8px 8px'}}>
@@ -516,6 +558,7 @@ export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initial
               subtotal={subtotal} taxAmount={taxAmount} total={total} svcCount={svcCount}
               handleCancel={handleCancel} handleSave={handleSave}
               setNoteDraft={setNoteDraft} setShowNotePopup={setShowNotePopup} F={F}
+              checkInMode={checkInMode}
             />
             {/* ═══ RIGHT CATALOG ═══ */}
             <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',padding:12,gap:12}}>
@@ -599,6 +642,43 @@ export default function BookingFlow({staff=[],techTurn=[],initialStaffId,initial
         <AreaTag id="BOOK" />min</div></button>);})}
             </div>
             <button onClick={()=>setShowTimePopup(false)} style={{width:'100%',marginTop:12,height:36,background:'transparent',border:`1px solid ${C.borderMedium}`,borderRadius:6,color:C.textPrimary,fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:F}}>Close</button>
+          </div>
+        </div>
+      )}
+      {/* ═══════════ APPOINTMENT FOUND POPUP (check-in mode) ═══════════ */}
+      {apptFoundPopup&&(
+        <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(0,0,0,0.55)',zIndex:400,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={function(){setApptFoundPopup(null);}}>
+          <div style={{backgroundColor:'#1E293B',border:'1px solid #334155',borderRadius:12,width:380,boxShadow:'0 20px 60px rgba(0,0,0,0.5)'}} onClick={function(e){e.stopPropagation();}}>
+            <div style={{padding:'20px 20px 14px'}}>
+              <div style={{fontSize:15,fontWeight:600,color:C.blueLight,marginBottom:14}}>Appointment found</div>
+              <div style={{fontSize:13,color:'#E2E8F0',lineHeight:'1.7'}}>
+                <span style={{color:'#38BDF8',fontWeight:500}}>{apptFoundPopup.client.first_name} {apptFoundPopup.client.last_name}</span> has {apptFoundPopup.appointments.length>1?apptFoundPopup.appointments.length+' services':'an appointment'} today:
+              </div>
+              <div style={{background:'#283548',borderRadius:8,padding:12,marginTop:10}}>
+                {apptFoundPopup.appointments.map(function(sl,si){
+                  var techObj=staff.find(function(s){return s.id===sl.staff_id;});
+                  var startH=sl.starts_at instanceof Date?sl.starts_at.getHours():0;
+                  var startM=sl.starts_at instanceof Date?sl.starts_at.getMinutes():0;
+                  return(
+                    <div key={si} style={{marginBottom:si<apptFoundPopup.appointments.length-1?8:0}}>
+                      <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
+                        <span style={{color:'#E2E8F0',fontSize:13,fontWeight:500}}>{sl.service}</span>
+                        <span style={{color:'#94A3B8',fontSize:12}}>{ft(startH,startM)}</span>
+                      </div>
+                      {techObj&&<div style={{color:'#FBBF24',fontSize:12}}>with {techObj.display_name}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{display:'flex',gap:8,padding:'12px 20px 16px',borderTop:'1px solid #334155'}}>
+              <div onClick={handleApptWalkIn} style={{flex:1,height:38,border:'1px solid #475569',borderRadius:6,color:'#E2E8F0',fontSize:12,fontWeight:500,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',userSelect:'none'}}
+                onMouseEnter={function(e){e.currentTarget.style.background='#334155';}}
+                onMouseLeave={function(e){e.currentTarget.style.background='transparent';}}>Walk-in instead</div>
+              <div onClick={handleApptCheckIn} style={{flex:1,height:38,background:C.blue,borderRadius:6,color:'#fff',fontSize:12,fontWeight:500,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',userSelect:'none'}}
+                onMouseEnter={function(e){e.currentTarget.style.background='#1D4ED8';}}
+                onMouseLeave={function(e){e.currentTarget.style.background=C.blue;}}>Check in for this</div>
+            </div>
           </div>
         </div>
       )}

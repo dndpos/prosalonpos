@@ -16,6 +16,7 @@ import { useState, useEffect } from 'react';
 import { CHECKOUT_SETTINGS } from './checkoutBridge';
 import { fmt, fp } from '../../lib/formatUtils';
 import AreaTag from '../../components/ui/AreaTag';
+import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 
 export default function PaidScreen({ totalCents, clientName, client, payments, changeDue, onCloseTicket, salonSettings, ticket }){
   var C = useTheme();
@@ -75,6 +76,15 @@ export default function PaidScreen({ totalCents, clientName, client, payments, c
     setReceiptStep('sending');
     setTimeout(()=> setReceiptStep('sent'), 1000);
   }
+
+  useNumpadKeyboard(
+    receiptChoice === 'text',
+    function(d) { if (phoneInput.length < 10) setPhoneInput(function(p) { return p + d; }); },
+    function() { setPhoneInput(function(p) { return p.slice(0, -1); }); },
+    function() { if (phoneInput.length === 10) handleSendReceipt(); },
+    null,
+    [receiptChoice, phoneInput]
+  );
 
   function handleClose(){
     // Store auto-print fires silently on close
@@ -144,7 +154,14 @@ export default function PaidScreen({ totalCents, clientName, client, payments, c
     });
   }
 
-  const methodLabel = payments.map(p=>p.method).join(' + ');
+  var METHOD_NAMES = { cash: 'Cash', credit: 'Credit Card', giftcard: 'Gift Card', zelle: 'Zelle' };
+  const methodLabel = payments.map(function(p) { return METHOD_NAMES[p.method] || p.method; }).join(' + ');
+
+  // Compute gift card remaining balances after payment
+  var gcBalanceLines = payments.filter(function(p) { return p.method === 'giftcard' && p.gc_original_balance !== undefined; }).map(function(p) {
+    var remaining = p.gc_original_balance - p.amount_cents;
+    return { code: p.gc_code, remaining: remaining };
+  });
 
   // ── SENDING state ──
   if(receiptStep === 'sending'){
@@ -176,10 +193,13 @@ export default function PaidScreen({ totalCents, clientName, client, payments, c
           </div>
           <div style={{color:C.success,fontSize:22,fontWeight:600,marginBottom:4}}>Paid</div>
           <div style={{color:C.textPrimary,fontSize:28,fontWeight:600,marginBottom:4}}>{fmt(totalCents)}</div>
-          {clientName && <div style={{color:C.textPrimary,fontSize:14,marginBottom:4}}>{clientName}</div>}
-          <div style={{color:C.textPrimary,fontSize:12,marginBottom:6}}>{methodLabel}</div>
-          {changeDue > 0 && <div style={{color:'#6EE7B7',fontSize:16,fontWeight:600,marginBottom:8}}>Change: {fmt(changeDue)}</div>}
-          <div style={{color:C.textPrimary,fontSize:12,marginBottom:6}}>{receiptMsg}</div>
+          {clientName && <div style={{color:C.textPrimary,fontSize:16,marginBottom:6}}>{clientName}</div>}
+          <div style={{color:C.textPrimary,fontSize:16,fontWeight:500,marginBottom:6}}>{methodLabel}</div>
+          {gcBalanceLines.length > 0 && gcBalanceLines.map(function(gc) {
+            return <div key={gc.code} style={{color:'#A78BFA',fontSize:14,marginBottom:4}}>Gift Card {gc.code} remaining: {fmt(gc.remaining)}</div>;
+          })}
+          {changeDue > 0 && <div style={{color:'#6EE7B7',fontSize:18,fontWeight:600,marginBottom:8}}>Change: {fmt(changeDue)}</div>}
+          <div style={{color:C.textPrimary,fontSize:13,marginBottom:6}}>{receiptMsg}</div>
           {settings.store_auto_print_receipt && (
             <div style={{color:C.textPrimary,fontSize:11,marginBottom:20}}>Store copy will auto-print</div>
           )}
@@ -205,9 +225,12 @@ export default function PaidScreen({ totalCents, clientName, client, payments, c
         </div>
         <div style={{color:C.success,fontSize:22,fontWeight:600,marginBottom:4}}>Paid</div>
         <div style={{color:C.textPrimary,fontSize:28,fontWeight:600,marginBottom:4}}>{fmt(totalCents)}</div>
-        {clientName && <div style={{color:C.textPrimary,fontSize:14,marginBottom:4}}>{clientName}</div>}
-        <div style={{color:C.textPrimary,fontSize:12,marginBottom:6}}>{methodLabel}</div>
-        {changeDue > 0 && <div style={{color:'#6EE7B7',fontSize:16,fontWeight:600,marginBottom:16}}>Change: {fmt(changeDue)}</div>}
+        {clientName && <div style={{color:C.textPrimary,fontSize:16,marginBottom:6}}>{clientName}</div>}
+        <div style={{color:C.textPrimary,fontSize:16,fontWeight:500,marginBottom:6}}>{methodLabel}</div>
+        {gcBalanceLines.length > 0 && gcBalanceLines.map(function(gc) {
+          return <div key={gc.code} style={{color:'#A78BFA',fontSize:14,marginBottom:4}}>Gift Card {gc.code} remaining: {fmt(gc.remaining)}</div>;
+        })}
+        {changeDue > 0 && <div style={{color:'#6EE7B7',fontSize:18,fontWeight:600,marginBottom:16}}>Change: {fmt(changeDue)}</div>}
 
         {/* Receipt option buttons */}
         <div style={{color:C.textPrimary,fontSize:12,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:10,marginTop:changeDue>0?0:16}}>Customer Receipt</div>

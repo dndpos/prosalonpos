@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNumpadKeyboard } from '../../lib/useNumpadKeyboard';
 // TODO Phase 2: Kiosk reads from API — mock data removed Session 88
 var KIOSK_CLIENTS = [];
 var KIOSK_APPOINTMENTS = [];
@@ -181,6 +182,15 @@ export default function KioskApp() {
     }
   }
   function lookupPhone() { lookupWithPhone(phone); }
+
+  useNumpadKeyboard(
+    step === 'phone',
+    function(d) { handlePhoneKey(d); },
+    function() { handlePhoneKey('⌫'); },
+    lookupPhone,
+    function() { resetKiosk(); },
+    [step, phone]
+  );
 
   // New client submit
   function submitNewClient() {

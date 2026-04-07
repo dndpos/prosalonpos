@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { createHash } from 'crypto';
 import prisma, { isSQLite } from '../config/database.js';
-import { createToken, comparePin, hashPin, comparePinAsync, hashPinAsync, pinSha256 } from '../config/auth.js';
+import { createToken, verifyToken, comparePin, hashPin, comparePinAsync, hashPinAsync, pinSha256 } from '../config/auth.js';
 
 function fromDb(val) {
   if (val === null || val === undefined) return null;
@@ -279,34 +279,48 @@ router.post('/verify-pin', async function(req, res, next) {
 });
 
 // ── Change Owner PIN ──
-// No old password required — user is already authenticated as owner to reach settings
+// Requires JWT — inline auth check since this router is public
 router.put('/owner-pin', async function(req, res, next) {
   try {
-    var { new_pin } = req.body;
-    if (!new_pin || String(new_pin).length < 2) {
-      return res.status(400).json({ error: 'PIN must be at least 2 digits' });
+    console.log('[Auth] PUT /owner-pin called');
+    var { new_pin, salon_id } = req.body;
+
+    // Try JWT first, fall back to salon_id from body
+    var resolvedSalonId = null;
+    var authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        var decoded = verifyToken(authHeader.slice(7));
+        resolvedSalonId = decoded.salon_id;
+      } catch (e) {
+        // Token expired — fall through to salon_id from body
+      }
+    }
+    if (!resolvedSalonId && salon_id) {
+      resolvedSalonId = salon_id;
+    }
+    if (!resolvedSalonId) {
+      return res.status(401).json({ error: 'salon_id required' });
     }
 
-    // Get salon_id from JWT (set by authenticate middleware or from body)
-    var salon_id = (req.auth && req.auth.salon_id) || req.body.salon_id;
-    if (!salon_id) {
-      return res.status(400).json({ error: 'salon_id is required' });
+    if (!new_pin || String(new_pin).length < 2) {
+      return res.status(400).json({ error: 'PIN must be at least 2 digits' });
     }
 
     var newHash = hashPin(String(new_pin));
     var newSha = pinSha256(String(new_pin));
     await prisma.salon.update({
-      where: { id: salon_id },
+      where: { id: resolvedSalonId },
       data: { owner_pin_hash: newHash, owner_pin_sha256: newSha }
     });
 
     // Sync to any staff record with role 'owner' (they share the salon owner PIN)
     await prisma.staff.updateMany({
-      where: { salon_id: salon_id, role: 'owner' },
+      where: { salon_id: resolvedSalonId, role: 'owner' },
       data: { pin_hash: newHash, pin_sha256: newSha }
     });
 
-    console.log('[Auth] Owner PIN updated for salon', salon_id);
+    console.log('[Auth] Owner PIN updated for salon', resolvedSalonId);
     res.json({ success: true });
   } catch (err) { next(err); }
 });
