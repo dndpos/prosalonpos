@@ -25,11 +25,11 @@ prosalonpos/                     ← GitHub repo root
 
 | Setting | Value |
 |---------|-------|
-| **Root Directory** | *(leave BLANK — do NOT set to /prosalonpos-server)* |
-| **Build Command** | `cd prosalonpos-server && npm install && node scripts/build-railway.js` |
-| **Start Command** | `cd prosalonpos-server && node src/server.js` |
+| **Root Directory** | *(leave BLANK)* |
+| **Build Command** | `node scripts/build-railway.js` |
+| **Custom Start Command** | `node src/server.js` |
 
-**Why Root Directory must be blank:** Railway needs to see both folders during the build. The build script navigates into `prosalonpos-station/` to install and build the frontend, then copies the output to `prosalonpos-server/public/`. If Root Directory is set, Railway isolates to that folder and the frontend can't be found.
+**Note:** Railway's Railpack auto-detects the server folder and copies only its contents into `/app/`. The `cd prosalonpos-server` prefix is NOT needed — Railpack already runs from inside the server folder. The frontend is pre-built locally and committed as `public/` inside the server folder.
 
 ## Environment Variables
 
@@ -41,12 +41,12 @@ prosalonpos/                     ← GitHub repo root
 
 ## What the Build Script Does
 
-1. `cd prosalonpos-server && npm install` — installs server dependencies
+1. Railway's Railpack detects Node.js, runs `npm ci` automatically
 2. `node scripts/build-railway.js` runs:
    - `npx prisma generate` — generates Prisma client
-   - `npm install` in `../prosalonpos-station/` — installs frontend deps
-   - `npx vite build` in `../prosalonpos-station/` — builds React app
-   - Copies `prosalonpos-station/dist/` → `prosalonpos-server/public/`
+   - Verifies pre-built frontend exists in `public/`
+3. On server start, `prisma db push` creates/updates database tables
+4. Server auto-bootstraps salon data on first run
 
 ## What Happens on First Run
 
