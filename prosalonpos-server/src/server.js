@@ -266,11 +266,15 @@ httpServer.listen(PORT, async function() {
 
     var result = await bootstrapSalon(salonName, licKey);
 
+    console.log('[Bootstrap] Salon: "' + result.salon.name + '" | code: ' + result.salon.salon_code + ' | id: ' + result.salon.id);
+
     if (result.created) {
-      console.log('[Bootstrap] ✅ New salon created — code: ' + result.salon.salon_code);
+      console.log('[Bootstrap] ✅ New salon created');
       console.log('[Bootstrap]    Owner PIN: 0000 | Manager PIN: 1234');
     } else if (result.seeded) {
       console.log('[Bootstrap] ✅ Default data seeded into existing salon');
+    } else {
+      console.log('[Bootstrap] ✅ Existing salon — no changes needed');
     }
 
     // Auto-remove old owner Staff records (migration cleanup from pre-S86)
