@@ -1,6 +1,6 @@
 # ProSalonPOS — Railway Deployment Guide
 
-**Session 91**
+**Session V23 — Fixed**
 
 ## Overview
 
@@ -44,7 +44,6 @@ prosalonpos/                     ← GitHub repo root
 1. `cd prosalonpos-server && npm install` — installs server dependencies
 2. `node scripts/build-railway.js` runs:
    - `npx prisma generate` — generates Prisma client
-   - `npx prisma db push` — creates/updates database tables
    - `npm install` in `../prosalonpos-station/` — installs frontend deps
    - `npx vite build` in `../prosalonpos-station/` — builds React app
    - Copies `prosalonpos-station/dist/` → `prosalonpos-server/public/`

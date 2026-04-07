@@ -407,29 +407,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         <div style={{width:1,height:28,background:C.borderMedium}}/>
         <button onClick={()=>setVisibleCols(Math.max(1,visibleCols-1))} style={{background:'none',border:`1px solid ${C.borderMedium}`,color:C.textPrimary,fontSize:16,cursor:'pointer',padding:'2px 10px',borderRadius:4}}>−</button>
         <span style={{color:C.textMuted,fontSize:12,minWidth:16,textAlign:'center'}}>{visibleCols}</span>
-        <button onClick={()=>setVisibleCols(Math.min(STAFF.length,visibleCols+1))} style={{background:'none',border:`1px solid ${C.borderMedium}`,color:C.textPrimary,fontSize:16,cursor:'pointer',padding:'2px 10px',borderRadius:4}}>+</button>
-        <div style={{width:1,height:28,background:C.borderMedium,marginLeft:12}}/>
-        <button onClick={function(){try{window.moveTo(0,0);window.resizeTo(0,0);}catch(e){}window.blur();if(document.activeElement)document.activeElement.blur();try{window.open('','_self');window.minimize&&window.minimize();}catch(e){}try{var w=window.outerWidth;var h=window.outerHeight;window.resizeTo(w,0);setTimeout(function(){window.resizeTo(w,h);},50);}catch(e){}}}
-          title="Minimize"
-          style={{background:'none',border:'none',color:C.textMuted,fontSize:18,cursor:'pointer',padding:'2px 8px',lineHeight:1,display:'flex',alignItems:'center'}}
-          onMouseEnter={function(e){e.currentTarget.style.color=C.textPrimary;e.currentTarget.style.background=C.gridHover;e.currentTarget.style.borderRadius='4px';}}
-          onMouseLeave={function(e){e.currentTarget.style.color=C.textMuted;e.currentTarget.style.background='none';}}>
-          &#x2014;
-        </button>
-        <button onClick={function(){if(document.fullscreenElement){document.exitFullscreen();}else{document.documentElement.requestFullscreen();}}}
-          title="Maximize / Restore"
-          style={{background:'none',border:'none',color:C.textMuted,fontSize:14,cursor:'pointer',padding:'2px 8px',lineHeight:1,display:'flex',alignItems:'center'}}
-          onMouseEnter={function(e){e.currentTarget.style.color=C.textPrimary;e.currentTarget.style.background=C.gridHover;e.currentTarget.style.borderRadius='4px';}}
-          onMouseLeave={function(e){e.currentTarget.style.color=C.textMuted;e.currentTarget.style.background='none';}}>
-          &#x25A1;
-        </button>
-        <button onClick={function(){if(confirm('Close ProSalonPOS?')){window.close();try{window.open('','_self').close();}catch(e){}}}}
-          title="Close"
-          style={{background:'none',border:'none',color:C.textMuted,fontSize:16,cursor:'pointer',padding:'2px 8px',lineHeight:1,display:'flex',alignItems:'center',marginRight:12}}
-          onMouseEnter={function(e){e.currentTarget.style.color='#FCA5A5';e.currentTarget.style.background='rgba(239,68,68,0.15)';e.currentTarget.style.borderRadius='4px';}}
-          onMouseLeave={function(e){e.currentTarget.style.color=C.textMuted;e.currentTarget.style.background='none';}}>
-          &#x2715;
-        </button>
+        <button onClick={()=>setVisibleCols(Math.min(STAFF.length,visibleCols+1))} style={{background:'none',border:`1px solid ${C.borderMedium}`,color:C.textPrimary,fontSize:16,cursor:'pointer',padding:'2px 10px',borderRadius:4,marginRight:12}}>+</button>
       </div>
       {/* BODY */}
       <div style={{flex:1,display:'flex',overflow:'hidden'}}>

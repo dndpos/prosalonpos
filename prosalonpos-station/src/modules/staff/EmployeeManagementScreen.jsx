@@ -132,15 +132,11 @@ export default function EmployeeManagementScreen({
     });
   }
 
-  var [savingNew, setSavingNew] = useState(false);
-
   function handleSaveNew(data) {
-    if (savingNew) return;
     if (data.badge_id) {
       var dup = employees.find(function(e) { return e.badge_id === data.badge_id; });
       if (dup) { toast.show('Badge ID "' + data.badge_id + '" is already assigned to ' + dup.display_name + '.', 'error'); return; }
     }
-    setSavingNew(true);
     var newStaffData = {
       display_name: data.display_name, legal_name: data.legal_name,
       role: data.role, badge_id: data.badge_id || undefined,
@@ -157,26 +153,12 @@ export default function EmployeeManagementScreen({
       rbac_role: data.rbac_role || 'tech', permissions: data.permissions || {},
     };
     staffActions.createStaff(newStaffData).then(function(created) {
-      if (created) {
-        if (addSlotIdx !== null) {
-          setEmpSlots(function(prev) { var slots = { ...prev }; slots[addSlotIdx] = created.id; return slots; });
-        } else {
-          // Auto-assign to first empty grid slot
-          setEmpSlots(function(prev) {
-            var slots = { ...prev };
-            var totalSlots = (empColumns || 6) * (empRows || 6);
-            for (var i = 0; i < totalSlots; i++) {
-              if (!slots[i]) { slots[i] = created.id; break; }
-            }
-            return slots;
-          });
-        }
+      if (addSlotIdx !== null && created) {
+        setEmpSlots(function(prev) { var slots = { ...prev }; slots[addSlotIdx] = created.id; return slots; });
       }
       setAddSlotIdx(null);
-      setSavingNew(false);
     }).catch(function(err) {
       toast.show(err.message || 'Failed to create staff', 'error');
-      setSavingNew(false);
     });
   }
 
