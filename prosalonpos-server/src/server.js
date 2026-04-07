@@ -14,6 +14,7 @@ import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { existsSync } from 'fs';
+import { execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -54,6 +55,9 @@ var PORT = process.env.PORT || 3001;
 // ════════════════════════════════════════════
 
 var app = express();
+
+// Trust Railway's reverse proxy (fixes express-rate-limit X-Forwarded-For warning)
+app.set('trust proxy', 1);
 
 // Gzip compression — reduces response sizes by 60-80% over the wire
 app.use(compression());
@@ -214,6 +218,20 @@ var modeLabel = isProduction ? 'PRODUCTION' : 'DEVELOPMENT';
 // Run license check (only enforced in production/SQLite mode)
 var licenseResult = startupLicenseCheck();
 
+// ── Ensure database schema is up to date (BEFORE starting server) ──
+// On Railway, db push can't run during build (no DB access).
+// Run it here before listen() so tables exist before any requests arrive.
+try {
+  console.log('[Schema] Running prisma db push...');
+  execSync('npx prisma db push --skip-generate --accept-data-loss', {
+    cwd: dirname(fileURLToPath(import.meta.url)) + '/..',
+    stdio: 'inherit'
+  });
+  console.log('[Schema] ✅ Database schema is up to date');
+} catch (schemaErr) {
+  console.error('[Schema] ❌ prisma db push failed:', schemaErr.message);
+}
+
 httpServer.listen(PORT, async function() {
   console.log('');
   console.log('  ╔══════════════════════════════════════════╗');
@@ -234,25 +252,10 @@ httpServer.listen(PORT, async function() {
 
   console.log('');
 
-  // ── Ensure database schema is up to date ──
-  // On Railway, db push can't run during build (no DB access).
-  // Run it here at startup so tables exist before bootstrap queries them.
-  try {
-    console.log('[Schema] Running prisma db push...');
-    var { execSync } = await import('child_process');
-    execSync('npx prisma db push --skip-generate --accept-data-loss', {
-      cwd: dirname(fileURLToPath(import.meta.url)) + '/..',
-      stdio: 'inherit'
-    });
-    console.log('[Schema] ✅ Database schema is up to date');
-  } catch (schemaErr) {
-    console.error('[Schema] ❌ prisma db push failed:', schemaErr.message);
-    console.error('[Schema]    Server will attempt to continue...');
-  }
-
   // ── Auto-bootstrap: ensure salon + default data exist ──
   // Runs in ALL modes (dev, cloud, .exe). On a fresh database, creates
   // salon record, default categories, services, settings, and one manager.
+  console.log('[Bootstrap] Starting bootstrap check...');
   try {
     var salonName = (licenseResult.status === 'valid' && licenseResult.license)
       ? licenseResult.license.salon_name
