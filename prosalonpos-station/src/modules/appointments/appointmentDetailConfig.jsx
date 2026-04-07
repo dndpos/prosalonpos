@@ -12,6 +12,7 @@ export var STATUS_CONFIG = {
   checked_in:  {label:'Checked In',  bg:'rgba(16,185,129,0.15)', color:'#6EE7B7',  dot:'#10B981'},
   in_progress: {label:'In Progress', bg:'rgba(139,92,246,0.15)', color:'#C4B5FD',  dot:'#8B5CF6'},
   completed:   {label:'Completed',   bg:'rgba(34,197,94,0.15)',  color:'#86EFAC',  dot:'#22C55E'},
+  checked_out: {label:'Checked Out', bg:'rgba(34,197,94,0.15)',  color:'#86EFAC',  dot:'#22C55E'},
   no_show:     {label:'No Show',     bg:'rgba(239,68,68,0.15)',  color:'#FCA5A5',  dot:'#EF4444'},
   cancelled:   {label:'Cancelled',   bg:'rgba(100,116,139,0.15)',color:'#CBD5E1',  dot:'#64748B'},
 };
@@ -22,6 +23,7 @@ export var ALLOWED_TRANSITIONS = {
   checked_in:  ['in_progress','cancelled'],
   in_progress: ['completed'],
   completed:   [],
+  checked_out: [],
   no_show:     [],
   cancelled:   [],
 };

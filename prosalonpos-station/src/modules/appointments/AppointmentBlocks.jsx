@@ -95,7 +95,7 @@ export default function AppointmentBlocks({serviceLines, blockedTimes, visibleSt
     const innerH=heightPx-8;
     const isMulti=group.length>1;
     const isDragging=dragging&&group.some(s=>s.id===dragging.slId);
-    const isFaded=first.status==='completed'||first.status==='cancelled'||first.status==='no_show';
+    const isFaded=first.status==='completed'||first.status==='checked_out'||first.status==='cancelled'||first.status==='no_show';
 
     // For multi-service: build gradient from service colors proportionally
     let bgStyle;

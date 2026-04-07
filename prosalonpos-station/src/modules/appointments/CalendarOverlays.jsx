@@ -47,34 +47,38 @@ export default function CalendarOverlays({
       {/* ── Group booking move popup ── */}
       {pendingGroupMove && (
         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(0,0,0,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={cancelGroupMove}>
-          <div style={{backgroundColor:C.chrome,border:`1px solid ${C.borderMedium}`,borderRadius:12,width:440,padding:0,boxShadow:'0 20px 60px rgba(0,0,0,0.5)',position:'relative'}} onClick={e=>e.stopPropagation()}>
+          <div style={{backgroundColor:C.chrome,border:'2px solid #B45309',borderRadius:12,width:440,padding:0,boxShadow:'0 20px 60px rgba(0,0,0,0.5)',position:'relative'}} onClick={e=>e.stopPropagation()}>
             <AreaTag id="CAL-OVR" />
-            <div style={{padding:'20px 24px',borderBottom:`1px solid ${C.borderLight}`}}>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
-                <span style={{fontSize:18}}>👥</span>
-                <span style={{fontSize:15,fontWeight:600,color:C.textPrimary}}>Group Appointment</span>
+            <div style={{padding:'18px 24px',background:'linear-gradient(135deg, #78350F 0%, #92400E 100%)',borderRadius:'10px 10px 0 0'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                <span style={{fontSize:20}}>⚠️</span>
+                <span style={{fontSize:16,fontWeight:700,color:'#FDE68A',letterSpacing:'0.02em'}}>Group Appointment</span>
               </div>
-              <div style={{fontSize:13,color:C.textPrimary,lineHeight:'1.6'}}>
-                This appointment is part of a group booking. Do you want to move <span style={{color:C.blueLight,fontWeight:500}}>all clients</span> in this group to the new time?
+              <div style={{fontSize:13,color:'#FBBF24',lineHeight:'1.6'}}>
+                This appointment is part of a group booking. Do you want to move <span style={{color:'#FFF',fontWeight:600}}>all clients</span> in this group to the new time?
               </div>
             </div>
-            <div style={{display:'flex',flexDirection:'column',gap:8,padding:'16px 24px'}}>
+            <div style={{display:'flex',flexDirection:'column',gap:10,padding:'18px 24px'}}>
               <button onClick={confirmGroupMoveAll}
-                style={{width:'100%',padding:'12px 20px',borderRadius:8,border:`2px solid ${C.blue}`,background:C.blueTint,color:C.textPrimary,fontSize:14,fontWeight:600,cursor:'pointer',fontFamily:"'Inter',sans-serif",textAlign:'left'}}
-                onMouseEnter={e=>e.currentTarget.style.background=C.accentBg}
-                onMouseLeave={e=>e.currentTarget.style.background=C.blueTint}>
+                style={{width:'100%',padding:'14px 20px',borderRadius:10,border:'none',background:'#134E4A',color:'#5EEAD4',fontSize:14,fontWeight:600,cursor:'pointer',fontFamily:"'Inter',sans-serif",textAlign:'left',transition:'background 0.15s'}}
+                onMouseEnter={e=>{e.currentTarget.style.background='#1a5e58';}}
+                onMouseLeave={e=>{e.currentTarget.style.background='#134E4A';}}>
                 <div>Move entire group</div>
-                <div style={{fontSize:11,fontWeight:400,color:C.textMuted,marginTop:2}}>All clients in this booking shift to the new time</div>
+                <div style={{fontSize:11,fontWeight:400,color:'#99F6E4',marginTop:3,opacity:0.8}}>All clients in this booking shift to the new time</div>
               </button>
               <button onClick={confirmGroupMoveOne}
-                style={{width:'100%',padding:'12px 20px',borderRadius:8,border:`1px solid ${C.borderMedium}`,background:'transparent',color:C.textPrimary,fontSize:14,fontWeight:600,cursor:'pointer',fontFamily:"'Inter',sans-serif",textAlign:'left'}}
-                onMouseEnter={e=>e.currentTarget.style.background=C.gridHover}
-                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                style={{width:'100%',padding:'14px 20px',borderRadius:10,border:'none',background:'#312E81',color:'#A5B4FC',fontSize:14,fontWeight:600,cursor:'pointer',fontFamily:"'Inter',sans-serif",textAlign:'left',transition:'background 0.15s'}}
+                onMouseEnter={e=>{e.currentTarget.style.background='#3b3898';}}
+                onMouseLeave={e=>{e.currentTarget.style.background='#312E81';}}>
                 <div>Move only this client</div>
-                <div style={{fontSize:11,fontWeight:400,color:C.textMuted,marginTop:2}}>Other clients stay at their current time</div>
+                <div style={{fontSize:11,fontWeight:400,color:'#C7D2FE',marginTop:3,opacity:0.8}}>Other clients stay at their current time</div>
               </button>
-              <button onClick={cancelGroupMove}
-                style={{width:'100%',padding:'8px 20px',borderRadius:6,border:'none',background:'none',color:C.textMuted,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:"'Inter',sans-serif",marginTop:4}}>Cancel</button>
+              <div style={{display:'flex',justifyContent:'center',marginTop:4}}>
+                <button onClick={cancelGroupMove}
+                  style={{padding:'9px 32px',borderRadius:8,border:'none',background:'#4C1D1D',color:'#FCA5A5',fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:"'Inter',sans-serif",transition:'background 0.15s'}}
+                  onMouseEnter={e=>{e.currentTarget.style.background='#5C2424';}}
+                  onMouseLeave={e=>{e.currentTarget.style.background='#4C1D1D';}}>Cancel</button>
+              </div>
             </div>
           </div>
         </div>

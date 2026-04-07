@@ -272,6 +272,7 @@ model ServiceLine {
   duration_minutes   Int
   calendar_color     String
   status             String   @default("pending")
+  payment_method     String?  // set after checkout: cash, credit, giftcard, zelle, package
   client_name        String?  // denormalized
   service_name       String
   price_cents        Int      @default(0)

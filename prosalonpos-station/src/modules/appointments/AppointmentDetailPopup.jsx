@@ -46,8 +46,10 @@ export default function AppointmentDetailPopup({sl, allServiceLines, staff, onCl
   const[addServiceCat,setAddServiceCat]=useState(SERVICE_CATEGORIES[0]?.id||'');
   const[stagedServices,setStagedServices]=useState([]); // [{svc object}]
 
-  // Find all service lines for the same client (multi-service visit)
-  const relatedLines=allServiceLines.filter(s=>s.client===sl.client&&s.id!==sl.id).sort((a,b)=>a.starts_at-b.starts_at);
+  // Find all service lines for the same appointment (multi-service visit)
+  const relatedLines=sl.appointment_id
+    ? allServiceLines.filter(s=>s.appointment_id===sl.appointment_id&&s.id!==sl.id).sort((a,b)=>a.starts_at-b.starts_at)
+    : allServiceLines.filter(s=>s.client===sl.client&&s.id!==sl.id).sort((a,b)=>a.starts_at-b.starts_at);
   const allLines=[sl,...relatedLines].sort((a,b)=>a.starts_at-b.starts_at);
 
   // Lines not yet staged for reassignment
@@ -660,7 +662,8 @@ export default function AppointmentDetailPopup({sl, allServiceLines, staff, onCl
         ):(
           <div style={{padding:'14px 24px',borderTop:`1px solid ${C.borderLight}`,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
             <span style={{fontSize:12,color:C.textMuted}}>
-              {sl.status==='completed'?'Service completed — ready for checkout'
+              {sl.status==='checked_out'?'✓ Paid — checkout complete'
+               :sl.status==='completed'?'Service completed — ready for checkout'
                :sl.status==='no_show'?'Client did not show up'
                :sl.status==='cancelled'?'This appointment was cancelled'
                :'No further actions'}
@@ -668,8 +671,11 @@ export default function AppointmentDetailPopup({sl, allServiceLines, staff, onCl
             {sl.status==='completed'&&(
               <button onClick={()=>{
                 if(onCheckout){
-                  // Build checkout data from all service lines for this client
-                  const checkoutLines=allLines.map(line=>{
+                  // Only include service lines from THIS appointment (not all client lines for the day)
+                  var apptLines = sl.appointment_id
+                    ? allLines.filter(function(l) { return l.appointment_id === sl.appointment_id; })
+                    : allLines;
+                  const checkoutLines=apptLines.map(line=>{
                     const techObj=staff.find(s=>s.id===line.staff_id);
                     return{id:line.id,name:line.service,tech:techObj?.display_name||'—',techId:line.staff_id,price_cents:line.price_cents||0,original_price_cents:line.price_cents||0,color:line.color,serviceCatalogId:line.service_catalog_id||null,open_price:!!line.open_price};
                   });
@@ -681,7 +687,7 @@ export default function AppointmentDetailPopup({sl, allServiceLines, staff, onCl
                         return nm ? { id: nm.id, first_name: nm.first_name, last_name: nm.last_name, phone: (nm.phone || '').replace(/\D/g,'') }
                           : { first_name: (sl.client || '').split(' ')[0] || '', last_name: (sl.client || '').split(' ').slice(1).join(' ') || '', phone: '' };
                       })();
-                  onCheckout({client:checkoutClient,services:checkoutLines,serviceLineIds:allLines.map(function(l){return l.id;})});
+                  onCheckout({client:checkoutClient,services:checkoutLines,serviceLineIds:apptLines.map(function(l){return l.id;}),appointmentId:sl.appointment_id||null});
                 }
                 onClose();
               }} style={{padding:'9px 20px',borderRadius:7,border:'none',background:'#22C55E',color:'#fff',fontSize:13,fontWeight:500,cursor:'pointer'}}>

@@ -121,10 +121,10 @@ export default function useCalendarDrag({
     }
     const origMin = dragging.origStartMin;
     const timeChanged = newStartMin !== origMin;
-    if (timeChanged && sl.bookingId) {
+    const staffChanged = newStaffId !== sl.staff_id;
+    if ((timeChanged || staffChanged) && sl.bookingId) {
       const groupMembers = serviceLines.filter(s => s.bookingId === sl.bookingId && s.id !== sl.id);
-      const otherClients = groupMembers.filter(s => s.client !== sl.client);
-      if (otherClients.length > 0) {
+      if (groupMembers.length > 0) {
         setPendingGroupMove({ sl, newStaffId, newStartMin, timeDelta: newStartMin - origMin });
         setDragging(null); setDragPreview(null); return;
       }
@@ -185,7 +185,12 @@ export default function useCalendarDrag({
         return { ...s, staff_id: newStaffId, starts_at: minutesToTime(oldMin + delta) };
       }));
       // Persist each moved line to server
-      if (persist) groupIds.forEach(function(id) { persist.saveMove(id, { staff_id: newStaffId }); });
+      if (persist) groupIds.forEach(function(id) {
+        var line = serviceLines.find(function(s) { return s.id === id; });
+        var oldMin = line ? timeToMinutes(line.starts_at) : 0;
+        var newTime = minutesToTime(oldMin + delta);
+        persist.saveMove(id, { staff_id: newStaffId, starts_at: newTime });
+      });
       setPendingMove(null);
     });
   }
@@ -226,7 +231,7 @@ export default function useCalendarDrag({
         return { ...s, starts_at: minutesToTime(newTimes[s.id]) };
       }));
       // Persist all moved lines to server
-      if (persist) Object.keys(newTimes).forEach(function(id) { persist.saveMove(id, { staff_id: dragGroupIds.has(id) ? newStaffId : undefined }); });
+      if (persist) Object.keys(newTimes).forEach(function(id) { persist.saveMove(id, { staff_id: dragGroupIds.has(id) ? newStaffId : undefined, starts_at: minutesToTime(newTimes[id]) }); });
       const clients = [...new Set(allGroupLines.map(s => s.client))];
       setActivityLog(prev => [{ id: Date.now(), timestamp: new Date(), action: 'moved', client: clients.join(', '), service: 'Group booking', description: `Group booking rescheduled (${clients.length} clients, ${allGroupLines.length} services)`, requested: sl.requested, changedTech: newStaffId !== sl.staff_id }, ...prev]);
       setPendingGroupMove(null);

@@ -63,10 +63,28 @@ router.get('/service-lines', async function(req, res, next) {
         starts_at: { gte: bounds.start, lte: bounds.end },
         status: { not: 'cancelled' }
       },
+      include: {
+        appointment: {
+          select: { booking_group_id: true, client_id: true, requested: true, source: true }
+        }
+      },
       orderBy: { starts_at: 'asc' }
     });
 
-    res.json({ serviceLines: lines });
+    // Flatten parent appointment fields onto each service line for calendar compatibility
+    var flat = lines.map(function(sl) {
+      var obj = Object.assign({}, sl);
+      if (sl.appointment) {
+        obj.bookingId = sl.appointment.booking_group_id || null;
+        obj.client_id = sl.appointment.client_id || null;
+        obj.requested = sl.appointment.requested || false;
+        obj.source = sl.appointment.source || null;
+      }
+      delete obj.appointment;
+      return obj;
+    });
+
+    res.json({ serviceLines: flat });
   } catch (err) { next(err); }
 });
 
@@ -209,7 +227,7 @@ router.put('/service-line/:id', async function(req, res, next) {
     var data = req.body;
     var updateData = {};
     var fields = ['staff_id', 'starts_at', 'duration_minutes', 'calendar_color',
-      'status', 'client_name', 'service_name', 'price_cents'];
+      'status', 'client_name', 'service_name', 'price_cents', 'payment_method'];
 
     fields.forEach(function(f) {
       if (data[f] !== undefined) {

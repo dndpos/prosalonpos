@@ -39,6 +39,9 @@ export default function useCalendarHandlers(ctx) {
   var blockedTimes = ctx.blockedTimes;
   var isBlockedSlot = ctx.isBlockedSlot;
   var ROW_H = ctx.ROW_H;
+  var onClockPunch = ctx.onClockPunch;
+  var onPresencePunch = ctx.onPresencePunch;
+  var _clockedInIds = ctx._clockedInIds;
 
   // ── Status / Tech / Service changes ──
   function handleStatusChange(sl, newStatus) {
@@ -62,8 +65,34 @@ export default function useCalendarHandlers(ctx) {
     setSelectedAppt(function(prev) { return prev && prev.id === sl.id ? Object.assign({}, prev, {status: newStatus}) : prev; });
     if (newStatus === 'completed' || newStatus === 'cancelled' || newStatus === 'no_show') {
       setTurnState(function(prev) { return TurnEngine.markAvailable(prev, sl.staff_id, _settings).state; });
-    } else if (newStatus === 'in_progress' || newStatus === 'checked_in') {
-      setTurnState(function(prev) { return TurnEngine.markBusy(prev, sl.staff_id).state; });
+    } else if (newStatus === 'in_progress') {
+      // Auto clock-in: if tech isn't clocked in yet, clock them in first (full protocol)
+      // then mark busy. This ensures turn rotation stays correct.
+      if (!_clockedInIds[sl.staff_id]) {
+        var staffMember = STAFF.find(function(s) { return s.id === sl.staff_id; });
+        if (staffMember) {
+          var isHourly = staffMember.pay_type === 'hourly';
+          if (isHourly) {
+            // Hourly: clock punch (payroll) + presence record (turn system)
+            if (onClockPunch) onClockPunch(sl.staff_id, 'in');
+            if (onPresencePunch) onPresencePunch(sl.staff_id, 'in');
+          } else {
+            // Non-hourly: presence record only (turn system)
+            if (onPresencePunch) onPresencePunch(sl.staff_id, 'in');
+          }
+          // Immediately add to turn state via clockIn so markBusy has a target.
+          // The useEffect in CalendarDayView will also fire when _clockedInIds updates,
+          // but we do it here synchronously so the markBusy below doesn't miss.
+          setTurnState(function(prev) {
+            var s = TurnEngine.clockIn(prev, sl.staff_id, staffMember.display_name || staffMember.name || '').state;
+            return TurnEngine.markBusy(s, sl.staff_id).state;
+          });
+        } else {
+          setTurnState(function(prev) { return TurnEngine.markBusy(prev, sl.staff_id).state; });
+        }
+      } else {
+        setTurnState(function(prev) { return TurnEngine.markBusy(prev, sl.staff_id).state; });
+      }
     }
   }
 

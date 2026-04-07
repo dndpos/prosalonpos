@@ -33,6 +33,7 @@ export default function useTicketHandlers() {
   var storeVoidTicket = useTicketStore(function(s) { return s.voidTicket; });
   var storeRefundTicket = useTicketStore(function(s) { return s.refundTicket; });
   var storeUpdateServiceLine = useAppointmentStore(function(s) { return s.updateServiceLine; });
+  var storeUpdateAppointment = useAppointmentStore(function(s) { return s.updateAppointment; });
   var enrollMember = useMembershipStore(function(s) { return s.enrollMember; });
   var renewMember = useMembershipStore(function(s) { return s.renewMember; });
   var sellPackage = usePackageStore(function(s) { return s.sellPackage; });
@@ -57,10 +58,17 @@ export default function useTicketHandlers() {
         storeRemoveOpenTicket(tid);
       });
     }
-    // Connection 3: mark originating calendar service lines as completed
+    // Connection 3: mark originating calendar service lines as checked_out (paid)
     if (ticket.serviceLineIds && ticket.serviceLineIds.length > 0) {
+      var payMethod = (ticket.payments[0] || {}).method || (ticket.packageRedemptions ? 'package' : null);
       ticket.serviceLineIds.forEach(function(slId) {
-        storeUpdateServiceLine(slId, { status: 'completed', payment_method: (ticket.payments[0] || {}).method || (ticket.packageRedemptions ? 'package' : null) });
+        storeUpdateServiceLine(slId, { status: 'checked_out', payment_method: payMethod });
+      });
+    }
+    // Connection 3b: mark parent appointment as checked_out so it can't be re-checked-out
+    if (ticket.appointmentId) {
+      storeUpdateAppointment(ticket.appointmentId, { status: 'checked_out' }).catch(function(err) {
+        console.warn('[handleCloseTicket] Appointment status update failed:', err.message);
       });
     }
 
@@ -400,42 +408,71 @@ export default function useTicketHandlers() {
   }
 
   function handlePrintHold(holdData) {
-    // Save ticket to database so it persists across page navigations
-    var ticketData = {
-      client_id: holdData.client ? holdData.client.id : null,
-      client_name: holdData.clientName || null,
-      deposit_cents: holdData.depositCents || 0,
-      lineItems: (holdData.items || []).map(function(it) {
-        return {
-          type: it.type || 'service',
-          name: it.name || 'Service',
-          price_cents: it.price_cents || 0,
-          original_price_cents: it.original_price_cents || it.price_cents || 0,
-          tech_id: it.techId || null,
-          tech_name: it.tech || null,
-          service_id: it.service_id || it.serviceCatalogId || null,
-          product_id: it.product_id || null,
-          color: it.color || null,
-        };
-      }),
-    };
-    storeCreateTicket(ticketData).then(function(ticket) {
-      console.log('[handlePrintHold] Ticket saved to DB:', ticket.id);
-    }).catch(function(err) {
-      // Fallback: save locally if API fails
-      console.warn('[handlePrintHold] DB save failed, keeping local:', err.message);
-      var ticket = {
-        id: holdData.id || ('hold-' + Date.now()),
-        ticketNumber: holdData.ticketNumber || 0,
-        client: holdData.client || null,
-        clientName: holdData.clientName || null,
-        items: holdData.items || [],
-        depositCents: holdData.depositCents || 0,
-        status: 'open',
-        createdAt: Date.now(),
+    // The ticket was already created when checkout opened (handleCheckout in App.jsx).
+    // holdData.id contains the existing openTicketId — do NOT create another ticket.
+    // Only create a new ticket if there's no existing ID (edge case: direct checkout without appointment).
+    var existingId = holdData.id;
+    var isRealId = existingId && !String(existingId).startsWith('hold-') && !String(existingId).startsWith('ot-');
+
+    if (isRealId) {
+      // Ticket already exists in DB — update it with latest items (user may have modified in checkout)
+      var updateData = {
+        items: (holdData.items || []).map(function(it) {
+          return {
+            type: it.type || 'service',
+            name: it.name || 'Service',
+            price_cents: it.price_cents || 0,
+            original_price_cents: it.original_price_cents || it.price_cents || 0,
+            tech_id: it.techId || null,
+            tech_name: it.tech || null,
+            service_id: it.service_id || it.serviceCatalogId || null,
+            product_id: it.product_id || null,
+            color: it.color || null,
+          };
+        }),
       };
-      storeAddOpenTicket(ticket);
-    });
+      storeUpdateTicket(existingId, updateData).then(function() {
+        console.log('[handlePrintHold] Ticket updated:', existingId);
+      }).catch(function(err) {
+        console.warn('[handlePrintHold] Ticket update failed:', err.message);
+      });
+    } else {
+      // No existing ticket — create one (walk-in or fallback)
+      var ticketData = {
+        client_id: holdData.client ? holdData.client.id : null,
+        client_name: holdData.clientName || null,
+        deposit_cents: holdData.depositCents || 0,
+        lineItems: (holdData.items || []).map(function(it) {
+          return {
+            type: it.type || 'service',
+            name: it.name || 'Service',
+            price_cents: it.price_cents || 0,
+            original_price_cents: it.original_price_cents || it.price_cents || 0,
+            tech_id: it.techId || null,
+            tech_name: it.tech || null,
+            service_id: it.service_id || it.serviceCatalogId || null,
+            product_id: it.product_id || null,
+            color: it.color || null,
+          };
+        }),
+      };
+      storeCreateTicket(ticketData).then(function(ticket) {
+        console.log('[handlePrintHold] Ticket created:', ticket.id);
+      }).catch(function(err) {
+        console.warn('[handlePrintHold] DB save failed, keeping local:', err.message);
+        var ticket = {
+          id: holdData.id || ('hold-' + Date.now()),
+          ticketNumber: holdData.ticketNumber || 0,
+          client: holdData.client || null,
+          clientName: holdData.clientName || null,
+          items: holdData.items || [],
+          depositCents: holdData.depositCents || 0,
+          status: 'open',
+          createdAt: Date.now(),
+        };
+        storeAddOpenTicket(ticket);
+      });
+    }
 
     // Connection 2: Print & Hold — tech is done with client, return to available queue
     var staffIds = [];

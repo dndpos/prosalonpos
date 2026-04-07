@@ -275,19 +275,34 @@ export default function App() {
     var enrichedClient = enrichClientBalance(data.client);
     var clientName = enrichedClient ? enrichedClient.first_name + ' ' + enrichedClient.last_name : 'Walk-in';
     var items = (data.services || []).map(function(s){ return {...s, type: s.type || 'service'}; });
-    var ticketData = { client_id: enrichedClient ? enrichedClient.id : null, client_name: clientName, lineItems: items, deposit_cents: data.depositCents || 0 };
-    storeCreateTicket(ticketData).then(function(ticket) {
-      var checkoutPayload = { ...data, client: enrichedClient, openTicketId: ticket.id || ('ot-' + Date.now()) };
+
+    // Check if an open ticket already exists for this appointment (prevents duplicates on hold → re-checkout)
+    var existingTicket = null;
+    if (data.appointmentId) {
+      existingTicket = openTickets.find(function(t) { return t.appointment_id === data.appointmentId; });
+    }
+
+    if (existingTicket) {
+      // Reuse existing ticket — don't create a new one
+      var checkoutPayload = { ...data, client: enrichedClient, openTicketId: existingTicket.id };
       if (rbacStaff) checkoutPayload.cashierStaff = rbacStaff;
       setCheckoutData(checkoutPayload);
       setActivePage('checkout');
-    }).catch(function(err) {
-      console.warn('[handleCheckout] Store create failed, using local:', err.message);
-      var checkoutPayload = { ...data, client: enrichedClient, openTicketId: 'ot-' + Date.now() };
-      if (rbacStaff) checkoutPayload.cashierStaff = rbacStaff;
-      setCheckoutData(checkoutPayload);
-      setActivePage('checkout');
-    });
+    } else {
+      var ticketData = { client_id: enrichedClient ? enrichedClient.id : null, client_name: clientName, lineItems: items, deposit_cents: data.depositCents || 0, appointment_id: data.appointmentId || null };
+      storeCreateTicket(ticketData).then(function(ticket) {
+        var checkoutPayload = { ...data, client: enrichedClient, openTicketId: ticket.id || ('ot-' + Date.now()) };
+        if (rbacStaff) checkoutPayload.cashierStaff = rbacStaff;
+        setCheckoutData(checkoutPayload);
+        setActivePage('checkout');
+      }).catch(function(err) {
+        console.warn('[handleCheckout] Store create failed, using local:', err.message);
+        var checkoutPayload = { ...data, client: enrichedClient, openTicketId: 'ot-' + Date.now() };
+        if (rbacStaff) checkoutPayload.cashierStaff = rbacStaff;
+        setCheckoutData(checkoutPayload);
+        setActivePage('checkout');
+      });
+    }
   }
 
   function handleTechSelected(tech) {
@@ -310,6 +325,7 @@ export default function App() {
         cashierStaff: tech, client: client || null,
         services: activeLines.map(function(sl) { return { name: sl.service, price_cents: sl.price_cents || 0, type: 'service', techId: sl.staff_id, color: sl.color, serviceLineId: sl.id }; }),
         serviceLineIds: activeLines.map(function(sl) { return sl.id; }),
+        appointmentId: firstLine.appointment_id || null,
       });
     } else {
       setCheckoutData({ cashierStaff: tech });
@@ -379,7 +395,7 @@ export default function App() {
 
   function renderPage() {
     switch (activePage) {
-      case 'calendar':       return <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} />;
+      case 'calendar':       return <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} onClockPunch={timeClock.handleClockPunch} onPresencePunch={timeClock.handlePresencePunch} />;
       case 'checkout':       return <CheckoutScreen appointmentData={checkoutData} onDone={function(){ setCheckoutData(null); if(activeTech){ handleBackToTechSelect(); } else { setActivePage('calendar'); } }} onCloseTicket={handleCloseTicket} onPrintHold={handlePrintHold} openTickets={openTickets} nextTicketNumber={nextTicketNumber} catalogLayout={grid.catalogLayout} drawerSession={drawer.drawerSession} salonSettings={salonSettings} onCashPayment={drawer.handleCashPaymentTracked} canProcessPayments={activeTech ? stationConfig.can_process_payments : true} />;
       case 'tickets':        return <TicketViewer closedTickets={closedTickets} openTickets={openTickets} onBack={function(){ setActivePage('calendar'); }} onReopen={handleReopenTicket} onOpenTicketCheckout={handleOpenTicketCheckout} onNewSale={function(){ setCheckoutData(null); setActivePage('checkout'); }} onUpdateTicketTips={handleUpdateTicketTips} onAddTicketTip={handleAddTicketTip} onVoid={handleVoidTicket} onRefund={handleRefundTicket} />;
       case 'clients':        return <ClientList onBack={function(){ setActivePage('calendar'); }} />;

@@ -33,7 +33,11 @@ function useCalendarPersist() {
       groups[key].lines.push(sl);
     });
 
-    Object.keys(groups).forEach(function(key) {
+    // If multiple groups (multi-tech booking), generate a shared booking_group_id
+    var groupKeys = Object.keys(groups);
+    var bookingGroupId = groupKeys.length > 1 ? ('bg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)) : null;
+
+    groupKeys.forEach(function(key) {
       var group = groups[key];
       var payload = {
         client_name: group.clientName,
@@ -41,6 +45,7 @@ function useCalendarPersist() {
         status: 'pending',
         source: 'staff',
         walk_in: false,
+        booking_group_id: bookingGroupId,
         service_lines: group.lines.map(function(sl) {
           return {
             service_catalog_id: sl.service_catalog_id || null,
