@@ -17,14 +17,23 @@
  * Database is NOT reachable during build — prisma db push runs at server startup instead.
  */
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, cpSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, cpSync, rmSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 var __dirname = dirname(fileURLToPath(import.meta.url));
 var serverRoot = join(__dirname, '..');
-var stationRoot = join(serverRoot, '..', 'prosalonpos-station');
 var publicDir = join(serverRoot, 'public');
+
+// Find the station folder — could be sibling (../prosalonpos-station) or
+// at various Railway/Railpack paths depending on Root Directory setting
+var stationRoot = null;
+var searchPaths = [
+  join(serverRoot, '..', 'prosalonpos-station'),   // sibling (Root Dir = blank)
+  join(serverRoot, 'prosalonpos-station'),          // nested inside server
+  '/app/prosalonpos-station',                       // Railpack absolute
+  '/prosalonpos-station',                           // root level
+];
 
 function run(cmd, cwd) {
   console.log('[build] > ' + cmd);
@@ -43,14 +52,32 @@ run('npx prisma generate');
 console.log('[build] ✅ Prisma client generated');
 console.log('');
 
-// ── Step 2: Check station folder exists ──
-console.log('[build] Step 2: Looking for frontend at ' + stationRoot);
-if (!existsSync(stationRoot)) {
-  console.error('[build] ❌ FATAL: prosalonpos-station folder not found!');
-  console.error('[build]    Make sure Railway Root Directory is BLANK (not /prosalonpos-server)');
+// ── Step 2: Find station folder ──
+console.log('[build] Step 2: Looking for frontend...');
+console.log('[build]    Server root: ' + serverRoot);
+console.log('[build]    Parent dir contents: ');
+try {
+  var parentContents = readdirSync(join(serverRoot, '..'));
+  console.log('[build]    ' + parentContents.join(', '));
+} catch(e) {
+  console.log('[build]    (could not read parent dir)');
+}
+
+for (var i = 0; i < searchPaths.length; i++) {
+  console.log('[build]    Checking: ' + searchPaths[i]);
+  if (existsSync(join(searchPaths[i], 'package.json'))) {
+    stationRoot = searchPaths[i];
+    console.log('[build]    ✅ Found!');
+    break;
+  }
+}
+
+if (!stationRoot) {
+  console.error('[build] ❌ FATAL: prosalonpos-station folder not found in any expected location!');
+  console.error('[build]    Searched: ' + searchPaths.join(', '));
   process.exit(1);
 }
-console.log('[build] ✅ Frontend folder found');
+console.log('[build] ✅ Frontend folder: ' + stationRoot);
 console.log('');
 
 // ── Step 3: Install frontend dependencies ──
