@@ -53,7 +53,7 @@ export default function ClientList({ onBack }) {
   var [newFirst, setNewFirst] = useState('');
   var [newLast, setNewLast] = useState('');
   var [newEmail, setNewEmail] = useState('');
-
+  var [saving, setSaving] = useState(false);
   // Numpad functions
   function padTap(d) { if (phoneDigits.length >= 10) return; setPhoneDigits(function(prev) { return prev + d; }); }
   function padDel() { setPhoneDigits(function(prev) { return prev.slice(0, -1); }); }
@@ -101,6 +101,8 @@ export default function ClientList({ onBack }) {
 
   function saveNewClient() {
     if (!newFirst.trim() || phoneDigits.length !== 10) return;
+    if (saving) return;
+    setSaving(true);
     var newClientData = {
       phone: '(' + phoneDigits.slice(0, 3) + ') ' + phoneDigits.slice(3, 6) + '-' + phoneDigits.slice(6, 10),
       first_name: newFirst.trim(), last_name: newLast.trim(),
@@ -110,9 +112,10 @@ export default function ClientList({ onBack }) {
     var result = createClientAction(newClientData);
     // Handle both sync (mock) and async (API) returns
     if (result && result.then) {
-      result.then(function(created) { if (created) setSelectedClient(created); });
+      result.then(function(created) { if (created) setSelectedClient(created); setSaving(false); }).catch(function() { setSaving(false); });
     } else if (result) {
       setSelectedClient(result);
+      setSaving(false);
     }
     // Also add locally for instant UI (before store refetches)
     var localClient = Object.assign({

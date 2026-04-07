@@ -162,6 +162,9 @@ export default function useGridLayoutState(salonSettings, handleSettingsUpdate, 
       return;
     }
     if (_restoringGrid.current) return;
+    // Don't save empty layouts — wait until categories and services have populated
+    if (storeCategories.length > 0 && storeServices.length > 0 && Object.keys(svcCatSlots).length === 0) return;
+    if (storeCategories.length > 0 && storeServices.length > 0 && Object.keys(svcSlots).length === 0) return;
     gridPersist.save({
       catSlots: svcCatSlots, svcSlots: svcSlots, empSlots: empSlots,
       svcCatColumns: svcCatColumns, svcCatRows: svcCatRows, svcGridColumns: svcGridColumns, svcGridRows: svcGridRows,

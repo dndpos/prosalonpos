@@ -130,9 +130,9 @@ export default function ServiceGrid({
                 <span style={{ color: '#64748B', fontSize: 'clamp(10px, 1vw, 13px)' }}>{svc.default_duration_minutes} min</span>
               )}
             </div>
-            {/* Badges (edit mode only) */}
+            {/* Badges (edit mode only) — absolute so they don't affect card height */}
             {isEdit && (isInact || !svc.online_booking_enabled || svc.requires_room || (svc.category_ids && svc.category_ids.length > 1)) && (
-              <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+              <div style={{ position: 'absolute', bottom: 4, left: 8, right: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {isInact && <Badge color="#EF4444" label="Inactive" />}
                 {!svc.online_booking_enabled && <Badge color="#64748B" label="No Online" />}
                 {svc.requires_room && <Badge color="#8B5CF6" label="Room" />}
