@@ -44,6 +44,7 @@ function generateSalonCode() {
 async function bootstrapSalon(salonName, licenseKey) {
   // Check if salon already exists
   var existing = await prisma.salon.findFirst();
+  console.log('[Bootstrap] findFirst result: ' + (existing ? 'FOUND salon id=' + existing.id + ' code=' + existing.salon_code : 'NULL — no salon'));
 
   if (existing) {
     // Ensure owner_pin_hash exists
@@ -175,21 +176,37 @@ async function bootstrapSalon(salonName, licenseKey) {
   var salonCode = generateSalonCode();
   var name = salonName || 'My Salon';
 
-  var salon = await prisma.salon.create({
-    data: {
-      name: name,
-      salon_code: salonCode,
-      license_key: licenseKey || null,
-      owner_pin_hash: hashPin('0000'),
-      owner_pin_sha256: pinSha256('0000'),
-    },
-  });
+  console.log('[Bootstrap] No salon found — creating new salon...');
+  console.log('[Bootstrap]   name: ' + name + ', code: ' + salonCode);
 
-  console.log('[Bootstrap] Salon created: "' + name + '" (code: ' + salonCode + ')');
+  var salon;
+  try {
+    salon = await prisma.salon.create({
+      data: {
+        name: name,
+        salon_code: salonCode,
+        license_key: licenseKey || null,
+        owner_pin_hash: hashPin('0000'),
+        owner_pin_sha256: pinSha256('0000'),
+      },
+    });
+    console.log('[Bootstrap] ✅ Salon record created — id: ' + salon.id);
+  } catch (createErr) {
+    console.error('[Bootstrap] ❌ salon.create FAILED:', createErr.message);
+    console.error(createErr.stack);
+    throw createErr;
+  }
+
   console.log('[Bootstrap] Default owner PIN: 0000');
 
   // Seed default data
-  await seedDefaultData(salon.id);
+  try {
+    await seedDefaultData(salon.id);
+  } catch (seedErr) {
+    console.error('[Bootstrap] ❌ seedDefaultData FAILED:', seedErr.message);
+    console.error(seedErr.stack);
+    throw seedErr;
+  }
 
   return { salon: salon, created: true, seeded: true };
 }
