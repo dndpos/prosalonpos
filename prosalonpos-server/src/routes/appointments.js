@@ -271,4 +271,24 @@ router.delete('/:id', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── DELETE /bulk/all — Hard delete ALL appointments for this salon (owner only) ──
+router.delete('/bulk/all', async function(req, res, next) {
+  try {
+    if (req.staff_role !== 'owner') {
+      return res.status(403).json({ error: 'Only the owner can bulk delete appointments' });
+    }
+    var appts = await prisma.appointment.findMany({
+      where: { salon_id: req.salon_id },
+      select: { id: true },
+    });
+    var apptIds = appts.map(function(a) { return a.id; });
+    if (apptIds.length === 0) return res.json({ success: true, deleted: 0 });
+    await prisma.serviceLine.deleteMany({ where: { appointment_id: { in: apptIds } } });
+    var result = await prisma.appointment.deleteMany({ where: { salon_id: req.salon_id } });
+    console.log('[Appointments] Bulk deleted', result.count, 'appointments for salon', req.salon_id);
+    emit(req, 'appointment:deleted');
+    res.json({ success: true, deleted: result.count });
+  } catch (err) { next(err); }
+});
+
 export default router;
