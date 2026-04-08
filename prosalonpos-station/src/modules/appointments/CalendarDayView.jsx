@@ -118,6 +118,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   var storeServiceLines = useAppointmentStore(function(s){ return s.serviceLines; });
   var storeInitialized = useAppointmentStore(function(s){ return s.initialized; });
   var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
+  var _fetchRef = useRef(fetchServiceLines);
+  _fetchRef.current = fetchServiceLines;
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
   // Optimistic lock: when local state is updated by user action (drag, status change),
   // suppress store→local sync for 2s to prevent socket-triggered refetch from
@@ -132,12 +134,12 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     if (Date.now() < _optimisticLock.current) return;
     setServiceLines(storeServiceLines);
   },[storeServiceLines]);
-  // Fetch service lines when date changes
+  // Fetch service lines when date changes (only selectedDate triggers this)
   useEffect(function(){
     var d = selectedDate;
     var dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    fetchServiceLines(dateStr);
-  },[selectedDate, fetchServiceLines]);
+    _fetchRef.current(dateStr);
+  },[selectedDate]);
 
   const[waitlist,setWaitlist]=useState([]);
   const _initTechs=useMemo(function(){
