@@ -75,5 +75,3 @@ Push to GitHub → Railway auto-deploys → build script rebuilds frontend + pus
 - **Salon code:** 7AVM8Z
 - **Owner PIN:** 0000
 - **Manager PIN:** 1234
-
-<!-- C6: merge-and-close endpoint -->
