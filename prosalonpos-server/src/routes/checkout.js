@@ -261,7 +261,7 @@ router.post('/tickets/:id/close', async function(req, res, next) {
       }).catch(function() {}); // non-fatal
       await prisma.serviceLine.updateMany({
         where: { appointment_id: apptId },
-        data: { status: 'checked_out' },
+        data: { status: 'checked_out', payment_method: data.payment_method || null },
       }).catch(function() {}); // non-fatal
       emit(req, 'appointment:updated');
     }
@@ -497,7 +497,7 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       }).catch(function() {}); // non-fatal — frontend also does this
       await prisma.serviceLine.updateMany({
         where: { appointment_id: data.appointment_id },
-        data: { status: 'checked_out' },
+        data: { status: 'checked_out', payment_method: data.payment_method || null },
       }).catch(function() {}); // non-fatal
       emit(req, 'appointment:updated');
     }

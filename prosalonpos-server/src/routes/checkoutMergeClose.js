@@ -120,7 +120,7 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
         });
         await tx.serviceLine.updateMany({
           where: { appointment_id: uniqueApptIds[k] },
-          data: { status: 'checked_out' },
+          data: { status: 'checked_out', payment_method: closeData.payment_method || null },
         });
       }
 
