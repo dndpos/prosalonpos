@@ -115,6 +115,18 @@ app.get('/api/health', function(req, res) {
   res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() });
 });
 
+// ── Request timing — log slow API calls (>500ms target) ──
+app.use('/api/', function(req, res, next) {
+  var start = Date.now();
+  res.on('finish', function() {
+    var elapsed = Date.now() - start;
+    if (elapsed > 500) {
+      console.warn('[SLOW API] ' + req.method + ' ' + req.originalUrl + ' ' + elapsed + 'ms (status: ' + res.statusCode + ')');
+    }
+  });
+  next();
+});
+
 // ── Public routes (no auth required) ──
 app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
@@ -255,6 +267,15 @@ httpServer.listen(PORT, async function() {
   }
 
   console.log('');
+
+  // ── Warm up Prisma connection pool so first real request isn't slow ──
+  try {
+    var warmStart = Date.now();
+    await prisma.$queryRaw`SELECT 1`;
+    console.log('[DB] Connection pool warmed up in ' + (Date.now() - warmStart) + 'ms');
+  } catch (e) {
+    console.warn('[DB] Warmup failed:', e.message);
+  }
 
   // ── Auto-bootstrap: ensure salon + default data exist ──
   // Runs in ALL modes (dev, cloud, .exe). On a fresh database, creates
