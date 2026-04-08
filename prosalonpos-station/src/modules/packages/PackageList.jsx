@@ -190,19 +190,20 @@ export default function PackageList({ services: propServices, categories: propCa
     });
 
     try {
-      if (editing.id) {
-        // Update existing
-        await updatePackageApi(editing.id, editing, apiItems);
+      // Close editor immediately (optimistic)
+      var savedEditing = Object.assign({}, editing);
+      var savedItems = apiItems.slice();
+      setEditing(null);
+      setEditItems([]);
+      if (savedEditing.id) {
+        await updatePackageApi(savedEditing.id, savedEditing, savedItems);
       } else {
-        // Create new
-        await createPackageApi(editing, apiItems);
+        await createPackageApi(savedEditing, savedItems);
       }
       toast.show('Package saved.', 'success');
     } catch (err) {
       toast.show('Failed to save package: ' + (err.message || 'Unknown error'), 'error');
     }
-    setEditing(null);
-    setEditItems([]);
   }
 
   async function handleToggleActive(pkg) {

@@ -23,6 +23,9 @@
 import { create } from 'zustand';
 import { api, isBackendAvailable, checkBackend } from '../apiClient';
 
+var _lastCrudTs = 0;
+var CRUD_COOLDOWN = 800;
+
 function normalizeServiceLine(sl) {
   if (sl._normalized) return sl;
 
@@ -74,6 +77,8 @@ var useAppointmentStore = create(function(set, get) {
     // ─── Actions ───
 
     fetchServiceLines: async function(dateStr) {
+      // Skip if a local CRUD just happened (socket echo)
+      if (Date.now() - _lastCrudTs < CRUD_COOLDOWN) return;
       if (isBackendAvailable() === false) {
         set({ initialized: true, source: 'error', error: 'Server not available', loadedDate: dateStr || 'today' });
         return;

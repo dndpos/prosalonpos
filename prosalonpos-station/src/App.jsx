@@ -462,8 +462,8 @@ export default function App() {
         </div>
       )}
       <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {/* Calendar is always mounted — hidden via display:none when not active */}
-        <div style={{ display: _calendarHidden ? 'none' : 'contents' }}>
+        {/* Calendar is always mounted — hidden offscreen when not active to avoid repaint flash */}
+        <div style={_calendarHidden ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, visibility: 'hidden', pointerEvents: 'none' } : { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
           <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} onClockPunch={timeClock.handleClockPunch} onPresencePunch={timeClock.handlePresencePunch} />
         </div>
         {/* Other pages render on top (unmount when navigating away) */}

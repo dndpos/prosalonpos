@@ -277,22 +277,26 @@ router.put('/:id', async function(req, res, next) {
       include: { service_staff: true }
     });
 
-    // Handle assigned_service_ids if provided (replace all assignments)
+    // Handle assigned_service_ids if provided — only update if changed
     if (data.assigned_service_ids !== undefined) {
-      // Delete existing assignments
-      await prisma.serviceStaffAssignment.deleteMany({
-        where: { staff_id: req.params.id }
-      });
-      // Create new assignments
-      var assignedIds = data.assigned_service_ids || [];
-      if (assignedIds.length > 0) {
-        await prisma.serviceStaffAssignment.createMany({
-          data: assignedIds.map(function(svcId) {
-            return { service_catalog_id: svcId, staff_id: req.params.id };
-          })
+      var existingIds = (s.service_staff || []).map(function(ss) { return ss.service_catalog_id; }).sort();
+      var newIds = (data.assigned_service_ids || []).slice().sort();
+      var idsChanged = existingIds.length !== newIds.length || existingIds.some(function(id, i) { return id !== newIds[i]; });
+      if (idsChanged) {
+        // Delete existing assignments
+        await prisma.serviceStaffAssignment.deleteMany({
+          where: { staff_id: req.params.id }
         });
+        // Create new assignments
+        if (newIds.length > 0) {
+          await prisma.serviceStaffAssignment.createMany({
+            data: newIds.map(function(svcId) {
+              return { service_catalog_id: svcId, staff_id: req.params.id };
+            })
+          });
+        }
       }
-      s.assigned_service_ids = assignedIds;
+      s.assigned_service_ids = data.assigned_service_ids;
     } else {
       s.assigned_service_ids = (s.service_staff || []).map(function(ss) {
         return ss.service_catalog_id;
