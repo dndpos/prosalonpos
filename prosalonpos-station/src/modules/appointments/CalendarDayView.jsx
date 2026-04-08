@@ -67,7 +67,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         if (s.schedule && s.schedule[dayKey] && s.schedule[dayKey].enabled === false) return false;
         return true;
       })
-      .map(function(s) { return { id: s.id, display_name: s.display_name, photo_url: s.photo_url || null }; });
+      .map(function(s) { return { id: s.id, display_name: s.display_name, photo_url: s.photo_url || null }; })
+      .sort(function(a, b) { return (a.display_name || '').localeCompare(b.display_name || ''); });
   }, [_storeStaff, selectedDate, _clockedInIds]);
   const[activeTab,setActiveTab]=useState('waitlist');
   const[visibleCols,setVisibleCols]=useState(STAFF.length);
