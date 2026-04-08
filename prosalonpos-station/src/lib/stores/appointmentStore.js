@@ -93,17 +93,46 @@ var useAppointmentStore = create(function(set, get) {
       var isSameDate = state.loadedDate === dateStr;
       var hasLoaded = state.initialized && isSameDate;
       var showLoading = !hasLoaded;
-      set({ loading: showLoading, refreshing: true, error: null });
+      // Only set loading if we actually need to show skeleton (first load / date change).
+      // For silent refreshes, don't touch loading at all — prevents spinner flash.
+      if (showLoading) {
+        set({ loading: true, refreshing: true, error: null });
+      } else {
+        set({ refreshing: true, error: null });
+      }
       try {
         var data = await api.get('/appointments/service-lines?start=' + dateStr + '&end=' + dateStr);
-        set({
-          serviceLines: normalizeAll(data.serviceLines),
+        var newLines = normalizeAll(data.serviceLines);
+        // Skip replacing serviceLines if data hasn't changed (same IDs in same order).
+        // This prevents unnecessary re-renders from socket-triggered refetches.
+        var oldLines = get().serviceLines;
+        var changed = newLines.length !== oldLines.length;
+        if (!changed) {
+          for (var i = 0; i < newLines.length; i++) {
+            if (newLines[i].id !== oldLines[i].id || 
+                newLines[i].status !== oldLines[i].status ||
+                newLines[i].staff_id !== oldLines[i].staff_id ||
+                newLines[i].starts_at.getTime() !== oldLines[i].starts_at.getTime() ||
+                newLines[i].dur !== oldLines[i].dur ||
+                newLines[i].price_cents !== oldLines[i].price_cents ||
+                newLines[i].client !== oldLines[i].client ||
+                newLines[i].service !== oldLines[i].service) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        var updates = {
           loading: false,
           refreshing: false,
           source: 'api',
           initialized: true,
           loadedDate: dateStr,
-        });
+        };
+        if (changed) {
+          updates.serviceLines = newLines;
+        }
+        set(updates);
       } catch (err) {
         set({ loading: false, refreshing: false, error: err.message, initialized: true, source: 'error' });
       }
