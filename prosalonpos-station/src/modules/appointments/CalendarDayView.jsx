@@ -114,48 +114,65 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     });
     return result;
   },[staffOrder, STAFF]);
-  // ── Service lines from appointment store ──
-  var storeServiceLines = useAppointmentStore(function(s){ return s.serviceLines; });
+  // ── Service lines — owned locally, fetched directly via API ──
+  // CalendarDayView does NOT subscribe to the appointment store's serviceLines.
+  // This prevents socket-triggered refetches from causing re-render storms.
+  // The store is still used by other screens; this screen manages its own data.
+  var persist = useCalendarPersist();
   var storeInitialized = useAppointmentStore(function(s){ return s.initialized; });
-  var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
-  const[serviceLines,setServiceLines]=useState(storeServiceLines);
-  // Optimistic lock: when local state is updated by user action (drag, status change),
-  // suppress store→local sync for 2s to prevent socket-triggered refetch from
-  // causing a re-render flash. The lock ref is set by setServiceLinesLocal.
-  var _optimisticLock = useRef(0);
-  var setServiceLinesLocal = function(updater) {
-    _optimisticLock.current = Date.now() + 2000;
-    setServiceLines(updater);
-  };
-  // Sync from store → local state (suppressed during optimistic window)
-  useEffect(function(){
-    if (Date.now() < _optimisticLock.current) return;
-    setServiceLines(storeServiceLines);
-  },[storeServiceLines]);
-  // Fetch service lines when date changes
+  const[serviceLines,setServiceLines]=useState([]);
+  var _fetchRef = useRef(null);
+  // Fetch on mount and date change — direct API call, no store involvement
   useEffect(function(){
     var d = selectedDate;
     var dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    fetchServiceLines(dateStr);
-  },[selectedDate, fetchServiceLines]);
+    var ctrl = new AbortController();
+    _fetchRef.current = dateStr;
+    import('../../lib/apiClient').then(function(mod) {
+      mod.api.get('/appointments/service-lines?start=' + dateStr + '&end=' + dateStr).then(function(data) {
+        if (_fetchRef.current !== dateStr) return; // stale
+        var lines = (data.serviceLines || []).map(function(sl) {
+          var startsAt = typeof sl.starts_at === 'string' ? new Date(sl.starts_at) : sl.starts_at;
+          return {
+            id: sl.id, appointment_id: sl.appointment_id, service_catalog_id: sl.service_catalog_id,
+            staff_id: sl.staff_id, status: sl.status, requested: !!sl.requested,
+            price_cents: sl.price_cents || 0, open_price: !!sl.open_price,
+            client_id: sl.client_id || null, source: sl.source || null, notes: sl.notes || null,
+            bookingId: sl.bookingId || null, note: sl.note || '', payment_method: sl.payment_method || null,
+            starts_at: startsAt, dur: sl.duration_minutes != null ? sl.duration_minutes : (sl.dur || 30),
+            color: sl.calendar_color || sl.color || '#3B82F6',
+            client: sl.client_name || sl.client || 'Walk-in',
+            service: sl.service_name || sl.service || 'Service',
+            is_vip: !!sl.is_vip, _normalized: true,
+          };
+        });
+        setServiceLines(lines);
+      }).catch(function() {});
+    });
+    return function() { ctrl.abort(); };
+  },[selectedDate]);
+  // Optimistic setter for drag/status/booking actions
+  var setServiceLinesLocal = function(updater) {
+    setServiceLines(updater);
+  };
 
   const[waitlist,setWaitlist]=useState([]);
   const _initTechs=useMemo(function(){
     var busyIds={};
-    storeServiceLines.forEach(function(sl){ if(sl.status==='in_progress') busyIds[sl.staff_id]=true; });
+    serviceLines.forEach(function(sl){ if(sl.status==='in_progress') busyIds[sl.staff_id]=true; });
     var eligible = STAFF.filter(function(t) { return _clockedInIds[t.id] || busyIds[t.id]; });
     var pos=1;
     return eligible.map(function(t,i){
       var isBusy=!!busyIds[t.id];
       return{id:t.id,name:t.display_name||t.name||'',photo_url:t.photo_url||null,status:isBusy?'busy':'available',position:isBusy?null:pos++,clockedInAt:Date.now()+i,dailyServiceCount:0,preservedPosition:null,lastFreeAt:Date.now()+i};
     });
-  },[storeServiceLines, _clockedInIds, STAFF]);
+  },[serviceLines, _clockedInIds, STAFF]);
   const[turnState,setTurnState]=useState({techs:_initTechs,turnLog:[]});
   useEffect(function() {
     setTurnState(function(prev) {
       var s = prev;
       var ids = {}; prev.techs.forEach(function(t) { ids[t.id] = t.status; });
-      var busyIds = {}; storeServiceLines.forEach(function(sl) { if (sl.status === 'in_progress') busyIds[sl.staff_id] = true; });
+      var busyIds = {}; serviceLines.forEach(function(sl) { if (sl.status === 'in_progress') busyIds[sl.staff_id] = true; });
       Object.keys(_clockedInIds).forEach(function(sid) {
         if (!ids[sid] || ids[sid] === 'off') {
           var st = STAFF.find(function(x) { return x.id === sid; });
@@ -172,7 +189,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
       });
       return s;
     });
-  }, [_clockedInIds, STAFF, storeServiceLines]);
+  }, [_clockedInIds, STAFF, serviceLines]);
   // Derive flat techTurn array with mode-aware positions for UI
   const techTurn=useMemo(function(){
     var sorted=TurnEngine.getAvailableQueue(turnState,_settings);
