@@ -2,6 +2,7 @@ import AreaTag from '../../components/ui/AreaTag';
 import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/ToastContext';
 import { useStaffStore } from '../../lib/stores/staffStore';
+import { suppressNext } from '../../lib/socket';
 /**
  * EmployeeManagementScreen.jsx
  * Module 5 — Staff Management (Owner-facing)
@@ -125,8 +126,11 @@ export default function EmployeeManagementScreen({
       rbac_role: data.rbac_role || editingEmployee.rbac_role, permissions: data.permissions,
     };
     if (data.pin) updates.pin = data.pin;
+    // Optimistic: close modal immediately, suppress self-originated socket event
+    setEditingEmployee(null);
+    suppressNext('staff:updated', 3000);
     staffActions.updateStaff(editingEmployee.id, updates).then(function() {
-      setEditingEmployee(null);
+      // Success — store already updated optimistically
     }).catch(function(err) {
       toast.show(err.message || 'Failed to save staff', 'error');
     });
@@ -152,11 +156,14 @@ export default function EmployeeManagementScreen({
       permission_overrides: data.permission_overrides || {},
       rbac_role: data.rbac_role || 'tech', permissions: data.permissions || {},
     };
+    // Optimistic: close the add slot immediately
+    var savedSlotIdx = addSlotIdx;
+    setAddSlotIdx(null);
+    suppressNext('staff:created', 3000);
     staffActions.createStaff(newStaffData).then(function(created) {
-      if (addSlotIdx !== null && created) {
-        setEmpSlots(function(prev) { var slots = { ...prev }; slots[addSlotIdx] = created.id; return slots; });
+      if (savedSlotIdx !== null && created) {
+        setEmpSlots(function(prev) { var slots = { ...prev }; slots[savedSlotIdx] = created.id; return slots; });
       }
-      setAddSlotIdx(null);
     }).catch(function(err) {
       toast.show(err.message || 'Failed to create staff', 'error');
     });

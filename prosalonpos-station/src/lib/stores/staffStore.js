@@ -52,13 +52,27 @@ var useStaffStore = create(function(set, get) {
     },
 
     updateStaff: async function(id, updates) {
-      var data = await api.put('/staff/' + id, updates);
+      // Optimistic: update local state immediately
+      var previousStaff = get().staff.map(function(emp) { return Object.assign({}, emp); });
       set(function(s) {
         return { staff: s.staff.map(function(emp) {
-          return emp.id === id ? Object.assign({}, emp, data.staff) : emp;
+          return emp.id === id ? Object.assign({}, emp, updates) : emp;
         })};
       });
-      return data.staff;
+      try {
+        var data = await api.put('/staff/' + id, updates);
+        // Merge server response (may include computed fields)
+        set(function(s) {
+          return { staff: s.staff.map(function(emp) {
+            return emp.id === id ? Object.assign({}, emp, data.staff) : emp;
+          })};
+        });
+        return data.staff;
+      } catch (err) {
+        // Rollback to previous state
+        set({ staff: previousStaff });
+        throw err;
+      }
     },
 
     deactivateStaff: async function(id) {

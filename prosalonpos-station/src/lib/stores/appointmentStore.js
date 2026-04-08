@@ -86,7 +86,12 @@ var useAppointmentStore = create(function(set, get) {
           String(today.getDate()).padStart(2, '0');
       }
 
-      set({ loading: true, error: null });
+      // Only show skeleton on initial load or date change.
+      // Background refetches (same date, already have data) skip the loading flash.
+      var isInitial = !get().initialized || get().loadedDate !== dateStr;
+      if (isInitial) {
+        set({ loading: true, error: null });
+      }
       try {
         var data = await api.get('/appointments/service-lines?start=' + dateStr + '&end=' + dateStr);
         set({
