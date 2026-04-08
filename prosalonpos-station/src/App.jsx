@@ -201,9 +201,17 @@ export default function App() {
     onSocketEvent('settings:updated', function() { fetchSettings(); });
     onSocketEvent('client:created', function() { fetchClients(); });
     onSocketEvent('client:updated', function() { fetchClients(); });
-    onSocketEvent('appointment:created', function() { fetchServiceLines(); });
-    onSocketEvent('appointment:updated', function() { fetchServiceLines(); });
-    onSocketEvent('appointment:deleted', function() { fetchServiceLines(); });
+    // Debounce appointment socket events — server broadcasts back to sender,
+    // causing unnecessary refetch after every local action. Debounce collapses
+    // rapid events into one fetch 1s after the last event.
+    var _apptDebounce = null;
+    function debouncedFetchSL() {
+      if (_apptDebounce) clearTimeout(_apptDebounce);
+      _apptDebounce = setTimeout(function() { fetchServiceLines(); }, 1000);
+    }
+    onSocketEvent('appointment:created', debouncedFetchSL);
+    onSocketEvent('appointment:updated', debouncedFetchSL);
+    onSocketEvent('appointment:deleted', debouncedFetchSL);
     onSocketEvent('ticket:created', function() { fetchTickets(); });
     onSocketEvent('ticket:updated', function() { fetchTickets(); });
     onSocketEvent('ticket:closed', function() { fetchTickets(); });
