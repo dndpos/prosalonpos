@@ -31,6 +31,8 @@ import useCalendarDrag from './useCalendarDrag';
 import useCalendarPersist from './useCalendarPersist';
 import useCalendarHandlers from './useCalendarHandlers';
 import CalendarOverlays from './CalendarOverlays';
+import StaticGridLines from './StaticGridLines';
+import DateStatusDot from './DateStatusDot';
 import AreaTag from '../../components/ui/AreaTag';
 export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout, catalogLayout, salonSettings, onNavClick, onOwnerClick, unviewedCount, openTicketCount, drawerSession, onCashierClick, hasHourlyStaff, onTimeClockClick, clockPunches, presenceRecords, onClockPunch, onPresencePunch }){
   var C = useTheme();
@@ -114,8 +116,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   },[staffOrder, STAFF]);
   // ── Service lines from appointment store ──
   var storeServiceLines = useAppointmentStore(function(s){ return s.serviceLines; });
-  var storeLoading = useAppointmentStore(function(s){ return s.loading; });
-  var storeSource = useAppointmentStore(function(s){ return s.source; });
+  var storeInitialized = useAppointmentStore(function(s){ return s.initialized; });
   var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
   // Optimistic lock: when local state is updated by user action (drag, status change),
@@ -371,8 +372,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         <button onClick={()=>shiftDate(-1)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'4px 8px'}}>‹</button>
         <div style={{color:C.textPrimary,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:6}}>
           {dayShort}
-          {storeLoading&&<span style={{display:'inline-block',width:14,height:14,border:'2px solid '+C.borderMedium,borderTopColor:C.blueLight,borderRadius:'50%',animation:'spinDate 0.6s linear infinite'}}/> }
-          {!storeLoading&&<span title={storeSource==='api'?'Live data':'Mock data'} style={{width:7,height:7,borderRadius:'50%',background:storeSource==='api'?'#22C55E':'#EAB308',flexShrink:0}}/>}
+          <DateStatusDot />
         </div>
         <button onClick={()=>shiftDate(1)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'4px 8px'}}>›</button>
         <button onClick={()=>setSelectedDate(new Date())}
@@ -491,19 +491,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
               onContextMenu={handleContextMenu}
               style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto',contain:'style layout'}}>
               <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%'}}>
-                {/* GRID LINES */}
-                {Array.from({length:totalRows},(_,i)=>{
-                  const min=gridStartMin+i*15;const m=min%60;
-                  const isHour=m===0,isHalf=m===30;const yPos=i*ROW_H;
-                  let borderTop;
-                  if(isHour){borderTop=`2px solid ${C.gridLineHour}`;}
-                  else if(isHalf){borderTop=`1px dashed ${C.gridLineHalf}`;}
-                  else{borderTop=`1px solid ${C.gridLineQuarter}`;}
-                  return(<div key={'g'+i} style={{position:'absolute',top:yPos,left:0,right:0,height:ROW_H,borderTop}}/>);
-                })}
-                {/* COLUMN DIVIDERS */}
-                {colW>0&&visibleStaff.map((_,i)=>{if(i===0)return null;return(<div key={`vd-${i}`} style={{position:'absolute',top:0,bottom:0,left:i*colW,width:0,borderLeft:`1px solid ${C.colDivider}`,zIndex:1,pointerEvents:'none'}}/>);})}
-                {colW>0&&<div style={{position:'absolute',top:0,bottom:0,left:visibleStaff.length*colW,width:0,borderLeft:`1px solid ${C.colDivider}`,zIndex:1,pointerEvents:'none'}}/>}                {/* DRAG PREVIEW */}
+                <StaticGridLines totalRows={totalRows} gridStartMin={gridStartMin} ROW_H={ROW_H} colW={colW} staffCount={visibleStaff.length} />
+                {/* DRAG PREVIEW */}
                 {dragging&&dragPreview&&colW>0&&(()=>{
                   const sl=serviceLines.find(s=>s.id===dragging.slId);if(!sl)return null;
                   const topPx=((dragPreview.startMin-gridStartMin)/15)*ROW_H;
@@ -516,7 +505,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
                   </div>);
                 })()}
                 {/* APPOINTMENT BLOCKS */}
-                {storeLoading&&serviceLines.length===0&&colW>0&&(
+                {!storeInitialized&&serviceLines.length===0&&colW>0&&(
                   <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,zIndex:4,pointerEvents:'none'}}>
                     {visibleStaff.map(function(_s,ci){
                       // 3 skeleton bars per column at staggered positions
@@ -543,7 +532,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
                     })}
                   </div>
                 )}
-                {(!storeLoading||serviceLines.length>0)&&<AppointmentBlocks serviceLines={serviceLines} blockedTimes={blockedTimes} visibleStaff={visibleStaff} colW={colW} gridStartMin={gridStartMin} ROW_H={ROW_H} colLeftPx={function(idx){return idx*colW;}} dragging={dragging} onBlockStart={handleBlockStart} onBlockClick={function(b){setSelectedBlock(b);}} autoRequestMode={!!_settings.auto_request_mode}/>}
+                <AppointmentBlocks serviceLines={serviceLines} blockedTimes={blockedTimes} visibleStaff={visibleStaff} colW={colW} gridStartMin={gridStartMin} ROW_H={ROW_H} colLeftPx={function(idx){return idx*colW;}} dragging={dragging} onBlockStart={handleBlockStart} onBlockClick={function(b){setSelectedBlock(b);}} autoRequestMode={!!_settings.auto_request_mode}/>
                 {/* NOW LINE */}
                 {showNow&&(<div style={{position:'absolute',top:nowY,left:-6,right:0,zIndex:10,pointerEvents:'none',display:'flex',alignItems:'center'}}><div style={{width:10,height:10,borderRadius:'50%',background:C.nowLine,flexShrink:0}}/><div style={{flex:1,height:2,background:C.nowLine}}/></div>)}
               </div>
