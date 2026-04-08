@@ -21,8 +21,10 @@ var useInventoryStore = create(function(set, get) {
 
       set({ loading: true, error: null });
       try {
-        var data = await api.get('/inventory/products');
-        var catData = await api.get('/inventory/categories');
+        var [data, catData] = await Promise.all([
+          api.get('/inventory/products'),
+          api.get('/inventory/categories')
+        ]);
         set({ products: data.products || [], categories: catData.categories || [], loading: false, source: 'api', initialized: true });
       } catch (err) { set({ loading: false, error: err.message, initialized: true, source: 'error' }); }
     },

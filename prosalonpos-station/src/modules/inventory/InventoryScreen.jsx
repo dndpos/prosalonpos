@@ -209,14 +209,14 @@ export default function InventoryScreen() {
   }
 
   async function handleSaveProduct(data) {
+    setEditingProduct(null);
     try {
       if (editingProduct === 'new') {
         await createProduct(Object.assign({ category_id: activeCat }, data));
       } else {
         await updateProduct(editingProduct.id, data);
       }
-    } catch (err) { console.error('[Inventory] Save product failed:', err.message); }
-    setEditingProduct(null);
+    } catch (err) { toast.show('Failed to save product: ' + (err.message || 'Unknown'), 'error'); }
   }
 
   async function handleDeleteProduct(prodId) {

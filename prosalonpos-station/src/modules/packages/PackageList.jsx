@@ -189,20 +189,20 @@ export default function PackageList({ services: propServices, categories: propCa
       return { service_id: item.service_id, service_name: item.service_name, quantity: item.quantity || 1 };
     });
 
+    var _editing = editing;
+    setEditing(null);
+    setEditItems([]);
+
     try {
-      if (editing.id) {
-        // Update existing
-        await updatePackageApi(editing.id, editing, apiItems);
+      if (_editing.id) {
+        await updatePackageApi(_editing.id, _editing, apiItems);
       } else {
-        // Create new
-        await createPackageApi(editing, apiItems);
+        await createPackageApi(_editing, apiItems);
       }
       toast.show('Package saved.', 'success');
     } catch (err) {
       toast.show('Failed to save package: ' + (err.message || 'Unknown error'), 'error');
     }
-    setEditing(null);
-    setEditItems([]);
   }
 
   async function handleToggleActive(pkg) {

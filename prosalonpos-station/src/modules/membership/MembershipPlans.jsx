@@ -365,21 +365,20 @@ export default function MembershipPlans({ catalogLayout }) {
     if (ep._isNew) {
       storeCreatePlan(payload).then(function(plan) {
         toast.show('Plan created', 'success');
-        setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       }).catch(function(err) { console.error('[MembershipPlans] Create FAILED:', err); toast.show('Save failed: ' + err.message, 'error'); });
     } else {
       storeUpdatePlan(ep.id, payload).then(function(plan) {
         toast.show('Plan updated', 'success');
-        setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       }).catch(function(err) { console.error('[MembershipPlans] Update FAILED:', err); toast.show('Save failed: ' + err.message, 'error'); });
     }
+    setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
   }
 
   function deletePlan() {
     toast.confirm('Delete this plan? This cannot be undone.', function() {
+      setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       storeDeletePlan(ep.id).then(function() {
         toast.show('Plan deleted', 'success');
-        setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       }).catch(function(err) { console.error('[MembershipPlans] Delete FAILED:', err); toast.show('Delete failed: ' + err.message, 'error'); });
     });
   }

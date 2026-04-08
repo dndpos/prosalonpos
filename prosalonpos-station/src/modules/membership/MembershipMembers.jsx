@@ -83,42 +83,42 @@ export default function MembershipMembers() {
     return { active: active, frozen: frozen, totalCredit: totalCredit, revenue: revenue };
   }, [members]);
 
-  // Actions — call store API, then refresh
+  // Actions — update local state immediately, API in background
   function handleFreeze(memberId, until) {
-    storeUpdateMember(memberId, { status: 'frozen' }).then(function() {
-      toast.show('Membership frozen', 'success');
-      if (selectedMember && selectedMember.id === memberId) {
-        setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'frozen', freeze_until: until }); });
-      }
-    }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
+    if (selectedMember && selectedMember.id === memberId) {
+      setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'frozen', freeze_until: until }); });
+    }
     setShowFreezePopup(false);
     setFreezeDateStr('');
+    storeUpdateMember(memberId, { status: 'frozen' }).then(function() {
+      toast.show('Membership frozen', 'success');
+    }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
   }
 
   function handleUnfreeze(memberId) {
+    if (selectedMember && selectedMember.id === memberId) {
+      setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'active', freeze_until: null }); });
+    }
     storeUpdateMember(memberId, { status: 'active' }).then(function() {
       toast.show('Membership reactivated', 'success');
-      if (selectedMember && selectedMember.id === memberId) {
-        setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'active', freeze_until: null }); });
-      }
     }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
   }
 
   function handleCancel(memberId) {
+    if (selectedMember && selectedMember.id === memberId) {
+      setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'cancelled', cancelled_at: new Date().toISOString() }); });
+    }
     storeUpdateMember(memberId, { status: 'cancelled' }).then(function() {
       toast.show('Membership cancelled', 'success');
-      if (selectedMember && selectedMember.id === memberId) {
-        setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'cancelled', cancelled_at: new Date().toISOString() }); });
-      }
     }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
   }
 
   function handleReactivate(memberId) {
+    if (selectedMember && selectedMember.id === memberId) {
+      setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'active', cancelled_at: null, freeze_until: null }); });
+    }
     storeUpdateMember(memberId, { status: 'active' }).then(function() {
       toast.show('Membership reactivated', 'success');
-      if (selectedMember && selectedMember.id === memberId) {
-        setSelectedMember(function(prev) { return Object.assign({}, prev, { status: 'active', cancelled_at: null, freeze_until: null }); });
-      }
     }).catch(function(err) { toast.show('Failed: ' + err.message, 'error'); });
   }
 

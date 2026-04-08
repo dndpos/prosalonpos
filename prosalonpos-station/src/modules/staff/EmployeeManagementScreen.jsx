@@ -125,11 +125,10 @@ export default function EmployeeManagementScreen({
       rbac_role: data.rbac_role || editingEmployee.rbac_role, permissions: data.permissions,
     };
     if (data.pin) updates.pin = data.pin;
-    staffActions.updateStaff(editingEmployee.id, updates).then(function() {
-      setEditingEmployee(null);
-    }).catch(function(err) {
+    staffActions.updateStaff(editingEmployee.id, updates).catch(function(err) {
       toast.show(err.message || 'Failed to save staff', 'error');
     });
+    setEditingEmployee(null);
   }
 
   function handleSaveNew(data) {
@@ -152,11 +151,12 @@ export default function EmployeeManagementScreen({
       permission_overrides: data.permission_overrides || {},
       rbac_role: data.rbac_role || 'tech', permissions: data.permissions || {},
     };
+    var _slotIdx = addSlotIdx;
+    setAddSlotIdx(null);
     staffActions.createStaff(newStaffData).then(function(created) {
-      if (addSlotIdx !== null && created) {
-        setEmpSlots(function(prev) { var slots = { ...prev }; slots[addSlotIdx] = created.id; return slots; });
+      if (_slotIdx !== null && created) {
+        setEmpSlots(function(prev) { var slots = { ...prev }; slots[_slotIdx] = created.id; return slots; });
       }
-      setAddSlotIdx(null);
     }).catch(function(err) {
       toast.show(err.message || 'Failed to create staff', 'error');
     });
