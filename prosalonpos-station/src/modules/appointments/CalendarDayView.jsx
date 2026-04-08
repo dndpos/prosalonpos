@@ -119,12 +119,13 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
   // Sync from store → local state — only when data actually changed.
-  // Fingerprint includes IDs + status + staff + time so cross-station changes sync,
-  // but same-station optimistic updates (same data, new references) don't cause re-renders.
+  // Fingerprint includes IDs + status + staff + time (minute precision) so cross-station
+  // changes sync, but same-station optimistic updates don't cause re-renders.
   var _prevStoreFpRef = useRef('');
   useEffect(function(){
     var fp = storeServiceLines.map(function(s){
-      return s.id + ':' + s.status + ':' + s.staff_id + ':' + (s.starts_at instanceof Date ? s.starts_at.getTime() : s.starts_at);
+      var mins = s.starts_at instanceof Date ? (s.starts_at.getHours() * 60 + s.starts_at.getMinutes()) : 0;
+      return s.id + ':' + s.status + ':' + s.staff_id + ':' + mins + ':' + s.dur;
     }).sort().join('|');
     if (fp !== _prevStoreFpRef.current) {
       _prevStoreFpRef.current = fp;

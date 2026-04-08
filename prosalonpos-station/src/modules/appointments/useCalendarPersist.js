@@ -81,9 +81,9 @@ function useCalendarPersist() {
       };
 
       api.post('/appointments', payload).then(function() {
-        // Success — local state is already correct. Refetch to get real IDs
-        // but use a quiet delay so it doesn't flash.
-        setTimeout(refetch, 500);
+        // Success — local state with temp IDs is already correct for display.
+        // Real IDs will sync naturally when another station triggers a socket event
+        // or on the next date change. No refetch needed.
       }).catch(function(err) {
         console.error('[CalendarPersist] Failed to save booking:', err.message);
         toast.show('Failed to save booking — refreshing calendar', 'error');
