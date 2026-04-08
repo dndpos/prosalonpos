@@ -86,7 +86,11 @@ var useAppointmentStore = create(function(set, get) {
           String(today.getDate()).padStart(2, '0');
       }
 
-      set({ loading: true, error: null });
+      // Only show loading on initial load or date change — not background refetches
+      var isFirstLoad = !get().initialized || get().loadedDate !== dateStr;
+      if (isFirstLoad) {
+        set({ loading: true, error: null });
+      }
       try {
         var data = await api.get('/appointments/service-lines?start=' + dateStr + '&end=' + dateStr);
         set({

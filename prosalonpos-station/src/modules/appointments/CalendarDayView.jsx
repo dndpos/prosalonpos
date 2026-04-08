@@ -118,8 +118,15 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   var storeSource = useAppointmentStore(function(s){ return s.source; });
   var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
-  // Sync from store → local state
-  useEffect(function(){ setServiceLines(storeServiceLines); },[storeServiceLines]);
+  // Sync from store → local state — only when actual data changed (not just new references)
+  var _prevIdSetRef = useRef('');
+  useEffect(function(){
+    var idSet = storeServiceLines.map(function(s){ return s.id; }).sort().join(',');
+    if (idSet !== _prevIdSetRef.current) {
+      _prevIdSetRef.current = idSet;
+      setServiceLines(storeServiceLines);
+    }
+  },[storeServiceLines]);
   // Fetch service lines when date changes
   useEffect(function(){
     var d = selectedDate;

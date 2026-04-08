@@ -387,9 +387,11 @@ export default function App() {
     setActivePage(method === 'pin' ? 'tech-pin' : 'tech-select');
   }
 
-  function renderPage() {
+  var _calHidden = activePage !== 'calendar';
+
+  function renderOtherPage() {
     switch (activePage) {
-      case 'calendar':       return <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} onClockPunch={timeClock.handleClockPunch} onPresencePunch={timeClock.handlePresencePunch} />;
+      case 'calendar':       return null;
       case 'checkout':       return <CheckoutScreen appointmentData={checkoutData} onDone={function(){ setCheckoutData(null); if(activeTech){ handleBackToTechSelect(); } else { setActivePage('calendar'); } }} onCloseTicket={handleCloseTicket} onPrintHold={handlePrintHold} openTickets={openTickets} nextTicketNumber={nextTicketNumber} catalogLayout={grid.catalogLayout} drawerSession={drawer.drawerSession} salonSettings={salonSettings} onCashPayment={drawer.handleCashPaymentTracked} canProcessPayments={activeTech ? stationConfig.can_process_payments : true} />;
       case 'tickets':        return <TicketViewer closedTickets={closedTickets} openTickets={openTickets} onBack={function(){ setActivePage('calendar'); }} onReopen={handleReopenTicket} onOpenTicketCheckout={handleOpenTicketCheckout} onNewSale={function(){ setCheckoutData(null); setActivePage('checkout'); }} onUpdateTicketTips={handleUpdateTicketTips} onAddTicketTip={handleAddTicketTip} onVoid={handleVoidTicket} onRefund={handleRefundTicket} />;
       case 'clients':        return <ClientList onBack={function(){ setActivePage('calendar'); }} />;
@@ -407,7 +409,7 @@ export default function App() {
       case 'dashboard':      return <OwnerDashboard salonSettings={salonSettings} onSettingsUpdate={handleSettingsUpdate} onBack={function(){ setShowOwner(false); setActivePage('calendar'); }} onLaunchStation={handleLaunchStation} onProviderAdmin={function(){ setActivePage('provider-admin'); }} employees={grid.empStaff} setEmployees={grid.setEmpStaff} empColumns={grid.empColumns} setEmpColumns={grid.setEmpColumns} empRows={grid.empRows} setEmpRows={grid.setEmpRows} empSlots={grid.empSlots} setEmpSlots={grid.setEmpSlots} catalogLayout={grid.catalogLayout} categories={grid.svcCatCategories} setCategories={grid.setSvcCatCategories} services={grid.svcCatServices} setServices={grid.setSvcCatServices} catColumns={grid.svcCatColumns} setCatColumns={grid.setSvcCatColumns} catRows={grid.svcCatRows} setCatRows={grid.setSvcCatRows} svcColumns={grid.svcGridColumns} setSvcColumns={grid.setSvcGridColumns} svcRows={grid.svcGridRows} setSvcRows={grid.setSvcGridRows} catSlots={grid.svcCatSlots} setCatSlots={grid.setSvcCatSlots} svcSlots={grid.svcSlots} setSvcSlots={grid.setSvcSlots} clockPunches={timeClock.clockPunches} onAddPunch={timeClock.handleAddManualPunch} onEditPunch={timeClock.handleEditPunch} onDeletePunch={timeClock.handleDeletePunch} />;
       case 'reports':        return <ReportsModule />;
       case 'provider-admin': return <ProviderAdminPanel onBack={function(){ setActivePage('dashboard'); }} />;
-      default:               return <CalendarDayView />;
+      default:               return null;
     }
   }
 
@@ -458,7 +460,10 @@ export default function App() {
         </div>
       )}
       <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {renderPage()}
+        <div style={_calHidden ? {position:'absolute',top:0,left:0,right:0,bottom:0,visibility:'hidden',pointerEvents:'none'} : {position:'absolute',top:0,left:0,right:0,bottom:0}}>
+          <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} onClockPunch={timeClock.handleClockPunch} onPresencePunch={timeClock.handlePresencePunch} />
+        </div>
+        {renderOtherPage()}
       </main>
       <OnlineBookingsPopup show={showOnlinePopup} bookings={onlineBookings} unviewedCount={unviewedCount} onClose={function() { setShowOnlinePopup(false); }} onBookingTap={handleBookingTap} onMarkAllViewed={handleMarkAllViewed} />
       <GiftCardBalancePopup giftCards={allGiftCards} enabled={activePage !== 'checkout'} />
