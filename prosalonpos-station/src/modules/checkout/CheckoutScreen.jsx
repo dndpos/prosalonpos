@@ -135,6 +135,7 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
   var [clientMembership, setClientMembership] = useState(null);
   var [membershipBanner, setMembershipBanner] = useState(null);
   var [showChangePayment, setShowChangePayment] = useState(false);
+  var [holdLocked, setHoldLocked] = useState(false);
   useEffect(function() {
     setClientMembership(null); setMembershipBanner(null);
     if (!client || !client.id) return;
@@ -728,7 +729,8 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
               </button>
               {items.length>0 && !isReopened && (
               <button onClick={function(){
-                if(!onPrintHold) return;
+                if(!onPrintHold || holdLocked) return;
+                setHoldLocked(true);
                 var tNum = nextTicketNumber ? nextTicketNumber() : 1;
                 onPrintHold({
                   id: appointmentData && appointmentData.openTicketId ? appointmentData.openTicketId : ('hold-'+Date.now()),
@@ -740,9 +742,9 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
                 });
                 onDone();
               }}
-                style={{height:38,background:'#1E3A5F',border:'1px solid #2D5A8E',borderRadius:6,color:'#60A5FA',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}
-                onMouseEnter={function(e){e.currentTarget.style.background='#264B75';}}
-                onMouseLeave={function(e){e.currentTarget.style.background='#1E3A5F';}}>
+                style={{height:38,background:holdLocked?'#0F2440':'#1E3A5F',border:'1px solid '+(holdLocked?'#1A3A5F':'#2D5A8E'),borderRadius:6,color:holdLocked?'#3B6A9E':'#60A5FA',fontSize:12,fontWeight:600,cursor:holdLocked?'not-allowed':'pointer',fontFamily:'inherit',opacity:holdLocked?0.5:1}}
+                onMouseEnter={function(e){if(!holdLocked)e.currentTarget.style.background='#264B75';}}
+                onMouseLeave={function(e){if(!holdLocked)e.currentTarget.style.background='#1E3A5F';}}>
                 📋 Hold
               </button>
               )}
