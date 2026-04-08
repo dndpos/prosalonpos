@@ -36,13 +36,14 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
   var [pinTable, setPinTable] = useState(null);
   var verifyAnyPin = useStaffStore(function(s) { return s.verifyAnyPin; });
   var storeSource = useStaffStore(function(s) { return s.source; });
+  var cachedPinTable = useStaffStore(function(s) { return s.pinTable; });
   var loggedIn = useRef(false);
   var digitsRef = useRef('');
 
   // Keep ref in sync for keyboard handler
   useEffect(function() { digitsRef.current = digits; }, [digits]);
 
-  // Reset state + load pin table when popup opens
+  // Reset state + use cached pin table when popup opens
   useEffect(function() {
     if (show) {
       setDigits('');
@@ -52,19 +53,25 @@ export default function PinPopup({ show, title, titleColor, staffList, onSuccess
       loggedIn.current = false;
 
       if (storeSource === 'api') {
-        var salonId = getPairedSalonId();
-        if (salonId) {
-          var base = window.location.port === '5173' ? 'http://localhost:3001' : window.location.origin;
-          fetch(base + '/api/v1/auth/pin-table/' + salonId)
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-              if (data.pinTable) setPinTable(data.pinTable);
-            })
-            .catch(function() {});
+        // Use cached pin table from bootstrap (instant — no network)
+        if (cachedPinTable) {
+          setPinTable(cachedPinTable);
+        } else {
+          // Fallback: fetch if bootstrap didn't include it
+          var salonId = getPairedSalonId();
+          if (salonId) {
+            var base = window.location.port === '5173' ? 'http://localhost:3001' : window.location.origin;
+            fetch(base + '/api/v1/auth/pin-table/' + salonId)
+              .then(function(r) { return r.json(); })
+              .then(function(data) {
+                if (data.pinTable) setPinTable(data.pinTable);
+              })
+              .catch(function() {});
+          }
         }
       }
     }
-  }, [show, storeSource]);
+  }, [show, storeSource, cachedPinTable]);
 
   function handleDigitDirect(d) {
     if (loggedIn.current || checking) return;

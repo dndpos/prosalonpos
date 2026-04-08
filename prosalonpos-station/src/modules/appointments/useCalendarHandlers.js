@@ -59,9 +59,11 @@ export default function useCalendarHandlers(ctx) {
   function applyStatusChange(sl, newStatus) {
     var oldLabel = (STATUS_CONFIG[sl.status] || {}).label || sl.status;
     var newLabel = (STATUS_CONFIG[newStatus] || {}).label || newStatus;
+    // Snapshot for rollback before optimistic update
+    var snapshot = serviceLines.slice();
     setActivityLog(function(prev) { return [{id: Date.now(), timestamp: new Date(), action: 'status_change', client: sl.client, service: sl.service, techName: ((STAFF.find(function(s) { return s.id === sl.staff_id; })) || {}).display_name || '—', description: 'Status changed: ' + oldLabel + ' → ' + newLabel, requested: sl.requested, changedTech: false}].concat(prev); });
     setServiceLines(function(prev) { return prev.map(function(s) { return s.id !== sl.id ? s : Object.assign({}, s, {status: newStatus}); }); });
-    persist.saveStatus(sl, newStatus);
+    persist.saveStatus(sl, newStatus).catch(function() { setServiceLines(snapshot); });
     setSelectedAppt(function(prev) { return prev && prev.id === sl.id ? Object.assign({}, prev, {status: newStatus}) : prev; });
     if (newStatus === 'completed' || newStatus === 'cancelled' || newStatus === 'no_show') {
       setTurnState(function(prev) { return TurnEngine.markAvailable(prev, sl.staff_id, _settings).state; });
@@ -98,6 +100,8 @@ export default function useCalendarHandlers(ctx) {
 
   function handleChangeTech(serviceLineIds, newStaffId, timing, remainingOnSource) {
     rbac.requirePermission(ACTIONS.MOVE_APPOINTMENTS, function() {
+      // Snapshot for rollback before optimistic update
+      var snapshot = serviceLines.slice();
       var newStaff = STAFF.find(function(s) { return s.id === newStaffId; });
       serviceLineIds.forEach(function(slId) {
         var sl = serviceLines.find(function(s) { return s.id === slId; }); if (!sl) return;
@@ -138,25 +142,28 @@ export default function useCalendarHandlers(ctx) {
         return updated;
       });
       setSelectedAppt(function(prev) { if (!prev || !serviceLineIds.includes(prev.id)) return prev; return Object.assign({}, prev, {staff_id: newStaffId}); });
-      serviceLineIds.forEach(function(slId) { persist.saveMove(slId, {staff_id: newStaffId}); });
+      var movePromises = serviceLineIds.map(function(slId) { return persist.saveMove(slId, {staff_id: newStaffId}); });
+      Promise.all(movePromises).catch(function() { setServiceLines(snapshot); });
     });
   }
 
   function handleAddTime(sl, extraMinutes) {
+    var snapshot = serviceLines.slice();
     setActivityLog(function(prev) { return [{id: Date.now(), timestamp: new Date(), action: 'add_time', client: sl.client, service: sl.service, techName: ((STAFF.find(function(s) { return s.id === sl.staff_id; })) || {}).display_name || '—', description: 'Added ' + extraMinutes + ' min extra time (' + sl.dur + ' → ' + (sl.dur + extraMinutes) + ' min)', requested: sl.requested, changedTech: false}].concat(prev); });
     setServiceLines(function(prev) { return prev.map(function(s) { return s.id !== sl.id ? s : Object.assign({}, s, {dur: s.dur + extraMinutes}); }); });
-    persist.saveAddTime(sl, sl.dur + extraMinutes);
+    persist.saveAddTime(sl, sl.dur + extraMinutes).catch(function() { setServiceLines(snapshot); });
     setSelectedAppt(function(prev) { return prev && prev.id === sl.id ? Object.assign({}, prev, {dur: prev.dur + extraMinutes}) : prev; });
   }
 
   function handleAddService(sl, svc) {
+    var snapshot = serviceLines.slice();
     var clientLines = serviceLines.filter(function(s) { return s.client === sl.client && s.staff_id === sl.staff_id; }).sort(function(a, b) { return a.starts_at - b.starts_at; });
     var lastLine = clientLines[clientLines.length - 1] || sl;
     var newStart = new Date(lastLine.starts_at.getTime() + lastLine.dur * 60000);
     var newId = 'sl-new-' + Date.now();
     var newLine = {id: newId, staff_id: sl.staff_id, starts_at: newStart, dur: svc.dur, color: svc.color, client: sl.client, service: svc.name, status: sl.status, requested: sl.requested, price_cents: svc.price, open_price: !!svc.open_price};
     setServiceLines(function(prev) { return prev.concat([newLine]); });
-    persist.saveBooking([newLine], sl.client, sl.client_id);
+    persist.saveBooking([newLine], sl.client, sl.client_id).catch(function() { setServiceLines(snapshot); });
     setActivityLog(function(prev) { return [{id: Date.now(), timestamp: new Date(), action: 'add_service', client: sl.client, service: svc.name, techName: ((STAFF.find(function(s) { return s.id === sl.staff_id; })) || {}).display_name || '—', description: 'Added ' + svc.name + ' (' + svc.dur + ' min) at ' + formatTimeFull(newStart), requested: sl.requested, changedTech: false}].concat(prev); });
   }
 
@@ -202,8 +209,9 @@ export default function useCalendarHandlers(ctx) {
       }
     });
     if (blocked) { setBookingCtx(null); toast.show('This time slot is blocked. Choose a different time.', 'error'); return; }
+    var snapshot = serviceLines.slice();
     setServiceLines(function(prev) { return prev.concat(newLines); });
-    persist.saveBooking(newLines);
+    persist.saveBooking(newLines).catch(function() { setServiceLines(snapshot); });
     var clients = []; services.forEach(function(s) { if (clients.indexOf(s.clientName) === -1) clients.push(s.clientName); });
     var anyRequested = services.some(function(s) { return s.requested; });
     var logDetails = [];
@@ -265,6 +273,7 @@ export default function useCalendarHandlers(ctx) {
 
   function handlePasteAppt(staffId, startMin) {
     if (!copiedAppt) return;
+    var snapshot = serviceLines.slice();
     var newLine = {
       id: 'sl-paste-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       staff_id: staffId, starts_at: minutesToTime(startMin), dur: copiedAppt.dur,
@@ -273,7 +282,7 @@ export default function useCalendarHandlers(ctx) {
       price_cents: copiedAppt.price_cents, open_price: copiedAppt.open_price,
     };
     setServiceLines(function(prev) { return prev.concat([newLine]); });
-    persist.saveBooking([newLine], copiedAppt.client, copiedAppt.client_id);
+    persist.saveBooking([newLine], copiedAppt.client, copiedAppt.client_id).catch(function() { setServiceLines(snapshot); });
     setActivityLog(function(prev) { return [{id: Date.now(), timestamp: new Date(), action: 'booked', client: copiedAppt.client, service: copiedAppt.service, description: 'Copied appointment pasted for ' + copiedAppt.client + ' at ' + formatTimeFull(minutesToTime(startMin)), requested: copiedAppt.requested, changedTech: false}].concat(prev); });
     setCtxMenu(null);
   }
@@ -283,18 +292,21 @@ export default function useCalendarHandlers(ctx) {
     var nowMin = timeToMinutes(new Date());
     var snappedMin = Math.max(gridStartMin, Math.min(gridEndMin - 15, snapTo15(nowMin)));
     var snappedTime = minutesToTime(snappedMin);
+    var snapshot = serviceLines.slice();
     var existing = serviceLines.find(function(sl) { return sl.client === entry.client && sl.service === entry.service && (sl.status === 'pending' || sl.status === 'confirmed' || sl.status === 'checked_in'); });
     if (existing) {
       setServiceLines(function(prev) { return prev.map(function(sl) { if (sl.id !== existing.id) return sl; return Object.assign({}, sl, {staff_id: tech.id, status: 'in_progress', starts_at: snappedTime}); }); });
-      persist.saveMove(existing.id, {staff_id: tech.id, starts_at: snappedTime});
-      persist.saveStatus(existing, 'in_progress');
+      Promise.all([
+        persist.saveMove(existing.id, {staff_id: tech.id, starts_at: snappedTime}),
+        persist.saveStatus(existing, 'in_progress')
+      ]).catch(function() { setServiceLines(snapshot); });
       setActivityLog(function(prev) { return [{id: Date.now(), timestamp: new Date(), action: 'start_working', client: entry.client, service: entry.service, description: 'Started working with ' + tech.display_name + ' (updated existing appointment)', requested: !!entry.requested, changedTech: existing.staff_id !== tech.id}].concat(prev); });
     } else {
       var color = {'Blowout': '#EC4899', "Women's Cut": '#EF4444', 'Beard Trim': '#78716C', 'Full Color': '#8B5CF6', 'Manicure': '#06B6D4', 'Facial': '#10B981'}[entry.service] || '#3B82F6';
       var dur = {Blowout: 30, "Women's Cut": 45, 'Beard Trim': 15, 'Full Color': 90, 'Manicure': 30, 'Facial': 60}[entry.service] || 30;
       var newSl = {id: 'sl-wl-' + Date.now(), staff_id: tech.id, starts_at: snappedTime, dur: dur, color: color, client: entry.client, service: entry.service, status: 'in_progress', requested: !!entry.requested, price_cents: SERVICE_PRICES[entry.service] || 0, is_vip: !!entry.is_vip};
       setServiceLines(function(prev) { return prev.concat([newSl]); });
-      persist.saveBooking([newSl], entry.client);
+      persist.saveBooking([newSl], entry.client).catch(function() { setServiceLines(snapshot); });
       setActivityLog(function(prev) { return [{id: Date.now(), timestamp: new Date(), action: 'start_working', client: entry.client, service: entry.service, description: 'Started working with ' + tech.display_name + ' (walk-in)', requested: !!entry.requested, changedTech: false}].concat(prev); });
     }
     setWaitlist(function(prev) { return prev.filter(function(w) { return w.id !== entry.id; }); });

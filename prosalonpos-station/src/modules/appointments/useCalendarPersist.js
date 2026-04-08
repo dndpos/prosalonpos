@@ -1,14 +1,17 @@
 /**
  * useCalendarPersist.js — Server persistence for calendar operations
- * Session 99 | Wires local-only calendar state to the real API
+ * Session 99 | Session C6: Added toast on error + Promise return for rollback
  *
  * KEY DESIGN: Calls the API directly (not through the store) to avoid
  * triggering fetchServiceLines() which causes a full calendar flash.
  * The local state is already correct from the optimistic update.
  * The store will sync naturally via Socket.io events from other stations.
  *
+ * C6 CHANGE: All methods now return Promises and accept an onError callback
+ * so callers can snapshot→rollback on failure. Toast shown on any error.
+ *
  * Usage in CalendarDayView:
- *   var persist = useCalendarPersist();
+ *   var persist = useCalendarPersist(toast);
  *   persist.saveBooking(newLines, clientName);
  *   persist.saveStatus(sl, newStatus);
  *   persist.saveMove(serviceLineId, updates);
@@ -16,14 +19,19 @@
 
 import { api } from '../../lib/apiClient';
 
-function useCalendarPersist() {
+function useCalendarPersist(toast) {
+
+  function showError(action, err) {
+    console.error('[CalendarPersist] Failed to ' + action + ':', err.message);
+    if (toast) toast.show('Save failed — change reverted', 'error');
+  }
 
   /**
    * Save a new booking to the server.
-   * Called after handleBookingSave adds lines to local state.
+   * Returns a Promise that rejects on failure (caller can rollback).
    */
   function saveBooking(lines, clientName, clientId) {
-    if (!lines || lines.length === 0) return;
+    if (!lines || lines.length === 0) return Promise.resolve();
 
     // Group by client+tech (each group becomes one Appointment)
     var groups = {};
@@ -37,7 +45,7 @@ function useCalendarPersist() {
     var groupKeys = Object.keys(groups);
     var bookingGroupId = groupKeys.length > 1 ? ('bg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)) : null;
 
-    groupKeys.forEach(function(key) {
+    var promises = groupKeys.map(function(key) {
       var group = groups[key];
       var payload = {
         client_name: group.clientName,
@@ -61,23 +69,26 @@ function useCalendarPersist() {
         }),
       };
 
-      api.post('/appointments', payload).then(function() {
-      }).catch(function(err) {
-        console.error('[CalendarPersist] Failed to save booking:', err.message);
-      });
+      return api.post('/appointments', payload);
+    });
+
+    return Promise.all(promises).catch(function(err) {
+      showError('save booking', err);
+      throw err;
     });
   }
 
   /**
    * Save a status change to the server.
+   * Returns a Promise that rejects on failure.
    */
   function saveStatus(sl, newStatus) {
     if (!sl || !sl.appointment_id) {
-      return;
+      return Promise.resolve();
     }
-    api.put('/appointments/' + sl.appointment_id, { status: newStatus }).then(function() {
-    }).catch(function(err) {
-      console.error('[CalendarPersist] Failed to save status:', err.message);
+    return api.put('/appointments/' + sl.appointment_id, { status: newStatus }).catch(function(err) {
+      showError('save status', err);
+      throw err;
     });
   }
 
@@ -96,30 +107,33 @@ function useCalendarPersist() {
     }
     if (updates.duration_minutes) payload.duration_minutes = updates.duration_minutes;
 
-    return api.put('/appointments/service-line/' + serviceLineId, payload).then(function() {
-    }).catch(function(err) {
-      console.error('[CalendarPersist] Failed to save move:', err.message);
-      throw err; // re-throw so caller can rollback
+    return api.put('/appointments/service-line/' + serviceLineId, payload).catch(function(err) {
+      showError('save move', err);
+      throw err;
     });
   }
 
   /**
    * Save duration change (add time) to the server.
+   * Returns a Promise that rejects on failure.
    */
   function saveAddTime(sl, newDuration) {
-    if (!sl || !sl.id || sl.id.indexOf('sl-') === 0) return;
-    api.put('/appointments/service-line/' + sl.id, { duration_minutes: newDuration }).catch(function(err) {
-      console.error('[CalendarPersist] Failed to save add time:', err.message);
+    if (!sl || !sl.id || sl.id.indexOf('sl-') === 0) return Promise.resolve();
+    return api.put('/appointments/service-line/' + sl.id, { duration_minutes: newDuration }).catch(function(err) {
+      showError('save add time', err);
+      throw err;
     });
   }
 
   /**
    * Cancel an appointment on the server.
+   * Returns a Promise that rejects on failure.
    */
   function saveCancel(appointmentId) {
-    if (!appointmentId) return;
-    api.del('/appointments/' + appointmentId).catch(function(err) {
-      console.error('[CalendarPersist] Failed to cancel:', err.message);
+    if (!appointmentId) return Promise.resolve();
+    return api.del('/appointments/' + appointmentId).catch(function(err) {
+      showError('cancel appointment', err);
+      throw err;
     });
   }
 

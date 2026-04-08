@@ -22,6 +22,7 @@ var useStaffStore = create(function(set, get) {
     error: null,
     source: 'pending',            // 'pending' | 'api' | 'error'
     initialized: false,
+    pinTable: null,                // cached PIN lookup table from bootstrap
 
     // ─── Actions ───
 

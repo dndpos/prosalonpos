@@ -117,7 +117,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   // ── Service lines from appointment store ──
   var storeServiceLines = useAppointmentStore(function(s){ return s.serviceLines; });
   var storeInitialized = useAppointmentStore(function(s){ return s.initialized; });
-  var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
+  var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist(toast);
   var _fetchRef = useRef(fetchServiceLines);
   _fetchRef.current = fetchServiceLines;
   const[serviceLines,setServiceLines]=useState(storeServiceLines);

@@ -52,7 +52,8 @@ async function bootstrapStores() {
 
     // Staff
     useStaffStore.setState({
-      staff: data.staff || [], loading: false, source: 'api', initialized: true, error: null
+      staff: data.staff || [], loading: false, source: 'api', initialized: true, error: null,
+      pinTable: data.pinTable || null,
     });
 
     // Services + Categories
