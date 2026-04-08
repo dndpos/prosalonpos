@@ -27,17 +27,9 @@ var useMembershipStore = create(function(set, get) {
     },
 
     updatePlan: async function(id, planData) {
-      // Optimistic local merge
-      set(function(s) { return { plans: s.plans.map(function(p) { return p.id === id ? Object.assign({}, p, planData) : p; }) }; });
-      try {
-        var data = await api.put('/memberships/plans/' + id, planData);
-        set(function(s) { return { plans: s.plans.map(function(p) { return p.id === id ? data.plan : p; }) }; });
-        return data.plan;
-      } catch (err) {
-        // Rollback — refetch
-        get().fetchPlans();
-        throw err;
-      }
+      var data = await api.put('/memberships/plans/' + id, planData);
+      set(function(s) { return { plans: s.plans.map(function(p) { return p.id === id ? data.plan : p; }) }; });
+      return data.plan;
     },
 
     deletePlan: async function(id) {

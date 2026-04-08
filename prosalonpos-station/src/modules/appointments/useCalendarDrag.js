@@ -129,16 +129,7 @@ export default function useCalendarDrag({
         setDragging(null); setDragPreview(null); return;
       }
     }
-    // ── Optimistic: auto-confirm simple moves (no popup) ──
-    // Only show confirmation popup for requested-tech cross-tech moves.
-    // Same-tech time moves and non-requested cross-tech moves apply instantly.
-    if (staffChanged && sl.requested) {
-      // Requested client being moved to different tech — needs confirmation
-      setPendingMove({ sl, newStaffId, newStartMin });
-    } else {
-      // Auto-confirm: apply move immediately without popup
-      autoConfirmMove(sl, newStaffId, newStartMin);
-    }
+    setPendingMove({ sl, newStaffId, newStartMin });
     setDragging(null); setDragPreview(null);
   }
 
@@ -163,41 +154,6 @@ export default function useCalendarDrag({
     if (Math.abs(cx - x) > 5 || Math.abs(cy - y) > 5) return;
     rbac.requirePermission(ACTIONS.CREATE_EDIT_APPOINTMENTS, function () {
       setBookingCtx({ staffId, startMin });
-    });
-  }
-
-  // ─── Auto-confirm move (no popup — optimistic) ───
-  function autoConfirmMove(sl, newStaffId, newStartMin) {
-    rbac.requirePermission(ACTIONS.MOVE_APPOINTMENTS, function () {
-      const group = getGroup(sl.id, serviceLines);
-      const groupDur = group.reduce(function (s, g) { return s + g.dur; }, 0);
-      if (isBlockedSlot(newStaffId, newStartMin, newStartMin + groupDur)) { toast.show('Cannot move here — this time is blocked.', 'error'); return; }
-      const groupIds = group.map(s => s.id);
-      const delta = newStartMin - timeToMinutes(sl.starts_at);
-      const oldStaff = STAFF.find(s => s.id === sl.staff_id);
-      const newStaff = STAFF.find(s => s.id === newStaffId);
-      const oldTime = formatTimeFull(sl.starts_at);
-      const newTimeFmt = formatTimeFull(minutesToTime(newStartMin));
-      const changedTech = newStaffId !== sl.staff_id;
-      const changedTime = delta !== 0;
-      let description = '';
-      if (changedTech && changedTime) description = `Moved from ${oldStaff?.display_name} at ${oldTime} to ${newStaff?.display_name} at ${newTimeFmt}`;
-      else if (changedTech) description = `Reassigned from ${oldStaff?.display_name} to ${newStaff?.display_name}`;
-      else description = `Rescheduled from ${oldTime} to ${newTimeFmt}`;
-      if (group.length > 1) description += ` (${group.length} services)`;
-      setActivityLog(prev => [{ id: Date.now(), timestamp: new Date(), action: 'moved', client: sl.client, service: sl.service, description, requested: sl.requested, changedTech }, ...prev]);
-      setServiceLines(prev => prev.map(s => {
-        if (!groupIds.includes(s.id)) return s;
-        const oldMin = timeToMinutes(s.starts_at);
-        return { ...s, staff_id: newStaffId, starts_at: minutesToTime(oldMin + delta) };
-      }));
-      // Persist each moved line to server
-      if (persist) groupIds.forEach(function(id) {
-        var line = serviceLines.find(function(s) { return s.id === id; });
-        var oldMin = line ? timeToMinutes(line.starts_at) : 0;
-        var newT = minutesToTime(oldMin + delta);
-        persist.saveMove(id, { staff_id: newStaffId, starts_at: newT });
-      });
     });
   }
 

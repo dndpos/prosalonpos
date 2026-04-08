@@ -118,20 +118,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   var storeSource = useAppointmentStore(function(s){ return s.source; });
   var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
-  // Sync from store → local state — only when data actually changed.
-  // Fingerprint includes IDs + status + staff + time (minute precision) so cross-station
-  // changes sync, but same-station optimistic updates don't cause re-renders.
-  var _prevStoreFpRef = useRef('');
-  useEffect(function(){
-    var fp = storeServiceLines.map(function(s){
-      var mins = s.starts_at instanceof Date ? (s.starts_at.getHours() * 60 + s.starts_at.getMinutes()) : 0;
-      return s.id + ':' + s.status + ':' + s.staff_id + ':' + mins + ':' + s.dur;
-    }).sort().join('|');
-    if (fp !== _prevStoreFpRef.current) {
-      _prevStoreFpRef.current = fp;
-      setServiceLines(storeServiceLines);
-    }
-  },[storeServiceLines]);
+  // Sync from store → local state
+  useEffect(function(){ setServiceLines(storeServiceLines); },[storeServiceLines]);
   // Fetch service lines when date changes
   useEffect(function(){
     var d = selectedDate;
@@ -515,7 +503,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
                     <span style={{fontSize:11,fontWeight:600,color:'#FFFFFF',textShadow:'0 1px 3px rgba(0,0,0,0.5)'}}>to {previewEnd}</span>
                   </div>);
                 })()}
-                {/* APPOINTMENT BLOCKS — always rendered, never hidden by loading state */}
+                {/* APPOINTMENT BLOCKS */}
                 {storeLoading&&serviceLines.length===0&&colW>0&&(
                   <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,zIndex:4,pointerEvents:'none'}}>
                     {visibleStaff.map(function(_s,ci){
@@ -544,7 +532,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
                     <style>{`@keyframes skeletonShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } } @keyframes spinDate { to { transform: rotate(360deg); } }`}</style>
                   </div>
                 )}
-                {<AppointmentBlocks serviceLines={serviceLines} blockedTimes={blockedTimes} visibleStaff={visibleStaff} colW={colW} gridStartMin={gridStartMin} ROW_H={ROW_H} colLeftPx={function(idx){return idx*colW;}} dragging={dragging} onBlockStart={handleBlockStart} onBlockClick={function(b){setSelectedBlock(b);}} autoRequestMode={!!_settings.auto_request_mode}/>}
+                <AppointmentBlocks serviceLines={serviceLines} blockedTimes={blockedTimes} visibleStaff={visibleStaff} colW={colW} gridStartMin={gridStartMin} ROW_H={ROW_H} colLeftPx={function(idx){return idx*colW;}} dragging={dragging} onBlockStart={handleBlockStart} onBlockClick={function(b){setSelectedBlock(b);}} autoRequestMode={!!_settings.auto_request_mode}/>
                 {/* NOW LINE */}
                 {showNow&&(<div style={{position:'absolute',top:nowY,left:-6,right:0,zIndex:10,pointerEvents:'none',display:'flex',alignItems:'center'}}><div style={{width:10,height:10,borderRadius:'50%',background:C.nowLine,flexShrink:0}}/><div style={{flex:1,height:2,background:C.nowLine}}/></div>)}
               </div>

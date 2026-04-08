@@ -1,18 +1,11 @@
 /**
  * useCalendarPersist.js — Server persistence for calendar operations
  * Session 99 | Wires local-only calendar state to the real API
- * Session V24 | Optimistic UI — suppress self-originated socket events,
- *   rollback on failure, toast on error.
  *
  * KEY DESIGN: Calls the API directly (not through the store) to avoid
  * triggering fetchServiceLines() which causes a full calendar flash.
  * The local state is already correct from the optimistic update.
  * The store will sync naturally via Socket.io events from other stations.
- *
- * SOCKET SUPPRESSION: When this station saves a change, the server emits
- * appointment:updated to ALL stations (including the sender). Without
- * suppression, the sender gets its own event and does a full refetch → flash.
- * We call suppressNext() before the API call to skip that bounce-back.
  *
  * Usage in CalendarDayView:
  *   var persist = useCalendarPersist();
@@ -22,18 +15,8 @@
  */
 
 import { api } from '../../lib/apiClient';
-import { suppressNext } from '../../lib/socket';
-import { useToast } from '../../lib/ToastContext';
-import { useAppointmentStore } from '../../lib/stores/appointmentStore';
 
 function useCalendarPersist() {
-  var toast = useToast();
-
-  // Trigger a full refetch (used on rollback so the calendar re-syncs from server)
-  function refetch() {
-    var store = useAppointmentStore.getState();
-    if (store.loadedDate) store.fetchServiceLines(store.loadedDate);
-  }
 
   /**
    * Save a new booking to the server.
@@ -53,8 +36,6 @@ function useCalendarPersist() {
     // If multiple groups (multi-tech booking), generate a shared booking_group_id
     var groupKeys = Object.keys(groups);
     var bookingGroupId = groupKeys.length > 1 ? ('bg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)) : null;
-
-    suppressNext('appointment:created', 3000);
 
     groupKeys.forEach(function(key) {
       var group = groups[key];
@@ -81,13 +62,8 @@ function useCalendarPersist() {
       };
 
       api.post('/appointments', payload).then(function() {
-        // Success — local state with temp IDs is already correct for display.
-        // Real IDs will sync naturally when another station triggers a socket event
-        // or on the next date change. No refetch needed.
       }).catch(function(err) {
         console.error('[CalendarPersist] Failed to save booking:', err.message);
-        toast.show('Failed to save booking — refreshing calendar', 'error');
-        refetch();
       });
     });
   }
@@ -99,12 +75,9 @@ function useCalendarPersist() {
     if (!sl || !sl.appointment_id) {
       return;
     }
-    suppressNext('appointment:updated', 3000);
     api.put('/appointments/' + sl.appointment_id, { status: newStatus }).then(function() {
     }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save status:', err.message);
-      toast.show('Failed to update status — refreshing', 'error');
-      refetch();
     });
   }
 
@@ -122,12 +95,9 @@ function useCalendarPersist() {
     }
     if (updates.duration_minutes) payload.duration_minutes = updates.duration_minutes;
 
-    suppressNext('appointment:updated', 3000);
     api.put('/appointments/service-line/' + serviceLineId, payload).then(function() {
     }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save move:', err.message);
-      toast.show('Move failed — snapping back', 'error');
-      refetch();
     });
   }
 
@@ -136,11 +106,8 @@ function useCalendarPersist() {
    */
   function saveAddTime(sl, newDuration) {
     if (!sl || !sl.id || sl.id.indexOf('sl-') === 0) return;
-    suppressNext('appointment:updated', 3000);
     api.put('/appointments/service-line/' + sl.id, { duration_minutes: newDuration }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save add time:', err.message);
-      toast.show('Failed to save time change — refreshing', 'error');
-      refetch();
     });
   }
 
@@ -149,11 +116,8 @@ function useCalendarPersist() {
    */
   function saveCancel(appointmentId) {
     if (!appointmentId) return;
-    suppressNext('appointment:deleted', 3000);
     api.del('/appointments/' + appointmentId).catch(function(err) {
       console.error('[CalendarPersist] Failed to cancel:', err.message);
-      toast.show('Cancel failed — refreshing', 'error');
-      refetch();
     });
   }
 

@@ -363,14 +363,14 @@ export default function MembershipPlans({ catalogLayout }) {
     };
 
     if (ep._isNew) {
-      setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       storeCreatePlan(payload).then(function(plan) {
         toast.show('Plan created', 'success');
+        setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       }).catch(function(err) { console.error('[MembershipPlans] Create FAILED:', err); toast.show('Save failed: ' + err.message, 'error'); });
     } else {
-      setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       storeUpdatePlan(ep.id, payload).then(function(plan) {
         toast.show('Plan updated', 'success');
+        setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       }).catch(function(err) { console.error('[MembershipPlans] Update FAILED:', err); toast.show('Save failed: ' + err.message, 'error'); });
     }
   }

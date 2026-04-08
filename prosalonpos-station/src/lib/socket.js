@@ -23,24 +23,6 @@ var _socket = null;
 var _listeners = {};
 var _connected = false;
 
-// ── Self-originated event suppression ──
-// When this station makes an API call that triggers a socket broadcast,
-// the event bounces back and causes a redundant full refetch + flash.
-// suppressNext(event) tells the handler to skip the NEXT occurrence.
-var _suppressed = {};
-
-function suppressNext(event, durationMs) {
-  _suppressed[event] = Date.now() + (durationMs || 3000);
-}
-
-function isSuppressed(event) {
-  var until = _suppressed[event];
-  if (!until) return false;
-  if (Date.now() < until) return true;
-  delete _suppressed[event];
-  return false;
-}
-
 /**
  * Connect to the backend WebSocket server.
  * Only connects once — safe to call multiple times.
@@ -172,4 +154,4 @@ function emitSocket(event, data) {
   return false;
 }
 
-export { connectSocket, disconnectSocket, onSocketEvent, offSocketEvent, isSocketConnected, emitSocket, suppressNext, isSuppressed };
+export { connectSocket, disconnectSocket, onSocketEvent, offSocketEvent, isSocketConnected, emitSocket };

@@ -27,17 +27,9 @@ var usePackageStore = create(function(set, get) {
     },
 
     updatePackage: async function(id, updates, items) {
-      // Optimistic local merge
-      set(function(s) { return { packages: s.packages.map(function(p) { return p.id === id ? Object.assign({}, p, updates) : p; }) }; });
-      try {
-        var data = await api.put('/packages/' + id, { package: updates, items: items });
-        // Refresh to get server-computed fields (item totals etc)
-        get().fetchPackages();
-        return data.package;
-      } catch (err) {
-        get().fetchPackages();
-        throw err;
-      }
+      var data = await api.put('/packages/' + id, { package: updates, items: items });
+      get().fetchPackages();
+      return data.package;
     },
 
     fetchClientPackages: async function(clientId) {

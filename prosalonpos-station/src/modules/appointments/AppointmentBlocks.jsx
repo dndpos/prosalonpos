@@ -147,8 +147,9 @@ export default function AppointmentBlocks({serviceLines, blockedTimes, visibleSt
           display:'flex',
           flexDirection:'column',
           justifyContent:isReserved?'center':'flex-start',
-          opacity:isDragging?0.4:1,
+          opacity:isDragging?0.5:1,
           filter:isFaded?'saturate(0.5) brightness(0.75)':'none',
+          transition:isDragging?'none':'opacity 0.15s',
           border:isReserved?'2px dashed #FDE68A':'none',
         }}>
         {/* Calculate badge presence for padding */}

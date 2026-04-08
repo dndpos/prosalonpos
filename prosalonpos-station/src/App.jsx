@@ -19,7 +19,7 @@ import { useReportsStore } from './lib/stores/reportsStore';
 import { usePackageStore } from './lib/stores/packageStore';
 import { checkBackend, isPaired, getPairedSalonName, isLoggedIn, getToken, onAuthExpired } from './lib/apiClient';
 import { autoSetup as printAutoSetup, isQzReady, printReceipt, printTechSlip, printDrawerSummary, printToNamedPrinter } from './lib/printService';
-import { connectSocket, onSocketEvent, disconnectSocket, emitSocket, isSuppressed } from './lib/socket';
+import { connectSocket, onSocketEvent, disconnectSocket, emitSocket } from './lib/socket';
 import VirtualKeyboard from './components/ui/VirtualKeyboard';
 import OnlineBookingsPopup from './components/ui/OnlineBookingsPopup';
 import GiftCardBalancePopup from './components/ui/GiftCardBalancePopup';
@@ -189,9 +189,9 @@ export default function App() {
       fetchPayrollRuns(); fetchCommission();
     });
     connectSocket();
-    onSocketEvent('staff:created', function() { if (!isSuppressed('staff:created')) fetchStaff(); });
-    onSocketEvent('staff:updated', function() { if (!isSuppressed('staff:updated')) fetchStaff(); });
-    onSocketEvent('staff:deleted', function() { if (!isSuppressed('staff:deleted')) fetchStaff(); });
+    onSocketEvent('staff:created', function() { fetchStaff(); });
+    onSocketEvent('staff:updated', function() { fetchStaff(); });
+    onSocketEvent('staff:deleted', function() { fetchStaff(); });
     onSocketEvent('service:created', function() { fetchServices(); });
     onSocketEvent('service:updated', function() { fetchServices(); });
     onSocketEvent('service:deleted', function() { fetchServices(); });
@@ -201,9 +201,9 @@ export default function App() {
     onSocketEvent('settings:updated', function() { fetchSettings(); });
     onSocketEvent('client:created', function() { fetchClients(); });
     onSocketEvent('client:updated', function() { fetchClients(); });
-    onSocketEvent('appointment:created', function() { if (!isSuppressed('appointment:created')) fetchServiceLines(); });
-    onSocketEvent('appointment:updated', function() { if (!isSuppressed('appointment:updated')) fetchServiceLines(); });
-    onSocketEvent('appointment:deleted', function() { if (!isSuppressed('appointment:deleted')) fetchServiceLines(); });
+    onSocketEvent('appointment:created', function() { fetchServiceLines(); });
+    onSocketEvent('appointment:updated', function() { fetchServiceLines(); });
+    onSocketEvent('appointment:deleted', function() { fetchServiceLines(); });
     onSocketEvent('ticket:created', function() { fetchTickets(); });
     onSocketEvent('ticket:updated', function() { fetchTickets(); });
     onSocketEvent('ticket:closed', function() { fetchTickets(); });
@@ -387,13 +387,9 @@ export default function App() {
     setActivePage(method === 'pin' ? 'tech-pin' : 'tech-select');
   }
 
-  // ── Pages that always stay mounted (hidden via CSS when not active) ──
-  // This eliminates the flash when navigating back — no remount, no refetch.
-  var _calendarHidden = activePage !== 'calendar';
-
-  function renderOverlayPage() {
+  function renderPage() {
     switch (activePage) {
-      case 'calendar':       return null; // calendar is always mounted below
+      case 'calendar':       return <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} onClockPunch={timeClock.handleClockPunch} onPresencePunch={timeClock.handlePresencePunch} />;
       case 'checkout':       return <CheckoutScreen appointmentData={checkoutData} onDone={function(){ setCheckoutData(null); if(activeTech){ handleBackToTechSelect(); } else { setActivePage('calendar'); } }} onCloseTicket={handleCloseTicket} onPrintHold={handlePrintHold} openTickets={openTickets} nextTicketNumber={nextTicketNumber} catalogLayout={grid.catalogLayout} drawerSession={drawer.drawerSession} salonSettings={salonSettings} onCashPayment={drawer.handleCashPaymentTracked} canProcessPayments={activeTech ? stationConfig.can_process_payments : true} />;
       case 'tickets':        return <TicketViewer closedTickets={closedTickets} openTickets={openTickets} onBack={function(){ setActivePage('calendar'); }} onReopen={handleReopenTicket} onOpenTicketCheckout={handleOpenTicketCheckout} onNewSale={function(){ setCheckoutData(null); setActivePage('checkout'); }} onUpdateTicketTips={handleUpdateTicketTips} onAddTicketTip={handleAddTicketTip} onVoid={handleVoidTicket} onRefund={handleRefundTicket} />;
       case 'clients':        return <ClientList onBack={function(){ setActivePage('calendar'); }} />;
@@ -411,7 +407,7 @@ export default function App() {
       case 'dashboard':      return <OwnerDashboard salonSettings={salonSettings} onSettingsUpdate={handleSettingsUpdate} onBack={function(){ setShowOwner(false); setActivePage('calendar'); }} onLaunchStation={handleLaunchStation} onProviderAdmin={function(){ setActivePage('provider-admin'); }} employees={grid.empStaff} setEmployees={grid.setEmpStaff} empColumns={grid.empColumns} setEmpColumns={grid.setEmpColumns} empRows={grid.empRows} setEmpRows={grid.setEmpRows} empSlots={grid.empSlots} setEmpSlots={grid.setEmpSlots} catalogLayout={grid.catalogLayout} categories={grid.svcCatCategories} setCategories={grid.setSvcCatCategories} services={grid.svcCatServices} setServices={grid.setSvcCatServices} catColumns={grid.svcCatColumns} setCatColumns={grid.setSvcCatColumns} catRows={grid.svcCatRows} setCatRows={grid.setSvcCatRows} svcColumns={grid.svcGridColumns} setSvcColumns={grid.setSvcGridColumns} svcRows={grid.svcGridRows} setSvcRows={grid.setSvcGridRows} catSlots={grid.svcCatSlots} setCatSlots={grid.setSvcCatSlots} svcSlots={grid.svcSlots} setSvcSlots={grid.setSvcSlots} clockPunches={timeClock.clockPunches} onAddPunch={timeClock.handleAddManualPunch} onEditPunch={timeClock.handleEditPunch} onDeletePunch={timeClock.handleDeletePunch} />;
       case 'reports':        return <ReportsModule />;
       case 'provider-admin': return <ProviderAdminPanel onBack={function(){ setActivePage('dashboard'); }} />;
-      default:               return null;
+      default:               return <CalendarDayView />;
     }
   }
 
@@ -462,12 +458,7 @@ export default function App() {
         </div>
       )}
       <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {/* Calendar is always mounted — hidden offscreen when not active to avoid repaint flash */}
-        <div style={_calendarHidden ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, visibility: 'hidden', pointerEvents: 'none' } : { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-          <CalendarDayView scrollTarget={scrollTarget} onScrollDone={function(){setScrollTarget(null);}} onCheckout={handleCheckout} catalogLayout={grid.catalogLayout} salonSettings={salonSettings} onNavClick={handleNavClick} onOwnerClick={function(){ setShowOwner(true); setActivePage('dashboard'); }} unviewedCount={unviewedCount} openTicketCount={openTickets.length} drawerSession={drawer.drawerSession} onCashierClick={function(rbacStaff){ drawer.setCashierStaff(rbacStaff || null); drawer.setShowCashierModal(true); }} hasHourlyStaff={grid.hasHourlyStaff} onTimeClockClick={function(){ timeClock.setShowTimeClockModal(true); }} clockPunches={timeClock.clockPunches} presenceRecords={timeClock.presenceRecords} onClockPunch={timeClock.handleClockPunch} onPresencePunch={timeClock.handlePresencePunch} />
-        </div>
-        {/* Other pages render on top (unmount when navigating away) */}
-        {renderOverlayPage()}
+        {renderPage()}
       </main>
       <OnlineBookingsPopup show={showOnlinePopup} bookings={onlineBookings} unviewedCount={unviewedCount} onClose={function() { setShowOnlinePopup(false); }} onBookingTap={handleBookingTap} onMarkAllViewed={handleMarkAllViewed} />
       <GiftCardBalancePopup giftCards={allGiftCards} enabled={activePage !== 'checkout'} />

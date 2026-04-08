@@ -23,9 +23,6 @@
 import { create } from 'zustand';
 import { api, isBackendAvailable, checkBackend } from '../apiClient';
 
-var _lastCrudTs = 0;
-var CRUD_COOLDOWN = 800;
-
 function normalizeServiceLine(sl) {
   if (sl._normalized) return sl;
 
@@ -77,8 +74,6 @@ var useAppointmentStore = create(function(set, get) {
     // ─── Actions ───
 
     fetchServiceLines: async function(dateStr) {
-      // Skip if a local CRUD just happened (socket echo)
-      if (Date.now() - _lastCrudTs < CRUD_COOLDOWN) return;
       if (isBackendAvailable() === false) {
         set({ initialized: true, source: 'error', error: 'Server not available', loadedDate: dateStr || 'today' });
         return;
@@ -91,12 +86,7 @@ var useAppointmentStore = create(function(set, get) {
           String(today.getDate()).padStart(2, '0');
       }
 
-      // Only show skeleton on initial load or date change.
-      // Background refetches (same date, already have data) skip the loading flash.
-      var isInitial = !get().initialized || get().loadedDate !== dateStr;
-      if (isInitial) {
-        set({ loading: true, error: null });
-      }
+      set({ loading: true, error: null });
       try {
         var data = await api.get('/appointments/service-lines?start=' + dateStr + '&end=' + dateStr);
         set({
