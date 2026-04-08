@@ -242,6 +242,14 @@ router.put('/service-line/:id', async function(req, res, next) {
       data: updateData
     });
 
+    // Cascade status to parent appointment (e.g. Start Working via service line fallback)
+    if (data.status && existing.appointment_id) {
+      await prisma.appointment.update({
+        where: { id: existing.appointment_id },
+        data: { status: data.status, version: { increment: 1 } },
+      });
+    }
+
     emit(req, 'appointment:updated');
     res.json({ serviceLine: sl });
   } catch (err) { next(err); }
