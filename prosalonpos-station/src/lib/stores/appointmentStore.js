@@ -66,6 +66,7 @@ var useAppointmentStore = create(function(set, get) {
     serviceLines: [],
     appointments: [],
     loading: false,
+    refreshing: false,
     error: null,
     source: 'pending',
     initialized: false,
@@ -86,18 +87,25 @@ var useAppointmentStore = create(function(set, get) {
           String(today.getDate()).padStart(2, '0');
       }
 
-      set({ loading: true, error: null });
+      // Silent refresh: only show loading skeleton on first load or date change.
+      // If we already have data for this date, refresh in background (no flash).
+      var state = get();
+      var isSameDate = state.loadedDate === dateStr;
+      var hasLoaded = state.initialized && isSameDate;
+      var showLoading = !hasLoaded;
+      set({ loading: showLoading, refreshing: true, error: null });
       try {
         var data = await api.get('/appointments/service-lines?start=' + dateStr + '&end=' + dateStr);
         set({
           serviceLines: normalizeAll(data.serviceLines),
           loading: false,
+          refreshing: false,
           source: 'api',
           initialized: true,
           loadedDate: dateStr,
         });
       } catch (err) {
-        set({ loading: false, error: err.message, initialized: true, source: 'error' });
+        set({ loading: false, refreshing: false, error: err.message, initialized: true, source: 'error' });
       }
     },
 
