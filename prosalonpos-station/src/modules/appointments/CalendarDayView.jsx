@@ -363,10 +363,6 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         })}
         {/* Center — Date Navigation */}
         <div style={{flex:1}}/>
-        {/* DEBUG — remove after fixing flash */}
-        <div style={{position:'fixed',bottom:4,left:8,fontSize:10,fontWeight:600,color:'#FDE68A',background:'rgba(0,0,0,0.7)',padding:'2px 8px',borderRadius:4,zIndex:99999,fontFamily:'monospace',pointerEvents:'none'}}>
-          local:{serviceLines.length} store:{storeServiceLines.length} load:{storeLoading?'Y':'N'}
-        </div>
         <button onClick={()=>shiftDate(-1)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'4px 8px'}}>‹</button>
         <div style={{color:C.textPrimary,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:6}}>
           {dayShort}
@@ -488,8 +484,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
               onTouchStart={e=>{const t=e.touches[0];if(t)handleSlotStart(t.clientX,t.clientY,e.target,e.currentTarget);}}
               onTouchEnd={e=>{const t=e.changedTouches[0];if(t)handleSlotEnd(t.clientX,t.clientY);}}
               onContextMenu={handleContextMenu}
-              style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto'}}>
-              <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%'}}>
+              style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto',willChange:'transform'}}>
+              <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%',willChange:'transform'}}>
                 {/* GRID LINES */}
                 {Array.from({length:totalRows},(_,i)=>{
                   const min=gridStartMin+i*15;const m=min%60;
@@ -543,7 +539,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
                     <style>{`@keyframes skeletonShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } } @keyframes spinDate { to { transform: rotate(360deg); } }`}</style>
                   </div>
                 )}
-                <AppointmentBlocks serviceLines={serviceLines} blockedTimes={blockedTimes} visibleStaff={visibleStaff} colW={colW} gridStartMin={gridStartMin} ROW_H={ROW_H} colLeftPx={function(idx){return idx*colW;}} dragging={dragging} onBlockStart={handleBlockStart} onBlockClick={function(b){setSelectedBlock(b);}} autoRequestMode={!!_settings.auto_request_mode}/>
+                <AppointmentBlocks serviceLines={serviceLines} blockedTimes={blockedTimes} visibleStaff={visibleStaff} colW={colW} gridStartMin={gridStartMin} ROW_H={ROW_H} colLeftPx={colLeftPx} dragging={dragging} onBlockStart={handleBlockStart} onBlockClick={setSelectedBlock} autoRequestMode={!!_settings.auto_request_mode}/>
                 {/* NOW LINE */}
                 {showNow&&(<div style={{position:'absolute',top:nowY,left:-6,right:0,zIndex:10,pointerEvents:'none',display:'flex',alignItems:'center'}}><div style={{width:10,height:10,borderRadius:'50%',background:C.nowLine,flexShrink:0}}/><div style={{flex:1,height:2,background:C.nowLine}}/></div>)}
               </div>

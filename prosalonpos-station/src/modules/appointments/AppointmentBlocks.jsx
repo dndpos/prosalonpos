@@ -6,18 +6,6 @@ import { useTheme } from '../../lib/ThemeContext';
  */
 import { getContrastText, timeToMinutes, formatTimeShort, calcOverlapLayout } from '../../lib/calendarHelpers';
 
-/**
- * Renders all appointment blocks for the visible staff columns.
- * @param {Object} props
- * @param {Array} props.serviceLines - all service line records
- * @param {Array} props.visibleStaff - staff objects shown as columns
- * @param {number} props.colW - column width in px
- * @param {number} props.gridStartMin - grid start in minutes from midnight
- * @param {number} props.ROW_H - row height in px
- * @param {function} props.colLeftPx - function(colIndex) → left px
- * @param {Object|null} props.dragging - current drag state
- * @param {function} props.onBlockStart - (cx, cy, sl) handler
- */
 export default function AppointmentBlocks({serviceLines, blockedTimes, visibleStaff, colW, gridStartMin, ROW_H, colLeftPx, dragging, onBlockStart, onBlockClick, autoRequestMode}){
   var C = useTheme();
   if(colW<=0) return null;
