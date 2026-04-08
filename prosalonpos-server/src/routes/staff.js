@@ -305,7 +305,7 @@ router.put('/:id', async function(req, res, next) {
       }
 
       return updated;
-    });
+    }, { timeout: 20000 });
 
     delete s.pin_hash;
     delete s.service_staff;

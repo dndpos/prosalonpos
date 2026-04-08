@@ -140,7 +140,7 @@ router.post('/tickets/:id/refund', async function(req, res, next) {
               data: { status: 'active' },
             });
             await tx.packageRedemption.delete({ where: { id: red.id } });
-          });
+          }, { timeout: 20000 });
           restoredPkgCredits.push({ cpiId: red.client_package_item_id, service: red.service_redeemed_name });
         } catch (pkgErr) {
           console.warn('[Refund] Failed to restore pkg credit:', red.id, pkgErr.message);

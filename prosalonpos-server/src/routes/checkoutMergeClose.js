@@ -129,7 +129,7 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
         where: { id: absorber.id },
         include: { items: true, payments: true },
       });
-    });
+    }, { timeout: 20000 });
 
     emit(req, 'ticket:closed');
     if (uniqueApptIds.length > 0) {

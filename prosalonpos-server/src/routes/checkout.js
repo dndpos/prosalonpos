@@ -389,7 +389,7 @@ router.post('/tickets/merge', async function(req, res, next) {
         where: { id: absorber.id },
         include: { items: true, payments: true },
       });
-    });
+    }, { timeout: 20000 });
 
     emit(req, 'ticket:merged');
     res.json({ ticket: formatTicket(result) });
