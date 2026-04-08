@@ -83,10 +83,11 @@ function useCalendarPersist() {
 
   /**
    * Save a service line move (drag-drop, tech change) to the server.
+   * Returns a Promise so callers can rollback on failure.
    */
   function saveMove(serviceLineId, updates) {
     if (!serviceLineId || serviceLineId.indexOf('sl-') === 0) {
-      return;
+      return Promise.resolve();
     }
     var payload = {};
     if (updates.staff_id) payload.staff_id = updates.staff_id;
@@ -95,9 +96,10 @@ function useCalendarPersist() {
     }
     if (updates.duration_minutes) payload.duration_minutes = updates.duration_minutes;
 
-    api.put('/appointments/service-line/' + serviceLineId, payload).then(function() {
+    return api.put('/appointments/service-line/' + serviceLineId, payload).then(function() {
     }).catch(function(err) {
       console.error('[CalendarPersist] Failed to save move:', err.message);
+      throw err; // re-throw so caller can rollback
     });
   }
 

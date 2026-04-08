@@ -179,18 +179,26 @@ export default function useCalendarDrag({
       else description = `Rescheduled from ${oldTime} to ${newTime}`;
       if (group.length > 1) description += ` (${group.length} services)`;
       setActivityLog(prev => [{ id: Date.now(), timestamp: new Date(), action: 'moved', client: sl.client, service: sl.service, description, requested: sl.requested, changedTech }, ...prev]);
+      // Snapshot for rollback before optimistic update
+      var snapshot = serviceLines.slice();
       setServiceLines(prev => prev.map(s => {
         if (!groupIds.includes(s.id)) return s;
         const oldMin = timeToMinutes(s.starts_at);
         return { ...s, staff_id: newStaffId, starts_at: minutesToTime(oldMin + delta) };
       }));
-      // Persist each moved line to server
-      if (persist) groupIds.forEach(function(id) {
-        var line = serviceLines.find(function(s) { return s.id === id; });
-        var oldMin = line ? timeToMinutes(line.starts_at) : 0;
-        var newTime = minutesToTime(oldMin + delta);
-        persist.saveMove(id, { staff_id: newStaffId, starts_at: newTime });
-      });
+      // Persist each moved line to server — rollback all on any failure
+      if (persist) {
+        var promises = groupIds.map(function(id) {
+          var line = serviceLines.find(function(s) { return s.id === id; });
+          var oldMin = line ? timeToMinutes(line.starts_at) : 0;
+          var newTime = minutesToTime(oldMin + delta);
+          return persist.saveMove(id, { staff_id: newStaffId, starts_at: newTime });
+        });
+        Promise.all(promises).catch(function() {
+          setServiceLines(snapshot);
+          toast.show('Move failed — reverted.', 'error');
+        });
+      }
       setPendingMove(null);
     });
   }
@@ -223,6 +231,8 @@ export default function useCalendarDrag({
         });
       });
 
+      // Snapshot for rollback before optimistic update
+      var snapshot = serviceLines.slice();
       setServiceLines(prev => prev.map(s => {
         if (newTimes[s.id] === undefined) return s;
         if (dragGroupIds.has(s.id)) {
@@ -230,8 +240,16 @@ export default function useCalendarDrag({
         }
         return { ...s, starts_at: minutesToTime(newTimes[s.id]) };
       }));
-      // Persist all moved lines to server
-      if (persist) Object.keys(newTimes).forEach(function(id) { persist.saveMove(id, { staff_id: dragGroupIds.has(id) ? newStaffId : undefined, starts_at: minutesToTime(newTimes[id]) }); });
+      // Persist all moved lines to server — rollback on any failure
+      if (persist) {
+        var promises = Object.keys(newTimes).map(function(id) {
+          return persist.saveMove(id, { staff_id: dragGroupIds.has(id) ? newStaffId : undefined, starts_at: minutesToTime(newTimes[id]) });
+        });
+        Promise.all(promises).catch(function() {
+          setServiceLines(snapshot);
+          toast.show('Group move failed — reverted.', 'error');
+        });
+      }
       const clients = [...new Set(allGroupLines.map(s => s.client))];
       setActivityLog(prev => [{ id: Date.now(), timestamp: new Date(), action: 'moved', client: clients.join(', '), service: 'Group booking', description: `Group booking rescheduled (${clients.length} clients, ${allGroupLines.length} services)`, requested: sl.requested, changedTech: newStaffId !== sl.staff_id }, ...prev]);
       setPendingGroupMove(null);

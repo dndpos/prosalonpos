@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useTheme } from '../../lib/ThemeContext';
 /**
  * Pro Salon POS — Appointment Block Renderer
@@ -18,7 +19,7 @@ import { getContrastText, timeToMinutes, formatTimeShort, calcOverlapLayout } fr
  * @param {Object|null} props.dragging - current drag state
  * @param {function} props.onBlockStart - (cx, cy, sl) handler
  */
-export default function AppointmentBlocks({serviceLines, blockedTimes, visibleStaff, colW, gridStartMin, ROW_H, colLeftPx, dragging, onBlockStart, onBlockClick, autoRequestMode}){
+export default memo(function AppointmentBlocks({serviceLines, blockedTimes, visibleStaff, colW, gridStartMin, ROW_H, colLeftPx, dragging, onBlockStart, onBlockClick, autoRequestMode}){
   var C = useTheme();
   if(colW<=0) return null;
 
@@ -207,4 +208,4 @@ export default function AppointmentBlocks({serviceLines, blockedTimes, visibleSt
     );
   });
   return(<>{blockedEls}{apptEls}</>);
-}
+});
