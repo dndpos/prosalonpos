@@ -149,7 +149,6 @@ export default function App() {
   var closedTickets = useTicketStore(function(s) { return s.closedTickets; });
 
   var storeSettings = useSettingsStore(function(s) { return s.settings; });
-  var storeServiceLines = useAppointmentStore(function(s) { return s.serviceLines; });
   var fetchStaff = useStaffStore(function(s) { return s.fetchStaff; });
   var fetchServices = useServiceStore(function(s) { return s.fetchServices; });
   var fetchSettings = useSettingsStore(function(s) { return s.fetchSettings; });
@@ -201,9 +200,6 @@ export default function App() {
     onSocketEvent('settings:updated', function() { fetchSettings(); });
     onSocketEvent('client:created', function() { fetchClients(); });
     onSocketEvent('client:updated', function() { fetchClients(); });
-    // Debounce appointment socket events — server broadcasts back to sender,
-    // causing unnecessary refetch after every local action. Debounce collapses
-    // rapid events into one fetch 1s after the last event.
     var _apptDebounce = null;
     function debouncedFetchSL() {
       if (_apptDebounce) clearTimeout(_apptDebounce);
@@ -310,7 +306,7 @@ export default function App() {
   function handleTechSelected(tech) {
     setActiveTech(tech);
     if (stationConfig.station_mode === 'calendar') { setActivePage('calendar'); return; }
-    var activeLines = storeServiceLines.filter(function(sl) {
+    var activeLines = useAppointmentStore.getState().serviceLines.filter(function(sl) {
       return sl.staff_id === tech.id && (sl.status === 'in_progress' || sl.status === 'checked_in');
     });
     if (activeLines.length > 0) {
@@ -410,8 +406,8 @@ export default function App() {
       case 'online-booking': return <OnlineBookingPortal />;
       case 'kiosk':             return <KioskApp />;
       case 'customer-display':  return <CustomerDisplayApp />;
-      case 'tech-select':       return <TechSelectApp onTechSelected={handleTechSelected} onExit={function(){ setActiveTech(null); setActivePage('calendar'); }} stationMode={stationConfig.station_mode} canProcessPayments={stationConfig.can_process_payments} activeAppointments={(function(){ var m={}; storeServiceLines.filter(function(sl){ return sl.status==='in_progress'||sl.status==='checked_in'; }).forEach(function(sl){ if(!m[sl.staff_id]) m[sl.staff_id]={clientName:sl.client,services:[]}; m[sl.staff_id].services.push({name:sl.service,price_cents:sl.price_cents||0}); }); return m; })()} />;
-      case 'tech-pin':          return <TechPinApp onTechSelected={handleTechSelected} onExit={function(){ setActiveTech(null); setActivePage('calendar'); }} stationMode={stationConfig.station_mode} activeAppointments={(function(){ var m={}; storeServiceLines.filter(function(sl){ return sl.status==='in_progress'||sl.status==='checked_in'; }).forEach(function(sl){ if(!m[sl.staff_id]) m[sl.staff_id]={clientName:sl.client,services:[]}; m[sl.staff_id].services.push({name:sl.service,price_cents:sl.price_cents||0}); }); return m; })()} />;
+      case 'tech-select':       return <TechSelectApp onTechSelected={handleTechSelected} onExit={function(){ setActiveTech(null); setActivePage('calendar'); }} stationMode={stationConfig.station_mode} canProcessPayments={stationConfig.can_process_payments} activeAppointments={(function(){ var m={}; var _sl=useAppointmentStore.getState().serviceLines; _sl.filter(function(sl){ return sl.status==='in_progress'||sl.status==='checked_in'; }).forEach(function(sl){ if(!m[sl.staff_id]) m[sl.staff_id]={clientName:sl.client,services:[]}; m[sl.staff_id].services.push({name:sl.service,price_cents:sl.price_cents||0}); }); return m; })()} />;
+      case 'tech-pin':          return <TechPinApp onTechSelected={handleTechSelected} onExit={function(){ setActiveTech(null); setActivePage('calendar'); }} stationMode={stationConfig.station_mode} activeAppointments={(function(){ var m={}; var _sl=useAppointmentStore.getState().serviceLines; _sl.filter(function(sl){ return sl.status==='in_progress'||sl.status==='checked_in'; }).forEach(function(sl){ if(!m[sl.staff_id]) m[sl.staff_id]={clientName:sl.client,services:[]}; m[sl.staff_id].services.push({name:sl.service,price_cents:sl.price_cents||0}); }); return m; })()} />;
       case 'dashboard':      return <OwnerDashboard salonSettings={salonSettings} onSettingsUpdate={handleSettingsUpdate} onBack={function(){ setShowOwner(false); setActivePage('calendar'); }} onLaunchStation={handleLaunchStation} onProviderAdmin={function(){ setActivePage('provider-admin'); }} employees={grid.empStaff} setEmployees={grid.setEmpStaff} empColumns={grid.empColumns} setEmpColumns={grid.setEmpColumns} empRows={grid.empRows} setEmpRows={grid.setEmpRows} empSlots={grid.empSlots} setEmpSlots={grid.setEmpSlots} catalogLayout={grid.catalogLayout} categories={grid.svcCatCategories} setCategories={grid.setSvcCatCategories} services={grid.svcCatServices} setServices={grid.setSvcCatServices} catColumns={grid.svcCatColumns} setCatColumns={grid.setSvcCatColumns} catRows={grid.svcCatRows} setCatRows={grid.setSvcCatRows} svcColumns={grid.svcGridColumns} setSvcColumns={grid.setSvcGridColumns} svcRows={grid.svcGridRows} setSvcRows={grid.setSvcGridRows} catSlots={grid.svcCatSlots} setCatSlots={grid.setSvcCatSlots} svcSlots={grid.svcSlots} setSvcSlots={grid.setSvcSlots} clockPunches={timeClock.clockPunches} onAddPunch={timeClock.handleAddManualPunch} onEditPunch={timeClock.handleEditPunch} onDeletePunch={timeClock.handleDeletePunch} />;
       case 'reports':        return <ReportsModule />;
       case 'provider-admin': return <ProviderAdminPanel onBack={function(){ setActivePage('dashboard'); }} />;

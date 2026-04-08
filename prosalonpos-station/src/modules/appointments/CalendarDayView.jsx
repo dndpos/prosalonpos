@@ -114,27 +114,22 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
     });
     return result;
   },[staffOrder, STAFF]);
-  // ── Service lines — owned locally, fetched directly via API ──
-  // CalendarDayView does NOT subscribe to the appointment store's serviceLines.
-  // This prevents socket-triggered refetches from causing re-render storms.
-  // The store is still used by other screens; this screen manages its own data.
+  // ── Service lines — local state, direct API fetch ──
+  // NO Zustand subscription. Socket bounce-backs cannot trigger re-renders.
   var persist = useCalendarPersist();
   var storeInitialized = useAppointmentStore(function(s){ return s.initialized; });
   const[serviceLines,setServiceLines]=useState([]);
   var _fetchRef = useRef(null);
-  // Fetch on mount and date change — direct API call, no store involvement
   useEffect(function(){
     var d = selectedDate;
     var dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    var ctrl = new AbortController();
     _fetchRef.current = dateStr;
     import('../../lib/apiClient').then(function(mod) {
       mod.api.get('/appointments/service-lines?start=' + dateStr + '&end=' + dateStr).then(function(data) {
-        if (_fetchRef.current !== dateStr) return; // stale
+        if (_fetchRef.current !== dateStr) return;
         var lines = (data.serviceLines || []).map(function(sl) {
           var startsAt = typeof sl.starts_at === 'string' ? new Date(sl.starts_at) : sl.starts_at;
-          return {
-            id: sl.id, appointment_id: sl.appointment_id, service_catalog_id: sl.service_catalog_id,
+          return { id: sl.id, appointment_id: sl.appointment_id, service_catalog_id: sl.service_catalog_id,
             staff_id: sl.staff_id, status: sl.status, requested: !!sl.requested,
             price_cents: sl.price_cents || 0, open_price: !!sl.open_price,
             client_id: sl.client_id || null, source: sl.source || null, notes: sl.notes || null,
@@ -143,18 +138,12 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
             color: sl.calendar_color || sl.color || '#3B82F6',
             client: sl.client_name || sl.client || 'Walk-in',
             service: sl.service_name || sl.service || 'Service',
-            is_vip: !!sl.is_vip, _normalized: true,
-          };
+            is_vip: !!sl.is_vip, _normalized: true };
         });
         setServiceLines(lines);
       }).catch(function() {});
     });
-    return function() { ctrl.abort(); };
   },[selectedDate]);
-  // Optimistic setter for drag/status/booking actions
-  var setServiceLinesLocal = function(updater) {
-    setServiceLines(updater);
-  };
 
   const[waitlist,setWaitlist]=useState([]);
   const _initTechs=useMemo(function(){
@@ -288,7 +277,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
 
   // ── Drag-and-Drop (extracted to useCalendarDrag hook — Session 47) ──
   var drag=useCalendarDrag({
-    serviceLines, setServiceLines: setServiceLinesLocal,
+    serviceLines, setServiceLines,
     gridRef, gridContainerRef, headerRef,
     gridStartMin, colW, visibleStaff,
     setSelectedAppt, setActivityLog,
@@ -321,7 +310,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   // ── Handlers extracted to useCalendarHandlers (Session V18) ──
   var handlers = useCalendarHandlers({
     rbac: rbac, toast: toast, STAFF: STAFF, persist: persist, _settings: _settings,
-    serviceLines: serviceLines, setServiceLines: setServiceLinesLocal,
+    serviceLines: serviceLines, setServiceLines: setServiceLines,
     setActivityLog: setActivityLog, setTurnState: setTurnState,
     setSelectedAppt: setSelectedAppt, setBookingCtx: setBookingCtx,
     setBookingConfirm: setBookingConfirm, setBlockedTimes: setBlockedTimes,
@@ -458,7 +447,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
           </div>
         </div>
         {/* CALENDAR GRID */}
-        <div ref={gridContainerRef} style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
+        <div ref={gridContainerRef} style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative',transform:'translateZ(0)'}}>
           <AreaTag id="CAL-GRID" pos="tr" />
           {/* Tech headers row */}
           <div style={{display:'flex',flexShrink:0,borderBottom:`1px solid ${C.borderMedium}`}}>
@@ -484,7 +473,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
           {/* Body: time column + grid side by side */}
           <div style={{flex:1,display:'flex',overflow:'hidden'}}>
             {/* Time column — no scrollbar, position synced via JS */}
-            <div ref={timeColRef} style={{width:TIME_COL_W,minWidth:TIME_COL_W,flexShrink:0,overflowY:'hidden',overflowX:'hidden',background:C.grid,borderRight:`1px solid ${C.borderLight}`}}>
+            <div ref={timeColRef} style={{width:TIME_COL_W,minWidth:TIME_COL_W,flexShrink:0,overflowY:'hidden',overflowX:'hidden',background:C.grid,borderRight:`1px solid ${C.borderLight}`,transform:'translateZ(0)'}}>
               <div style={{position:'relative',height:totalRows*ROW_H}}>
                 {Array.from({length:totalRows},(_,i)=>{
                   const min=gridStartMin+i*15;const h=Math.floor(min/60),m=min%60;
@@ -506,10 +495,9 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
               onTouchStart={e=>{const t=e.touches[0];if(t)handleSlotStart(t.clientX,t.clientY,e.target,e.currentTarget);}}
               onTouchEnd={e=>{const t=e.changedTouches[0];if(t)handleSlotEnd(t.clientX,t.clientY);}}
               onContextMenu={handleContextMenu}
-              style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto',contain:'style layout'}}>
-              <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%'}}>
+              style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto',contain:'strict',willChange:'transform'}}>
+              <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%',transform:'translateZ(0)'}}>
                 <StaticGridLines totalRows={totalRows} gridStartMin={gridStartMin} ROW_H={ROW_H} colW={colW} staffCount={visibleStaff.length} />
-                {/* DRAG PREVIEW */}
                 {dragging&&dragPreview&&colW>0&&(()=>{
                   const sl=serviceLines.find(s=>s.id===dragging.slId);if(!sl)return null;
                   const topPx=((dragPreview.startMin-gridStartMin)/15)*ROW_H;
@@ -525,9 +513,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
                 {!storeInitialized&&serviceLines.length===0&&colW>0&&(
                   <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,zIndex:4,pointerEvents:'none'}}>
                     {visibleStaff.map(function(_s,ci){
-                      // 3 skeleton bars per column at staggered positions
                       return [0,1,2].map(function(bi){
-                        var topMin=[30,120,240][bi]; // 9:00, 10:30, 12:30 offset from grid start
+                        var topMin=[30,120,240][bi];
                         var durMin=[45,60,30][bi];
                         var topPx=(topMin/15)*ROW_H;
                         var hPx=Math.max(44,(durMin/15)*ROW_H);

@@ -1,11 +1,3 @@
-/**
- * DateStatusDot.jsx — Loading indicator for the date header
- * Session V24 | Extracted from CalendarDayView.
- *
- * Owns the storeLoading and storeSource Zustand selectors.
- * Only THIS component re-renders when loading/source changes,
- * preventing the entire CalendarDayView from re-evaluating its 40+ children.
- */
 import { useTheme } from '../../lib/ThemeContext';
 import { useAppointmentStore } from '../../lib/stores/appointmentStore';
 
