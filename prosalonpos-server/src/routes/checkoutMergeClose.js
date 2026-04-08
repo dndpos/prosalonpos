@@ -59,8 +59,11 @@ async function runTransaction(tx, absorber, absorbed, paymentCreates, closeData,
     total_cents: closeData.total_cents || 0,
     payment_method: closeData.payment_method || null,
     cashier_id: closeData.cashier_id || null,
-    closed_at: new Date(),
   };
+  // closed_at only if merge fields are available (column may not be migrated)
+  if (useMergeFields) {
+    updateData.closed_at = new Date();
+  }
   if (useMergeFields && displayNum) {
     updateData.display_number = displayNum;
   }
@@ -122,8 +125,9 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
         return runTransaction(tx, absorber, absorbed, paymentCreates, closeData, displayNum, totalDeposit, true);
       });
     } catch (firstErr) {
-      if (firstErr.message && (firstErr.message.indexOf('display_number') >= 0 || firstErr.message.indexOf('merged_into') >= 0)) {
-        console.warn('[merge-and-close] Merge columns missing, retrying without:', firstErr.message);
+      var msg = firstErr.message || '';
+      if (msg.indexOf('display_number') >= 0 || msg.indexOf('merged_into') >= 0 || msg.indexOf('closed_at') >= 0) {
+        console.warn('[merge-and-close] Schema columns missing, retrying without:', msg);
         result = await prisma.$transaction(function(tx) {
           return runTransaction(tx, absorber, absorbed, paymentCreates, closeData, displayNum, totalDeposit, false);
         });
