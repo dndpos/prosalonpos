@@ -115,12 +115,22 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   // ── Service lines from appointment store ──
   var storeServiceLines = useAppointmentStore(function(s){ return s.serviceLines; });
   var storeLoading = useAppointmentStore(function(s){ return s.loading; });
-  var storeRefreshing = useAppointmentStore(function(s){ return s.refreshing; });
   var storeSource = useAppointmentStore(function(s){ return s.source; });
   var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
-  // Sync from store → local state
-  useEffect(function(){ setServiceLines(storeServiceLines); },[storeServiceLines]);
+  // Optimistic lock: when local state is updated by user action (drag, status change),
+  // suppress store→local sync for 2s to prevent socket-triggered refetch from
+  // causing a re-render flash. The lock ref is set by setServiceLinesLocal.
+  var _optimisticLock = useRef(0);
+  var setServiceLinesLocal = function(updater) {
+    _optimisticLock.current = Date.now() + 2000;
+    setServiceLines(updater);
+  };
+  // Sync from store → local state (suppressed during optimistic window)
+  useEffect(function(){
+    if (Date.now() < _optimisticLock.current) return;
+    setServiceLines(storeServiceLines);
+  },[storeServiceLines]);
   // Fetch service lines when date changes
   useEffect(function(){
     var d = selectedDate;
@@ -260,7 +270,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
 
   // ── Drag-and-Drop (extracted to useCalendarDrag hook — Session 47) ──
   var drag=useCalendarDrag({
-    serviceLines, setServiceLines,
+    serviceLines, setServiceLines: setServiceLinesLocal,
     gridRef, gridContainerRef, headerRef,
     gridStartMin, colW, visibleStaff,
     setSelectedAppt, setActivityLog,
@@ -293,7 +303,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   // ── Handlers extracted to useCalendarHandlers (Session V18) ──
   var handlers = useCalendarHandlers({
     rbac: rbac, toast: toast, STAFF: STAFF, persist: persist, _settings: _settings,
-    serviceLines: serviceLines, setServiceLines: setServiceLines,
+    serviceLines: serviceLines, setServiceLines: setServiceLinesLocal,
     setActivityLog: setActivityLog, setTurnState: setTurnState,
     setSelectedAppt: setSelectedAppt, setBookingCtx: setBookingCtx,
     setBookingConfirm: setBookingConfirm, setBlockedTimes: setBlockedTimes,
@@ -361,8 +371,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         <button onClick={()=>shiftDate(-1)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'4px 8px'}}>‹</button>
         <div style={{color:C.textPrimary,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:6}}>
           {dayShort}
-          {(storeLoading||storeRefreshing)&&<span style={{display:'inline-block',width:14,height:14,border:'2px solid '+C.borderMedium,borderTopColor:C.blueLight,borderRadius:'50%',animation:'spinDate 0.6s linear infinite'}}/> }
-          {!storeLoading&&!storeRefreshing&&<span title={storeSource==='api'?'Live data':'Mock data'} style={{width:7,height:7,borderRadius:'50%',background:storeSource==='api'?'#22C55E':'#EAB308',flexShrink:0}}/>}
+          {storeLoading&&<span style={{display:'inline-block',width:14,height:14,border:'2px solid '+C.borderMedium,borderTopColor:C.blueLight,borderRadius:'50%',animation:'spinDate 0.6s linear infinite'}}/> }
+          {!storeLoading&&<span title={storeSource==='api'?'Live data':'Mock data'} style={{width:7,height:7,borderRadius:'50%',background:storeSource==='api'?'#22C55E':'#EAB308',flexShrink:0}}/>}
         </div>
         <button onClick={()=>shiftDate(1)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'4px 8px'}}>›</button>
         <button onClick={()=>setSelectedDate(new Date())}
@@ -480,10 +490,6 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
               onTouchEnd={e=>{const t=e.changedTouches[0];if(t)handleSlotEnd(t.clientX,t.clientY);}}
               onContextMenu={handleContextMenu}
               style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto'}}>
-              {/* DEBUG OVERLAY — temporary diagnostic, remove after fix */}
-              <div style={{position:'sticky',top:0,left:0,zIndex:99,background:'rgba(0,0,0,0.75)',color:'#0f0',fontSize:10,fontFamily:'monospace',padding:'2px 6px',pointerEvents:'none',whiteSpace:'nowrap'}}>
-                gW={gridWidth} colW={Math.round(colW)} vStaff={visibleStaff.length} vCols={visibleCols} sLines={serviceLines.length} storeSL={storeServiceLines.length} loading={storeLoading?'Y':'N'} refresh={storeRefreshing?'Y':'N'}
-              </div>
               <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%'}}>
                 {/* GRID LINES */}
                 {Array.from({length:totalRows},(_,i)=>{
