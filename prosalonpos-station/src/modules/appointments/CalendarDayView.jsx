@@ -363,6 +363,10 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         })}
         {/* Center — Date Navigation */}
         <div style={{flex:1}}/>
+        {/* DEBUG — remove after fixing flash */}
+        <div style={{position:'fixed',bottom:4,left:8,fontSize:10,fontWeight:600,color:'#FDE68A',background:'rgba(0,0,0,0.7)',padding:'2px 8px',borderRadius:4,zIndex:99999,fontFamily:'monospace',pointerEvents:'none'}}>
+          local:{serviceLines.length} store:{storeServiceLines.length} load:{storeLoading?'Y':'N'}
+        </div>
         <button onClick={()=>shiftDate(-1)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'4px 8px'}}>‹</button>
         <div style={{color:C.textPrimary,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:6}}>
           {dayShort}
