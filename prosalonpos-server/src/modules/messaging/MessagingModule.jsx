@@ -1,0 +1,79 @@
+import AreaTag from '../../components/ui/AreaTag';
+import { useTheme } from '../../lib/ThemeContext';
+/**
+ * Pro Salon POS — Messaging Module (Container)
+ * Session 8: Text messaging module with 4 tabs.
+ * Renders in OwnerDashboard right panel when sidebar "Messaging" is tapped.
+ *
+ * Tabs: Settings | Templates | Message log | Blasts
+ * Each tab is a separate sub-component for maintainability.
+ */
+
+import React, { useState } from 'react';
+import MessagingSettings from './MessagingSettings';
+import MessagingTemplates from './MessagingTemplates';
+import MessagingLog from './MessagingLog';
+import MessagingBlasts from './MessagingBlasts';
+
+
+var TABS = [
+  { id: 'settings',  label: 'Settings',  bg:'#182A3A', text:'#7EB8DC', border:'#264460' },
+  { id: 'templates', label: 'Templates', bg:'#0E3D3D', text:'#5EEAD4', border:'#1A5C5C' },
+  { id: 'log',       label: 'Message log', bg:'#1E2554', text:'#A5B4FC', border:'#2E3A7A' },
+  { id: 'blasts',    label: 'Blasts',    bg:'#3D2608', text:'#FBB040', border:'#5C3A10' },
+];
+
+export default function MessagingModule({ salonSettings, onSettingsUpdate }) {
+  var T = useTheme();
+  var [activeTab, setActiveTab] = useState('settings');
+
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', fontFamily: "'Inter',system-ui,sans-serif", position: 'relative' }}>
+        <AreaTag id="MSG" />
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px 0 20px' }}>
+        <span style={{ fontSize: 18, fontWeight: 600, color: T.text }}>Text messaging</span>
+        <span style={{ fontSize: 12, color: T.textMuted }}>Session 8 · 7 message types · SMS + Email</span>
+      </div>
+
+      {/* ── Tabs (proper button tabs) ── */}
+      <div style={{ display: 'flex', gap: 6, padding: '12px 20px' }}>
+        {TABS.map(function(tab) {
+          var active = activeTab === tab.id;
+          return (
+            <div
+              key={tab.id}
+              onClick={function() { setActiveTab(tab.id); }}
+              onMouseEnter={function(e) { if (!active) { e.currentTarget.style.borderWidth = '2px'; e.currentTarget.style.padding = '7px 17px'; } }}
+              onMouseLeave={function(e) { if (!active) { e.currentTarget.style.backgroundColor = tab.bg; e.currentTarget.style.color = tab.text; e.currentTarget.style.borderColor = tab.border; e.currentTarget.style.borderWidth = '1px'; e.currentTarget.style.padding = '8px 18px'; } }}
+              style={{
+                padding: '8px 18px', borderRadius: 6, fontSize: 13, fontWeight: active ? 600 : 500,
+                cursor: 'pointer', userSelect: 'none',
+                backgroundColor: tab.bg,
+                color: tab.text,
+                border: active ? '2px solid ' + tab.border : '1px solid ' + tab.border,
+                transition: 'background-color 150ms, color 150ms',
+              }}
+            >{tab.label}</div>
+          );
+        })}
+      </div>
+
+      {/* ── Tab content ── */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '4px 20px 20px 20px' }}>
+        {activeTab === 'settings' && (
+          <MessagingSettings settings={salonSettings} onUpdate={onSettingsUpdate} />
+        )}
+        {activeTab === 'templates' && (
+          <MessagingTemplates />
+        )}
+        {activeTab === 'log' && (
+          <MessagingLog />
+        )}
+        {activeTab === 'blasts' && (
+          <MessagingBlasts settings={salonSettings} />
+        )}
+      </div>
+    </div>
+  );
+}
