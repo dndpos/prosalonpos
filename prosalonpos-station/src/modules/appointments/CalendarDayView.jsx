@@ -150,8 +150,10 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         }
       });
       // Clock out techs no longer punched in (unless busy with service)
+      // Also remove techs not in STAFF (e.g. show_on_calendar toggled off)
+      var staffIds = {}; STAFF.forEach(function(x) { staffIds[x.id] = true; });
       prev.techs.forEach(function(t) {
-        if (t.status !== 'off' && !_clockedInIds[t.id] && !busyIds[t.id]) {
+        if (t.status !== 'off' && (!_clockedInIds[t.id] || !staffIds[t.id]) && !busyIds[t.id]) {
           s = TurnEngine.clockOut(s, t.id).state;
         }
       });
