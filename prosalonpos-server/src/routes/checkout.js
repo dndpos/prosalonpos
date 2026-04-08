@@ -251,6 +251,21 @@ router.post('/tickets/:id/close', async function(req, res, next) {
     }
 
     emit(req, 'ticket:closed');
+    
+    // Mark appointment + service lines as checked_out (same as quick-close path)
+    var apptId = existing.appointment_id || data.appointment_id;
+    if (apptId) {
+      await prisma.appointment.update({
+        where: { id: apptId },
+        data: { status: 'checked_out', version: { increment: 1 } },
+      }).catch(function() {}); // non-fatal
+      await prisma.serviceLine.updateMany({
+        where: { appointment_id: apptId },
+        data: { status: 'checked_out' },
+      }).catch(function() {}); // non-fatal
+      emit(req, 'appointment:updated');
+    }
+
     res.json({ ticket: formatTicket(ticket) });
   } catch (err) {
     console.error('[Close] FAILED:', err.message);
