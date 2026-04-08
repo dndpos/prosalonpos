@@ -349,7 +349,6 @@ export default function TimeClockTimesheets({ clockPunches, onAddPunch, onEditPu
       start: startDate + 'T00:00:00.000Z',
       end: endDate + 'T23:59:59.999Z',
     }).then(function(data) {
-      if (data) console.log('[Timesheets] Cleared ' + (data.deleted || 0) + ' punches');
       scheduleRefetch();
     }).catch(function(err) {
       console.error('[Timesheets] Clear all failed:', err.message);

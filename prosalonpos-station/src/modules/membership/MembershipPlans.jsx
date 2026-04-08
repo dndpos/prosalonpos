@@ -331,7 +331,6 @@ export default function MembershipPlans({ catalogLayout }) {
   var planPerks = editingPerks;
 
   function savePlan() {
-    console.log('[MembershipPlans] savePlan CALLED — ep.active:', ep.active, 'ep.name:', ep.name);
     if (!ep.name.trim()) { toast.show('Plan name is required.', 'error'); return; }
     if (ep.price_cents <= 0) { toast.show('Price must be greater than $0.', 'error'); return; }
 
@@ -363,17 +362,13 @@ export default function MembershipPlans({ catalogLayout }) {
       }),
     };
 
-    console.log('[MembershipPlans] savePlan — isNew:', !!ep._isNew, 'id:', ep.id, 'active:', payload.active, 'payload:', JSON.stringify(payload));
-
     if (ep._isNew) {
       storeCreatePlan(payload).then(function(plan) {
-        console.log('[MembershipPlans] Plan created OK:', plan);
         toast.show('Plan created', 'success');
         setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       }).catch(function(err) { console.error('[MembershipPlans] Create FAILED:', err); toast.show('Save failed: ' + err.message, 'error'); });
     } else {
       storeUpdatePlan(ep.id, payload).then(function(plan) {
-        console.log('[MembershipPlans] Plan updated OK:', plan);
         toast.show('Plan updated', 'success');
         setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       }).catch(function(err) { console.error('[MembershipPlans] Update FAILED:', err); toast.show('Save failed: ' + err.message, 'error'); });
@@ -382,9 +377,7 @@ export default function MembershipPlans({ catalogLayout }) {
 
   function deletePlan() {
     toast.confirm('Delete this plan? This cannot be undone.', function() {
-      console.log('[MembershipPlans] Deleting plan:', ep.id);
       storeDeletePlan(ep.id).then(function() {
-        console.log('[MembershipPlans] Plan deleted OK');
         toast.show('Plan deleted', 'success');
         setEditingPlan(null); setEditingPerks([]); setOriginalSnapshot(null); setShowUnsavedPopup(false);
       }).catch(function(err) { console.error('[MembershipPlans] Delete FAILED:', err); toast.show('Delete failed: ' + err.message, 'error'); });

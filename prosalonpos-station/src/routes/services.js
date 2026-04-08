@@ -59,15 +59,50 @@ router.put('/categories/:id', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── DELETE /categories/:id — Soft delete ──
+// ── DELETE /categories/:id — Hard delete category + orphaned services ──
 router.delete('/categories/:id', async function(req, res, next) {
   try {
-    // Hard delete — cascade removes service_links + category_staff
+    var existing = await prisma.serviceCategory.findFirst({
+      where: { id: req.params.id, salon_id: req.salon_id }
+    });
+    if (!existing) return res.status(404).json({ error: 'Category not found' });
+
+    // Find services that ONLY belong to this category (will become orphaned)
+    var linksInCat = await prisma.serviceCatalogCategory.findMany({
+      where: { category_id: req.params.id },
+      select: { service_catalog_id: true }
+    });
+    var svcIds = linksInCat.map(function(l) { return l.service_catalog_id; });
+
+    // For each service, check if it has links to OTHER categories
+    var orphanedIds = [];
+    if (svcIds.length > 0) {
+      var otherLinks = await prisma.serviceCatalogCategory.findMany({
+        where: {
+          service_catalog_id: { in: svcIds },
+          category_id: { not: req.params.id }
+        },
+        select: { service_catalog_id: true }
+      });
+      var hasOtherCat = {};
+      otherLinks.forEach(function(l) { hasOtherCat[l.service_catalog_id] = true; });
+      orphanedIds = svcIds.filter(function(id) { return !hasOtherCat[id]; });
+    }
+
+    // Delete category (cascade removes junction links + category_staff)
     await prisma.serviceCategory.delete({
       where: { id: req.params.id }
     });
+
+    // Delete orphaned services (no remaining category links)
+    if (orphanedIds.length > 0) {
+      await prisma.serviceCatalog.deleteMany({
+        where: { id: { in: orphanedIds } }
+      });
+    }
+
     emit(req, 'category:deleted');
-    res.json({ success: true });
+    res.json({ success: true, deletedServices: orphanedIds.length });
   } catch (err) { next(err); }
 });
 
@@ -179,6 +214,11 @@ router.put('/:id', async function(req, res, next) {
 // ── DELETE /:id — Soft delete ──
 router.delete('/:id', async function(req, res, next) {
   try {
+    var existing = await prisma.serviceCatalog.findFirst({
+      where: { id: req.params.id, salon_id: req.salon_id }
+    });
+    if (!existing) return res.status(404).json({ error: 'Service not found' });
+
     var svc = await prisma.serviceCatalog.update({
       where: { id: req.params.id },
       data: { active: false, version: { increment: 1 } }

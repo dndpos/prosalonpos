@@ -36,7 +36,6 @@ var usePackageStore = create(function(set, get) {
       try {
         var data = await api.get('/packages/client/' + clientId);
         set({ clientPackages: data.clientPackages || [], clientPackageItems: data.clientPackageItems || [] });
-        console.log('[packageStore] Fetched client packages:', (data.clientPackages || []).length, 'items:', (data.clientPackageItems || []).length);
       } catch (err) { console.warn('[packageStore] Client packages fetch failed:', err.message); }
     },
 
@@ -48,7 +47,6 @@ var usePackageStore = create(function(set, get) {
       try {
         var data = await api.post('/packages/cleanup', {});
         if (data.packagesFixed > 0) {
-          console.log('[packageStore] Cleanup fixed', data.packagesFixed, 'stale packages');
         }
         return data;
       } catch (err) { console.warn('[packageStore] Cleanup failed:', err.message); }

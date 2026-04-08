@@ -40,7 +40,6 @@ export default function useGridPersistence(salonSettings, onSettingsUpdate) {
     saveTimer.current = setTimeout(function() {
       if (onSettingsUpdate) {
         onSettingsUpdate(GRID_KEY, layout);
-        console.log('[GridPersist] Layout saved to settings');
       }
     }, 1000);
   }, [onSettingsUpdate]);
@@ -52,7 +51,6 @@ export default function useGridPersistence(salonSettings, onSettingsUpdate) {
     clearTimeout(saveTimer.current);
     if (onSettingsUpdate) {
       onSettingsUpdate(GRID_KEY, layout);
-      console.log('[GridPersist] Layout saved immediately');
     }
   }
 

@@ -214,7 +214,7 @@ router.get('/client/:clientId', async function(req, res, next) {
   try {
     var clientId = req.params.clientId;
     var clientPkgs = await prisma.clientPackage.findMany({
-      where: { salon_id: req.salon_id, client_id: clientId },
+      where: { salon_id: req.salon_id, client_id: clientId, status: 'active' },
       include: { items: true },
       orderBy: { purchased_at: 'desc' },
     });
@@ -329,9 +329,9 @@ router.post('/redeem', async function(req, res, next) {
           client_package_id: b.client_package_id,
           client_package_item_id: b.client_package_item_id,
           ticket_id: b.ticket_id || null,
-          service_redeemed_id: b.service_redeemed_id,
+          service_redeemed_id: b.service_redeemed_id || null,
           service_redeemed_name: b.service_redeemed_name || '',
-          package_service_id: b.package_service_id,
+          package_service_id: b.package_service_id || null,
           package_service_name: b.package_service_name || '',
           upgrade_difference_cents: b.upgrade_difference_cents || 0,
           staff_id: b.staff_id || null,
@@ -362,6 +362,82 @@ router.post('/redeem', async function(req, res, next) {
       redemption: formatRedemption(result.redemption),
       clientPackageItem: formatClientItem(result.updatedItem),
     });
+  } catch (err) { next(err); }
+});
+
+// ════════════════════════════════════════════
+// POST /cleanup — Fix stale active packages where all items are depleted
+// One-time or periodic cleanup. Sets status='depleted' where appropriate.
+// ════════════════════════════════════════════
+router.post('/cleanup', async function(req, res, next) {
+  try {
+    var activePkgs = await prisma.clientPackage.findMany({
+      where: { salon_id: req.salon_id, status: 'active' },
+      include: { items: true },
+    });
+    var fixed = 0;
+    for (var i = 0; i < activePkgs.length; i++) {
+      var cp = activePkgs[i];
+      if (cp.items.length === 0) continue;
+      var allDepleted = cp.items.every(function(item) { return item.remaining <= 0; });
+      if (allDepleted) {
+        await prisma.clientPackage.update({ where: { id: cp.id }, data: { status: 'depleted' } });
+        fixed++;
+      }
+    }
+    res.json({ message: 'Cleanup complete', packagesFixed: fixed });
+  } catch (err) { next(err); }
+});
+
+// ════════════════════════════════════════════
+// PUT /client-package/:id/deactivate — Cancel/deactivate a client package
+// ════════════════════════════════════════════
+router.put('/client-package/:id/deactivate', async function(req, res, next) {
+  try {
+    var cp = await prisma.clientPackage.update({
+      where: { id: req.params.id },
+      data: { status: 'cancelled' },
+    });
+    emit(req, 'package:updated', { clientPackage: formatClientPackage(cp) });
+    res.json({ clientPackage: formatClientPackage(cp) });
+  } catch (err) { next(err); }
+});
+
+// ════════════════════════════════════════════
+// DELETE /client-package/:id — Delete a client package and its items/redemptions
+// For cleaning up test data only
+// ════════════════════════════════════════════
+router.delete('/client-package/:id', async function(req, res, next) {
+  try {
+    var id = req.params.id;
+    // Delete redemptions first (foreign key constraint)
+    await prisma.packageRedemption.deleteMany({ where: { client_package_id: id } });
+    // Delete items
+    await prisma.clientPackageItem.deleteMany({ where: { client_package_id: id } });
+    // Delete the client package
+    await prisma.clientPackage.delete({ where: { id: id } });
+    res.json({ deleted: true, id: id });
+  } catch (err) { next(err); }
+});
+
+// ════════════════════════════════════════════
+// DELETE /client-packages/client/:clientId — Delete ALL client packages for a client
+// For cleaning up test data only
+// ════════════════════════════════════════════
+router.delete('/client-packages/client/:clientId', async function(req, res, next) {
+  try {
+    var clientId = req.params.clientId;
+    var pkgs = await prisma.clientPackage.findMany({
+      where: { salon_id: req.salon_id, client_id: clientId },
+    });
+    var count = 0;
+    for (var i = 0; i < pkgs.length; i++) {
+      await prisma.packageRedemption.deleteMany({ where: { client_package_id: pkgs[i].id } });
+      await prisma.clientPackageItem.deleteMany({ where: { client_package_id: pkgs[i].id } });
+      await prisma.clientPackage.delete({ where: { id: pkgs[i].id } });
+      count++;
+    }
+    res.json({ deleted: count, client_id: clientId });
   } catch (err) { next(err); }
 });
 

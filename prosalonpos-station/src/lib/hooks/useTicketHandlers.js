@@ -42,8 +42,6 @@ export default function useTicketHandlers() {
   var redeemGiftCard = useGiftCardStore(function(s) { return s.redeemGiftCard; });
 
   function handleCloseTicket(ticket) {
-    console.log('[handleCloseTicket] ALL ITEMS:', (ticket.items || []).map(function(it) { return { id: it.id, type: it.type, name: it.name, planId: it.planId, packageId: it.packageId }; }));
-    console.log('[handleCloseTicket] CLIENT:', ticket.client);
     // Connection 1: mark each tech on this ticket as Available in the turn list
     var staffIds = [];
     (ticket.items || []).forEach(function(item) {
@@ -74,20 +72,15 @@ export default function useTicketHandlers() {
 
     // Connection 4: Membership — enroll new or renew existing
     var memItems = (ticket.items || []).filter(function(it) { return it.type === 'membership_sale'; });
-    console.log('[handleCloseTicket] Membership items found:', memItems.length, memItems.map(function(m) { return { planId: m.planId, isRenewal: m.isRenewal }; }));
-    console.log('[handleCloseTicket] ticket.client:', ticket.client ? { id: ticket.client.id, name: ticket.client.name || ticket.client.display_name } : 'NO CLIENT');
     memItems.forEach(function(memItem) {
       if (memItem.isRenewal && memItem.membershipId) {
         // Renewal — advance next_billing
-        console.log('[handleCloseTicket] Renewing membership:', memItem.membershipId);
         renewMember(memItem.membershipId).catch(function(err) {
           console.warn('[handleCloseTicket] Membership renewal failed:', err.message);
         });
       } else if (memItem.planId && ticket.client && ticket.client.id) {
         // New enrollment
-        console.log('[handleCloseTicket] Enrolling client', ticket.client.id, 'in plan', memItem.planId);
         enrollMember(ticket.client.id, memItem.planId).then(function(member) {
-          console.log('[handleCloseTicket] Membership enrolled OK:', member);
         }).catch(function(err) {
           console.warn('[handleCloseTicket] Membership enrollment failed:', err.message);
         });
@@ -98,12 +91,10 @@ export default function useTicketHandlers() {
 
     // Connection 5: Package — sell to client on ticket close
     var pkgItems = (ticket.items || []).filter(function(it) { return it.type === 'package_sale'; });
-    console.log('[handleCloseTicket] Package items found:', pkgItems.length, pkgItems.map(function(p) { return { packageId: p.packageId, price: p.price_cents }; }));
     pkgItems.forEach(function(pkgItem) {
       if (pkgItem.packageId && ticket.client && ticket.client.id) {
         var techName = pkgItem.tech || null;
         var techId = pkgItem.techId || null;
-        console.log('[handleCloseTicket] Selling package', pkgItem.packageId, 'to client', ticket.client.id);
         sellPackage({
           client_id: ticket.client.id,
           client_name: ticket.clientName || ticket.client.name || ticket.client.display_name || '',
@@ -112,7 +103,6 @@ export default function useTicketHandlers() {
           sold_by_staff_id: techId,
           sold_by_staff_name: techName,
         }).then(function(cp) {
-          console.log('[handleCloseTicket] Package sold OK:', cp);
         }).catch(function(err) {
           console.warn('[handleCloseTicket] Package sell failed:', err.message);
         });
@@ -123,7 +113,6 @@ export default function useTicketHandlers() {
 
     // Connection 5b: Gift Card — create card record in database when sold at checkout
     var gcItems = (ticket.items || []).filter(function(it) { return it.type === 'giftcard'; });
-    console.log('[handleCloseTicket] Gift card items found:', gcItems.length);
     // Gift card creation deferred to after DB ticket creation (needs real ticket ID)
     function createGiftCardsForTicket(dbTicketId) {
       if (gcItems.length === 0) return;
@@ -133,7 +122,6 @@ export default function useTicketHandlers() {
           var cardCode = gcItem.cardNumber || gcItem.code || ('GC-' + Date.now());
           var staffId = gcItem.techId || null;
           var staffName = gcItem.tech || null;
-          console.log('[handleCloseTicket] Creating gift card:', cardCode, 'amount:', gcItem.price_cents);
           return createGiftCard({
             code: cardCode,
             type: 'physical',
@@ -147,7 +135,6 @@ export default function useTicketHandlers() {
             staff_name: staffName,
             ticket_id: dbTicketId,
           }).then(function(card) {
-            console.log('[handleCloseTicket] Gift card created OK:', card.id, card.code);
           }).catch(function(err) {
             console.warn('[handleCloseTicket] Gift card creation FAILED:', err.message);
           });
@@ -160,7 +147,6 @@ export default function useTicketHandlers() {
       var gcPayments = (ticket.payments || []).filter(function(p) { return p.gc_id; });
       if (gcPayments.length === 0) return;
       gcPayments.forEach(function(p) {
-        console.log('[handleCloseTicket] Redeeming gift card:', p.gc_id, 'amount:', p.amount_cents || p.amountCents);
         redeemGiftCard(p.gc_id, {
           amount_cents: p.amount_cents || p.amountCents || 0,
           ticket_id: dbTicketId,
@@ -179,7 +165,6 @@ export default function useTicketHandlers() {
       if (!ticket.packageRedemptions || !ticket.client || !ticket.client.id) return;
       var redemptionEntries = Object.keys(ticket.packageRedemptions);
       if (redemptionEntries.length === 0) return;
-      console.log('[handleCloseTicket] Redeeming', redemptionEntries.length, 'packages with DB ticket ID:', dbTicketId);
       // Build all payloads first
       var payloads = redemptionEntries.map(function(itemId) {
         var red = ticket.packageRedemptions[itemId];
@@ -205,9 +190,7 @@ export default function useTicketHandlers() {
         var pkgName = payload._pkgName;
         delete payload._pkgName;
         chain = chain.then(function() {
-          console.log('[handleCloseTicket] Redeem payload:', JSON.stringify(payload));
           return redeemPackage(payload).then(function(result) {
-            console.log('[handleCloseTicket] Package redeemed OK:', pkgName, payload.service_redeemed_name, result);
           }).catch(function(err) {
             console.warn('[handleCloseTicket] Package redeem FAILED:', err.message);
           });
@@ -270,7 +253,6 @@ export default function useTicketHandlers() {
           };
           return storeCloseTicket(reopenId, closeData);
         }).then(function() {
-          console.log('[handleCloseTicket] Reopened ticket closed:', reopenId);
           redeemPackagesForTicket(reopenId);
           createGiftCardsForTicket(reopenId);
           redeemGiftCardPayments(reopenId);
@@ -313,7 +295,6 @@ export default function useTicketHandlers() {
           };
           return storeCloseTicket(dbTicketId, closeData);
         }).then(function() {
-          console.log('[handleCloseTicket] Ticket closed in database:', dbTicketId);
           redeemPackagesForTicket(dbTicketId);
           createGiftCardsForTicket(dbTicketId);
           redeemGiftCardPayments(dbTicketId);
@@ -367,7 +348,6 @@ export default function useTicketHandlers() {
           }),
         };
         storeQuickCloseTicket(quickData).then(function(dbTicket) {
-          console.log('[handleCloseTicket] Quick-close ticket saved:', dbTicket.id);
           redeemPackagesForTicket(dbTicket.id);
           createGiftCardsForTicket(dbTicket.id);
           redeemGiftCardPayments(dbTicket.id);
@@ -432,7 +412,6 @@ export default function useTicketHandlers() {
         }),
       };
       storeUpdateTicket(existingId, updateData).then(function() {
-        console.log('[handlePrintHold] Ticket updated:', existingId);
       }).catch(function(err) {
         console.warn('[handlePrintHold] Ticket update failed:', err.message);
       });
@@ -457,7 +436,6 @@ export default function useTicketHandlers() {
         }),
       };
       storeCreateTicket(ticketData).then(function(ticket) {
-        console.log('[handlePrintHold] Ticket created:', ticket.id);
       }).catch(function(err) {
         console.warn('[handlePrintHold] DB save failed, keeping local:', err.message);
         var ticket = {
@@ -542,7 +520,6 @@ export default function useTicketHandlers() {
       void_by: data.staffName || 'Manager',
       reverse_tip: !!data.reverseTip,
     }).then(function(ticket) {
-      console.log('[handleVoidTicket] Voided in DB:', ticketId);
     }).catch(function(err) {
       console.warn('[handleVoidTicket] API void failed:', err.message);
     });
@@ -564,12 +541,10 @@ export default function useTicketHandlers() {
       tip_refunded_cents: data.tipRefunded_cents || 0,
       restore_package_credits: hasPkgRedeemed || false,
     }).then(function(refund) {
-      console.log('[handleRefundTicket] Refunded in DB:', ticketId);
       // Refresh gift card balances after refund
       var fetchGCs = useGiftCardStore.getState().fetchGiftCards;
       if (fetchGCs) fetchGCs();
       if (refund && refund.restoredPkgCredits && refund.restoredPkgCredits.length > 0) {
-        console.log('[handleRefundTicket] Restored package credits:', refund.restoredPkgCredits);
         // Refresh client packages in the store
         if (theTicket && (theTicket.client_id || theTicket.clientId)) {
           var fetchPkgs = usePackageStore.getState().fetchClientPackages;

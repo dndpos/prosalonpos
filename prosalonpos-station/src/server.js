@@ -9,9 +9,12 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { existsSync } from 'fs';
+import { execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -53,11 +56,40 @@ var PORT = process.env.PORT || 3001;
 
 var app = express();
 
+// Trust Railway's reverse proxy (fixes express-rate-limit X-Forwarded-For warning)
+app.set('trust proxy', 1);
+
 // Gzip compression — reduces response sizes by 60-80% over the wire
 app.use(compression());
 
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false,  // frontend serves its own CSP
+  crossOriginEmbedderPolicy: false
+}));
+
 // Parse JSON bodies
 app.use(express.json({ limit: '10mb' }));
+
+// Rate limiting — protect login endpoint from brute-force PIN attempts
+var loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,                  // 100 attempts per window per IP
+  message: { error: 'Too many login attempts. Please wait 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// General API rate limiter — generous for normal use, prevents abuse
+var apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 300,            // 300 requests per minute per IP
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use('/api/', apiLimiter);
 
 // CORS — allow frontend on localhost (dev), Railway, or configured domain
 app.use(cors({
@@ -67,7 +99,9 @@ app.use(cors({
     if (origin.indexOf('localhost') !== -1 || origin.indexOf('127.0.0.1') !== -1) return callback(null, true);
     if (origin.indexOf('.railway.app') !== -1) return callback(null, true);
     if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return callback(null, true);
-    // In production with no FRONTEND_URL set, allow all (single-origin deploy)
+    // Reject unknown origins in production when FRONTEND_URL is set
+    if (process.env.FRONTEND_URL) return callback(new Error('CORS not allowed'));
+    // Allow all only when FRONTEND_URL is not configured (single-origin deploy)
     callback(null, true);
   },
   credentials: true
@@ -80,7 +114,7 @@ app.get('/api/health', function(req, res) {
 });
 
 // ── Public routes (no auth required) ──
-app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
 
 // ── Protected routes (JWT required) ──
@@ -184,6 +218,20 @@ var modeLabel = isProduction ? 'PRODUCTION' : 'DEVELOPMENT';
 // Run license check (only enforced in production/SQLite mode)
 var licenseResult = startupLicenseCheck();
 
+// ── Ensure database schema is up to date (BEFORE starting server) ──
+// On Railway, db push can't run during build (no DB access).
+// Run it here before listen() so tables exist before any requests arrive.
+try {
+  console.log('[Schema] Running prisma db push...');
+  execSync('npx prisma db push --skip-generate --accept-data-loss', {
+    cwd: dirname(fileURLToPath(import.meta.url)) + '/..',
+    stdio: 'inherit'
+  });
+  console.log('[Schema] ✅ Database schema is up to date');
+} catch (schemaErr) {
+  console.error('[Schema] ❌ prisma db push failed:', schemaErr.message);
+}
+
 httpServer.listen(PORT, async function() {
   console.log('');
   console.log('  ╔══════════════════════════════════════════╗');
@@ -207,6 +255,7 @@ httpServer.listen(PORT, async function() {
   // ── Auto-bootstrap: ensure salon + default data exist ──
   // Runs in ALL modes (dev, cloud, .exe). On a fresh database, creates
   // salon record, default categories, services, settings, and one manager.
+  console.log('[Bootstrap] Starting bootstrap check...');
   try {
     var salonName = (licenseResult.status === 'valid' && licenseResult.license)
       ? licenseResult.license.salon_name
@@ -217,11 +266,15 @@ httpServer.listen(PORT, async function() {
 
     var result = await bootstrapSalon(salonName, licKey);
 
+    console.log('[Bootstrap] Salon: "' + result.salon.name + '" | code: ' + result.salon.salon_code + ' | id: ' + result.salon.id);
+
     if (result.created) {
-      console.log('[Bootstrap] ✅ New salon created — code: ' + result.salon.salon_code);
+      console.log('[Bootstrap] ✅ New salon created');
       console.log('[Bootstrap]    Owner PIN: 0000 | Manager PIN: 1234');
     } else if (result.seeded) {
       console.log('[Bootstrap] ✅ Default data seeded into existing salon');
+    } else {
+      console.log('[Bootstrap] ✅ Existing salon — no changes needed');
     }
 
     // Auto-remove old owner Staff records (migration cleanup from pre-S86)
@@ -234,8 +287,89 @@ httpServer.listen(PORT, async function() {
       });
       console.log('[Bootstrap] ✅ Removed ' + oldOwners.length + ' old owner staff record(s)');
     }
+
+    // ── Self-heal: populate ServiceCatalogCategory if empty ──
+    // Fixes salons bootstrapped before junction table existed.
+    // Idempotent — skips if any links already exist for this salon.
+    try {
+      var salonId = result.salon.id;
+      var allServices = await prisma.serviceCatalog.findMany({
+        where: { salon_id: salonId, active: true },
+        include: { category_links: true }
+      });
+      var allCategories = await prisma.serviceCategory.findMany({
+        where: { salon_id: salonId }
+      });
+
+      // Only run if we have services AND categories but zero junction records
+      var unlinkedServices = allServices.filter(function(s) {
+        return !s.category_links || s.category_links.length === 0;
+      });
+
+      if (unlinkedServices.length > 0 && allCategories.length > 0) {
+        console.log('[Bootstrap] 🔧 Found ' + unlinkedServices.length + ' services with no category links — auto-linking...');
+
+        // Build category lookup by lowercase name
+        var catByName = {};
+        allCategories.forEach(function(c) {
+          catByName[c.name.toLowerCase().trim()] = c.id;
+        });
+
+        // Name-based heuristic matching
+        var hairKeywords = ['haircut', 'blowout', 'updo', 'trim', 'shampoo', 'style', 'extension', 'perm', 'keratin', 'straighten'];
+        var colorKeywords = ['color', 'highlight', 'balayage', 'ombre', 'toner', 'gloss', 'bleach', 'dye'];
+        var nailKeywords = ['manicure', 'pedicure', 'gel', 'acrylic', 'nail', 'shellac', 'dip powder', 'polish'];
+        var skinKeywords = ['facial', 'wax', 'microderm', 'peel', 'mask', 'dermaplaning', 'lash', 'brow', 'threading', 'tint'];
+        var menKeywords = ["men's", 'beard', 'shave', 'fade', 'lineup', 'taper'];
+
+        function matchCategory(svcName) {
+          var lower = svcName.toLowerCase();
+          if (catByName['men'] && menKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['men'];
+          if (catByName['color'] && colorKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['color'];
+          if (catByName['nails'] && nailKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['nails'];
+          if (catByName['skin'] && skinKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['skin'];
+          if (catByName['hair'] && hairKeywords.some(function(k) { return lower.indexOf(k) !== -1; })) return catByName['hair'];
+          // Fallback: put in first category so it's visible somewhere
+          return allCategories[0].id;
+        }
+
+        var linked = 0;
+        for (var ui = 0; ui < unlinkedServices.length; ui++) {
+          var svc = unlinkedServices[ui];
+          var catId = matchCategory(svc.name);
+          try {
+            await prisma.serviceCatalogCategory.create({
+              data: {
+                service_catalog_id: svc.id,
+                category_id: catId,
+                position: ui,
+              }
+            });
+            linked++;
+          } catch (linkErr) {
+            // Skip duplicates (unique constraint)
+            if (linkErr.code !== 'P2002') {
+              console.error('[Bootstrap] ⚠️  Link failed for "' + svc.name + '":', linkErr.message);
+            }
+          }
+        }
+        console.log('[Bootstrap] ✅ Auto-linked ' + linked + ' services to categories');
+      }
+    } catch (healErr) {
+      console.error('[Bootstrap] ⚠️  Category link self-heal failed:', healErr.message);
+    }
+
   } catch (err) {
     console.error('[Bootstrap] ❌ Auto-bootstrap failed:', err.message);
     console.error(err.stack);
+  }
+
+  // ── Diagnostic: count tickets in DB ──
+  try {
+    var ticketCount = await prisma.ticket.count();
+    var paidCount = await prisma.ticket.count({ where: { status: 'paid' } });
+    console.log('[Diagnostic] Total tickets in DB:', ticketCount, '| Paid:', paidCount);
+  } catch (diagErr) {
+    console.error('[Diagnostic] Could not count tickets:', diagErr.message);
   }
 });

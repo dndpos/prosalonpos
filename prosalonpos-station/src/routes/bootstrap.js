@@ -76,9 +76,10 @@ router.get('/', async function(req, res, next) {
         orderBy: { display_name: 'asc' }
       }),
 
-      // Services
+      // Services (with category junction links)
       prisma.serviceCatalog.findMany({
         where: { salon_id: salonId },
+        include: { category_links: true },
         orderBy: { name: 'asc' }
       }),
 
@@ -133,10 +134,11 @@ router.get('/', async function(req, res, next) {
         where: { salon_id: salonId }
       }),
 
-      // Membership plans
+      // Membership plans (include perks, all plans for Owner Dashboard)
       prisma.membershipPlan.findMany({
-        where: { salon_id: salonId, active: true },
-        orderBy: { name: 'asc' }
+        where: { salon_id: salonId },
+        include: { perks: { orderBy: { position: 'asc' } } },
+        orderBy: { position: 'asc' }
       }),
 
       // Messaging templates
@@ -147,7 +149,8 @@ router.get('/', async function(req, res, next) {
 
       // Packages
       prisma.servicePackage.findMany({
-        where: { salon_id: salonId, active: true },
+        where: { salon_id: salonId },
+        include: { items: true },
         orderBy: { name: 'asc' }
       }),
 
@@ -178,6 +181,14 @@ router.get('/', async function(req, res, next) {
     // Include owner_pin_sha256 for local PIN check (same as settings route)
     if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
 
+    // Map service category_links to category_ids array (same as /services route)
+    services = services.map(function(s) {
+      var obj = Object.assign({}, s);
+      obj.category_ids = s.category_links ? s.category_links.map(function(l) { return l.category_id; }) : [];
+      delete obj.category_links;
+      return obj;
+    });
+
     // Clean staff data — add pin_display for non-owners
     staff = staff.map(function(s) {
       var copy = Object.assign({}, s);
@@ -201,7 +212,10 @@ router.get('/', async function(req, res, next) {
       loyaltyProgram: loyaltyProgram,
       membershipPlans: membershipPlans || [],
       templates: templates,
-      packages: packages,
+      packages: (packages || []).map(function(pkg) {
+        return { id: pkg.id, salon_id: pkg.salon_id, location_id: pkg.location_id, name: pkg.name, description: pkg.description, price_cents: pkg.price_cents, expiration_enabled: pkg.expiration_enabled, expiration_days: pkg.expiration_days, transferable: pkg.transferable, refundable: pkg.refundable, active: pkg.active, created_at: pkg.created_at, updated_at: pkg.updated_at };
+      }),
+      packageItems: (function() { var items = []; (packages || []).forEach(function(pkg) { (pkg.items || []).forEach(function(item) { items.push({ id: item.id, package_id: item.package_id, service_id: item.service_id, service_name: item.service_name, quantity: item.quantity }); }); }); return items; })(),
       clients: clients,
       today: today,
     });

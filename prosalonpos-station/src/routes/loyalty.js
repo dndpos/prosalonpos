@@ -124,6 +124,15 @@ router.put('/tiers/:id', async function(req, res, next) {
 // ── DELETE /tiers/:id — Delete a tier ──
 router.delete('/tiers/:id', async function(req, res, next) {
   try {
+    // Verify tier belongs to this salon's loyalty program
+    var tier = await prisma.loyaltyTier.findFirst({
+      where: { id: req.params.id },
+      include: { program: { select: { salon_id: true } } }
+    });
+    if (!tier || tier.program.salon_id !== req.salon_id) {
+      return res.status(404).json({ error: 'Tier not found' });
+    }
+
     await prisma.loyaltyTier.delete({ where: { id: req.params.id } });
     emit(req, 'loyalty:updated');
     res.json({ success: true });
@@ -183,6 +192,15 @@ router.put('/rewards/:id', async function(req, res, next) {
 // ── DELETE /rewards/:id — Delete a reward ──
 router.delete('/rewards/:id', async function(req, res, next) {
   try {
+    // Verify reward belongs to this salon's loyalty program
+    var reward = await prisma.loyaltyReward.findFirst({
+      where: { id: req.params.id },
+      include: { program: { select: { salon_id: true } } }
+    });
+    if (!reward || reward.program.salon_id !== req.salon_id) {
+      return res.status(404).json({ error: 'Reward not found' });
+    }
+
     await prisma.loyaltyReward.delete({ where: { id: req.params.id } });
     emit(req, 'loyalty:updated');
     res.json({ success: true });

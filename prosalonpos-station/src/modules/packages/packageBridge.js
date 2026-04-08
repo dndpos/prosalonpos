@@ -145,9 +145,7 @@ export function getClientPackages(clientId) {
   var all = MOCK_CLIENT_PACKAGES.filter(function(cp) {
     return cp.client_id === clientId && cp.status === 'active';
   });
-  console.log('[PkgBridge] getClientPackages(' + clientId + ') — total MOCK_CLIENT_PACKAGES:', MOCK_CLIENT_PACKAGES.length, 'filtered:', all.length);
   if (all.length === 0 && MOCK_CLIENT_PACKAGES.length > 0) {
-    console.log('[PkgBridge] All client_ids in store:', MOCK_CLIENT_PACKAGES.map(function(cp) { return cp.client_id; }));
   }
   return all;
 }
@@ -168,11 +166,9 @@ export function getClientPackageItems(clientPackageId) {
 // ════════════════════════════════════════════
 export function findRedeemablePackageItems(clientId, ticketServiceId, allServices, allCategories) {
   var clientPkgs = getClientPackages(clientId);
-  console.log('[PkgBridge] clientPkgs for', clientId, ':', clientPkgs.length, clientPkgs.map(function(cp) { return { id: cp.id, client_id: cp.client_id, name: cp.package_name }; }));
   if (!clientPkgs.length) return [];
 
   var ticketService = allServices.find(function(s) { return s.id === ticketServiceId; });
-  console.log('[PkgBridge] ticketService for svcId', ticketServiceId, ':', ticketService ? ticketService.name : 'NOT FOUND');
   if (!ticketService) return [];
   var ticketCategoryIds = ticketService.category_ids || [];
 
