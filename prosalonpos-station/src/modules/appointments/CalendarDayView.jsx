@@ -489,7 +489,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
               onTouchStart={e=>{const t=e.touches[0];if(t)handleSlotStart(t.clientX,t.clientY,e.target,e.currentTarget);}}
               onTouchEnd={e=>{const t=e.changedTouches[0];if(t)handleSlotEnd(t.clientX,t.clientY);}}
               onContextMenu={handleContextMenu}
-              style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto'}}>
+              style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto',contain:'style layout'}}>
               <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%'}}>
                 {/* GRID LINES */}
                 {Array.from({length:totalRows},(_,i)=>{

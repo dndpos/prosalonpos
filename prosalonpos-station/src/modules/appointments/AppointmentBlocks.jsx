@@ -152,6 +152,7 @@ export default memo(function AppointmentBlocks({serviceLines, blockedTimes, visi
           filter:isFaded?'saturate(0.5) brightness(0.75)':'none',
           transition:isDragging?'none':'opacity 0.15s',
           border:isReserved?'2px dashed #FDE68A':'none',
+          contain:'layout style paint',
         }}>
         {/* Calculate badge presence for padding */}
         {(function(){
