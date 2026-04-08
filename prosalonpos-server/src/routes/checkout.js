@@ -639,8 +639,6 @@ router.put('/tickets/:id/tip', async function(req, res, next) {
 });
 
 // ── POST /tickets/quick-close — Create + Pay + Close in one call ──
-// For walk-in sales from Checkout (no pre-existing open ticket).
-// Creates the ticket already as 'paid' so it never flickers as 'open'.
 router.post('/tickets/quick-close', async function(req, res, next) {
   try {
     var data = req.body;
@@ -731,25 +729,34 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       }
     }
 
+    // Mark appointment + service lines as checked_out (prevents re-checkout from calendar)
+    if (data.appointment_id) {
+      await prisma.appointment.update({
+        where: { id: data.appointment_id },
+        data: { status: 'checked_out', version: { increment: 1 } },
+      }).catch(function() {}); // non-fatal — frontend also does this
+      await prisma.serviceLine.updateMany({
+        where: { appointment_id: data.appointment_id },
+        data: { status: 'checked_out' },
+      }).catch(function() {}); // non-fatal
+      emit(req, 'appointment:updated');
+    }
+
     emit(req, 'ticket:closed');
     res.status(201).json({ ticket: formatTicket(ticket) });
   } catch (err) {
-    console.error('[Quick-Close] FAILED:', err.message);
-    console.error('[Quick-Close] Stack:', err.stack);
+    console.error('[Quick-Close] FAILED:', err.message, err.stack);
     next(err);
   }
 });
 
 // ── DELETE /tickets/bulk/all — Delete ALL tickets for this salon (owner only) ──
-// Nuclear option for cleaning up test data before go-live.
-// MUST be registered BEFORE /tickets/:id so Express doesn't match "bulk" as an ID.
 router.delete('/tickets/bulk/all', async function(req, res, next) {
   try {
     if (req.staff_role !== 'owner') {
       return res.status(403).json({ error: 'Only the owner can bulk delete tickets' });
     }
 
-    // Delete in order: payments → items → tickets
     var tickets = await prisma.ticket.findMany({
       where: { salon_id: req.salon_id },
       select: { id: true }
@@ -770,12 +777,9 @@ router.delete('/tickets/bulk/all', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── DELETE /tickets/:id — Hard delete a ticket (owner only, for test cleanup) ──
-// Permanently removes ticket + items + payments from database.
-// Requires owner role. Not for normal operations — use void/refund instead.
+// ── DELETE /tickets/:id — Hard delete a ticket (owner only) ──
 router.delete('/tickets/:id', async function(req, res, next) {
   try {
-    // Owner-only check
     if (req.staff_role !== 'owner') {
       return res.status(403).json({ error: 'Only the owner can delete tickets' });
     }
@@ -785,7 +789,6 @@ router.delete('/tickets/:id', async function(req, res, next) {
     });
     if (!existing) return res.status(404).json({ error: 'Ticket not found' });
 
-    // Cascade delete: items + payments first (onDelete: Cascade handles this in schema)
     await prisma.ticket.delete({ where: { id: req.params.id } });
 
     console.log('[Checkout] Ticket permanently deleted:', req.params.id, 'by owner');

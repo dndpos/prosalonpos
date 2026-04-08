@@ -289,19 +289,13 @@ export default function App() {
       setCheckoutData(checkoutPayload);
       setActivePage('checkout');
     } else {
-      var ticketData = { client_id: enrichedClient ? enrichedClient.id : null, client_name: clientName, lineItems: items, deposit_cents: data.depositCents || 0, appointment_id: data.appointmentId || null };
-      storeCreateTicket(ticketData).then(function(ticket) {
-        var checkoutPayload = { ...data, client: enrichedClient, openTicketId: ticket.id || ('ot-' + Date.now()) };
-        if (rbacStaff) checkoutPayload.cashierStaff = rbacStaff;
-        setCheckoutData(checkoutPayload);
-        setActivePage('checkout');
-      }).catch(function(err) {
-        console.warn('[handleCheckout] Store create failed, using local:', err.message);
-        var checkoutPayload = { ...data, client: enrichedClient, openTicketId: 'ot-' + Date.now() };
-        if (rbacStaff) checkoutPayload.cashierStaff = rbacStaff;
-        setCheckoutData(checkoutPayload);
-        setActivePage('checkout');
-      });
+      // Don't create a ticket on entry — just open checkout with the data.
+      // Ticket gets created later: Hold creates an open ticket, Pay uses quick-close (create+close in one call).
+      // This prevents orphan tickets when the user opens checkout but cancels without paying.
+      var checkoutPayload = { ...data, client: enrichedClient };
+      if (rbacStaff) checkoutPayload.cashierStaff = rbacStaff;
+      setCheckoutData(checkoutPayload);
+      setActivePage('checkout');
     }
   }
 
