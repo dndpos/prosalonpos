@@ -421,6 +421,7 @@ export default function useTicketHandlers() {
         client_id: holdData.client ? holdData.client.id : null,
         client_name: holdData.clientName || null,
         deposit_cents: holdData.depositCents || 0,
+        appointment_id: holdData.appointmentId || null,
         lineItems: (holdData.items || []).map(function(it) {
           return {
             type: it.type || 'service',

@@ -736,6 +736,7 @@ export default function CheckoutScreen({ appointmentData, onDone, onCloseTicket,
                   clientName: client ? ((client.first_name||'')+' '+(client.last_name||'')).trim() : null,
                   items: items.map(function(it){ return Object.assign({}, it, { price_cents: getPrice(it) }); }),
                   depositCents: depositCents || 0, activeTechId: activeTechId,
+                  appointmentId: appointmentData?.appointmentId || null,
                 });
                 onDone();
               }}

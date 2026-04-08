@@ -12,7 +12,7 @@ import { create } from 'zustand';
 
 var useAreaCodeStore = create(function(set, get) {
   return {
-    enabled: true,  // Default ON during development — toggle off in Salon Settings > Dev Tools
+    enabled: false,  // Default OFF — toggle on in Salon Settings > Dev Tools if needed
     toggle: function() { set({ enabled: !get().enabled }); },
     setEnabled: function(val) { set({ enabled: !!val }); },
   };
