@@ -115,18 +115,12 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   // ── Service lines from appointment store ──
   var storeServiceLines = useAppointmentStore(function(s){ return s.serviceLines; });
   var storeLoading = useAppointmentStore(function(s){ return s.loading; });
+  var storeRefreshing = useAppointmentStore(function(s){ return s.refreshing; });
   var storeSource = useAppointmentStore(function(s){ return s.source; });
   var fetchServiceLines = useAppointmentStore(function(s){ return s.fetchServiceLines; }); var persist = useCalendarPersist();
   const[serviceLines,setServiceLines]=useState(storeServiceLines);
-  // Sync from store → local state — only when actual data changed (not just new references)
-  var _prevIdSetRef = useRef('');
-  useEffect(function(){
-    var idSet = storeServiceLines.map(function(s){ return s.id; }).sort().join(',');
-    if (idSet !== _prevIdSetRef.current) {
-      _prevIdSetRef.current = idSet;
-      setServiceLines(storeServiceLines);
-    }
-  },[storeServiceLines]);
+  // Sync from store → local state
+  useEffect(function(){ setServiceLines(storeServiceLines); },[storeServiceLines]);
   // Fetch service lines when date changes
   useEffect(function(){
     var d = selectedDate;
@@ -328,6 +322,7 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
   var handleTechEndBreak = handlers.handleTechEndBreak;
   return(
     <div style={{width:'100%',height:'100%',background:C.chrome,fontFamily:"'Inter',system-ui,sans-serif",display:'flex',flexDirection:'column',overflow:'hidden',userSelect:dragging?'none':'auto'}}>
+      <style>{`@keyframes skeletonShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } } @keyframes spinDate { to { transform: rotate(360deg); } }`}</style>
       {/* TOP BAR — Nav + Date Controls */}
       <div style={{height:52,background:C.chromeDark,display:'flex',alignItems:'center',padding:0,gap:6,borderBottom:`1px solid ${C.borderLight}`,flexShrink:0,overflowX:'auto',overflowY:'hidden',position:'relative'}}>
         <AreaTag id="CAL-TOP" />
@@ -366,8 +361,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
         <button onClick={()=>shiftDate(-1)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'4px 8px'}}>‹</button>
         <div style={{color:C.textPrimary,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:6}}>
           {dayShort}
-          {storeLoading&&<span style={{display:'inline-block',width:14,height:14,border:'2px solid '+C.borderMedium,borderTopColor:C.blueLight,borderRadius:'50%',animation:'spinDate 0.6s linear infinite'}}/> }
-          {!storeLoading&&<span title={storeSource==='api'?'Live data':'Mock data'} style={{width:7,height:7,borderRadius:'50%',background:storeSource==='api'?'#22C55E':'#EAB308',flexShrink:0}}/>}
+          {(storeLoading||storeRefreshing)&&<span style={{display:'inline-block',width:14,height:14,border:'2px solid '+C.borderMedium,borderTopColor:C.blueLight,borderRadius:'50%',animation:'spinDate 0.6s linear infinite'}}/> }
+          {!storeLoading&&!storeRefreshing&&<span title={storeSource==='api'?'Live data':'Mock data'} style={{width:7,height:7,borderRadius:'50%',background:storeSource==='api'?'#22C55E':'#EAB308',flexShrink:0}}/>}
         </div>
         <button onClick={()=>shiftDate(1)} style={{background:'none',border:'none',color:C.textPrimary,fontSize:18,cursor:'pointer',padding:'4px 8px'}}>›</button>
         <button onClick={()=>setSelectedDate(new Date())}
@@ -484,8 +479,8 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
               onTouchStart={e=>{const t=e.touches[0];if(t)handleSlotStart(t.clientX,t.clientY,e.target,e.currentTarget);}}
               onTouchEnd={e=>{const t=e.changedTouches[0];if(t)handleSlotEnd(t.clientX,t.clientY);}}
               onContextMenu={handleContextMenu}
-              style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto',willChange:'transform'}}>
-              <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%',willChange:'transform'}}>
+              style={{flex:1,overflow:'auto',background:C.grid,cursor:dragging?'grabbing':'default',touchAction:dragging?'none':'auto'}}>
+              <div style={{position:'relative',height:totalRows*ROW_H,minWidth:needsScroll?colW*visibleCols:'100%'}}>
                 {/* GRID LINES */}
                 {Array.from({length:totalRows},(_,i)=>{
                   const min=gridStartMin+i*15;const m=min%60;
@@ -536,10 +531,9 @@ export default function CalendarDayView({ scrollTarget, onScrollDone, onCheckout
                         );
                       });
                     })}
-                    <style>{`@keyframes skeletonShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } } @keyframes spinDate { to { transform: rotate(360deg); } }`}</style>
                   </div>
                 )}
-                <AppointmentBlocks serviceLines={serviceLines} blockedTimes={blockedTimes} visibleStaff={visibleStaff} colW={colW} gridStartMin={gridStartMin} ROW_H={ROW_H} colLeftPx={colLeftPx} dragging={dragging} onBlockStart={handleBlockStart} onBlockClick={setSelectedBlock} autoRequestMode={!!_settings.auto_request_mode}/>
+                {(!storeLoading||serviceLines.length>0)&&<AppointmentBlocks serviceLines={serviceLines} blockedTimes={blockedTimes} visibleStaff={visibleStaff} colW={colW} gridStartMin={gridStartMin} ROW_H={ROW_H} colLeftPx={function(idx){return idx*colW;}} dragging={dragging} onBlockStart={handleBlockStart} onBlockClick={function(b){setSelectedBlock(b);}} autoRequestMode={!!_settings.auto_request_mode}/>}
                 {/* NOW LINE */}
                 {showNow&&(<div style={{position:'absolute',top:nowY,left:-6,right:0,zIndex:10,pointerEvents:'none',display:'flex',alignItems:'center'}}><div style={{width:10,height:10,borderRadius:'50%',background:C.nowLine,flexShrink:0}}/><div style={{flex:1,height:2,background:C.nowLine}}/></div>)}
               </div>
