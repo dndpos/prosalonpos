@@ -215,21 +215,21 @@ io.on('connection', function(socket) {
     socket.salonId = salonId;
     console.log('[Socket] ' + socket.id + ' joined salon:' + salonId + (staffId ? ' as ' + staffId : ''));
 
-    // Register active session
-    prisma.activeSession.create({
-      data: {
-        salon_id: salonId,
-        socket_id: socket.id,
-        staff_id: staffId,
-      }
+    // Register active session — clean up any stale sessions for this staff first
+    // (handles reconnects where socket ID changes but same person)
+    var cleanupWhere = { salon_id: salonId, socket_id: { not: socket.id } };
+    if (staffId) cleanupWhere.staff_id = staffId;
+    prisma.activeSession.deleteMany({ where: staffId ? { salon_id: salonId, staff_id: staffId, socket_id: { not: socket.id } } : { id: 'skip' } }).then(function() {
+      return prisma.activeSession.create({
+        data: { salon_id: salonId, socket_id: socket.id, staff_id: staffId }
+      });
     }).then(function() {
       console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id);
     }).catch(function(err) {
-      // Unique constraint = socket reconnected before old record cleaned up
       if (err.code === 'P2002') {
         prisma.activeSession.update({
           where: { socket_id: socket.id },
-          data: { last_heartbeat: new Date() }
+          data: { last_heartbeat: new Date(), staff_id: staffId }
         }).catch(function() {});
       } else {
         console.error('[Station] Failed to register session:', err.message);

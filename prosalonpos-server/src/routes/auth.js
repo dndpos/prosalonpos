@@ -174,7 +174,7 @@ router.post('/login', async function(req, res, next) {
         var activeCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
         if (activeCount >= salonRecord.station_count) {
           return res.status(403).json({
-            error: 'Station limit reached (' + activeCount + '/' + salonRecord.station_count + '). Close another station or contact your provider.',
+            error: 'This salon is already in use on ' + activeCount + ' device' + (activeCount > 1 ? 's' : '') + '. Your plan allows ' + salonRecord.station_count + '. Log out on another device or contact your provider to add more stations.',
             code: 'STATION_LIMIT',
             active: activeCount,
             limit: salonRecord.station_count,
@@ -209,7 +209,7 @@ router.post('/login', async function(req, res, next) {
         var ownerActiveCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
         if (ownerActiveCount >= salon.station_count) {
           return res.status(403).json({
-            error: 'Station limit reached (' + ownerActiveCount + '/' + salon.station_count + '). Close another station or contact your provider.',
+            error: 'This salon is already in use on ' + ownerActiveCount + ' device' + (ownerActiveCount > 1 ? 's' : '') + '. Your plan allows ' + salon.station_count + '. Log out on another device or contact your provider to add more stations.',
             code: 'STATION_LIMIT',
             active: ownerActiveCount,
             limit: salon.station_count,
