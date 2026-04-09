@@ -46,7 +46,18 @@ async function main() {
     }
   });
 
-  console.log('Done! Salon code: 7AVM8Z  Owner PIN: 0000');
+  // ── Provider Owner (ISO account — for Provider Admin Dashboard) ──
+  var providerPinHash = bcrypt.hashSync('90706', 12);
+  await prisma.providerOwner.create({
+    data: {
+      id: 'provider-owner-1',
+      name: 'Andy Tran',
+      email: 'andy@prosalonpos.com',
+      pin_hash: providerPinHash,
+    }
+  });
+
+  console.log('Done! Salon code: 7AVM8Z  Owner PIN: 0000  Provider PIN: 90706');
 }
 
 main()

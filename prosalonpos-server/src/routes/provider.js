@@ -27,7 +27,7 @@
  */
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
-import { createToken, hashPin, comparePin } from '../config/auth.js';
+import { createToken, hashPin, comparePin, pinSha256 } from '../config/auth.js';
 import providerAuth, { requireOwner } from '../middleware/providerAuth.js';
 
 // SQLite stores JSON as strings
@@ -175,6 +175,7 @@ router.get('/salons/:id', async function(req, res, next) {
 });
 
 // ── POST /salons — Create a new salon (owner + sales agents) ──
+// Creates: Salon + SalonSettings + owner Staff record (full onboarding)
 router.post('/salons', async function(req, res, next) {
   try {
     if (req.provider_role === 'support') {
@@ -190,8 +191,21 @@ router.post('/salons', async function(req, res, next) {
     var rand = Math.random().toString(36).substring(2, 6).toUpperCase();
     var licenseKey = prefix + '-' + tierCode + '-' + year + '-' + rand;
 
-    // Generate salon code
-    var salonCode = (d.salon_code || d.name || 'SALON').toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 10);
+    // Generate salon code — 6 random alphanumeric chars (unique, easy to share)
+    var salonCode = d.salon_code;
+    if (!salonCode) {
+      var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O, 1/I
+      salonCode = '';
+      for (var ci = 0; ci < 6; ci++) salonCode += chars[Math.floor(Math.random() * chars.length)];
+    }
+
+    // Check salon code uniqueness
+    var existing = await prisma.salon.findUnique({ where: { salon_code: salonCode } });
+    if (existing) {
+      // Regenerate once if collision
+      salonCode = '';
+      for (var ci2 = 0; ci2 < 6; ci2++) salonCode += 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)];
+    }
 
     // Default features based on plan tier
     var defaultFeatures = {
@@ -206,33 +220,81 @@ router.post('/salons', async function(req, res, next) {
     // Monthly fee based on tier
     var feeMap = { basic: 7900, professional: 14900, premium: 24900 };
 
-    var salon = await prisma.salon.create({
-      data: {
-        name: d.name || 'New Salon',
-        salon_code: salonCode,
-        phone: d.phone || null,
-        email: d.email || null,
-        address1: d.address1 || d.address || null,
-        owner_name: d.owner_name || '',
-        owner_phone: d.owner_phone || '',
-        owner_email: d.owner_email || '',
-        status: d.status || 'trial',
-        plan_tier: tier,
-        station_count: d.station_count || 1,
-        license_key: licenseKey,
-        processing_rate: d.processing_rate || 2.49,
-        monthly_software_fee_cents: d.monthly_software_fee_cents || feeMap[tier] || 7900,
-        signup_date: new Date(),
-        trial_end_date: d.status === 'trial' ? new Date(Date.now() + 30 * 86400000) : null,
-        assigned_agent_id: d.assigned_agent_id || (req.provider_role !== 'owner' ? req.provider_id : null),
-        features_enabled: toDb(features),
-      }
+    // Owner PIN — default to 0000 if not provided
+    var ownerPin = d.owner_pin || '0000';
+    var ownerPinHash = hashPin(ownerPin);
+    var ownerPinSha = pinSha256(ownerPin);
+
+    // Use a transaction to create Salon + SalonSettings + owner Staff atomically
+    var result = await prisma.$transaction(async function(tx) {
+      // 1. Create the Salon
+      var salon = await tx.salon.create({
+        data: {
+          name: d.name || 'New Salon',
+          salon_code: salonCode,
+          phone: d.phone || null,
+          email: d.email || null,
+          address1: d.address1 || d.address || null,
+          owner_name: d.owner_name || '',
+          owner_phone: d.owner_phone || '',
+          owner_email: d.owner_email || '',
+          status: d.status || 'trial',
+          plan_tier: tier,
+          station_count: d.station_count || 1,
+          license_key: licenseKey,
+          processing_rate: d.processing_rate || 2.49,
+          monthly_software_fee_cents: d.monthly_software_fee_cents || feeMap[tier] || 7900,
+          signup_date: new Date(),
+          trial_end_date: d.status === 'trial' ? new Date(Date.now() + 30 * 86400000) : null,
+          assigned_agent_id: d.assigned_agent_id || (req.provider_role !== 'owner' ? req.provider_id : null),
+          features_enabled: toDb(features),
+          owner_pin_hash: ownerPinHash,
+          owner_pin_sha256: ownerPinSha,
+        }
+      });
+
+      // 2. Create default SalonSettings
+      await tx.salonSettings.create({
+        data: {
+          salon_id: salon.id,
+          settings: {
+            salon_name: d.name || 'New Salon',
+            tax_rate_percentage: 7.5,
+            tip_presets_array: [18, 20, 25],
+            booking_increment_minutes: 15,
+            rotation_mode: 'round_robin',
+            opening_time: '09:00',
+            closing_time: '19:00',
+          }
+        }
+      });
+
+      // 3. Create owner Staff record (so the salon owner can log in)
+      var ownerDisplayName = d.owner_name || 'Owner';
+      await tx.staff.create({
+        data: {
+          salon_id: salon.id,
+          display_name: ownerDisplayName.split(' ')[0], // First name only for display
+          role: 'owner',
+          rbac_role: 'owner',
+          pin_hash: ownerPinHash,
+          pin_sha256: ownerPinSha,
+          position: 0,
+          tech_turn_eligible: false,
+          show_on_calendar: false,
+        }
+      });
+
+      return salon;
     });
 
     // Audit
-    await addAudit(req, 'salon_created', 'Created salon account: ' + salon.name, salon.id);
+    await addAudit(req, 'salon_created', 'Created salon account: ' + result.name + ' (code: ' + salonCode + ')', result.id);
 
-    res.status(201).json({ salon: formatProviderSalon(salon) });
+    // Return salon data + the generated owner PIN for display
+    var formatted = formatProviderSalon(result);
+    formatted.owner_pin = ownerPin; // Only returned at creation time
+    res.status(201).json({ salon: formatted });
   } catch (err) { next(err); }
 });
 
