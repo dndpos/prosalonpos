@@ -49,6 +49,7 @@ import reportsRoutes from './routes/reports.js';
 import providerRoutes from './routes/provider.js';
 import packageRoutes from './routes/packages.js';
 import bootstrapRoutes from './routes/bootstrap.js';
+import publicRoutes from './routes/public.js';
 
 var PORT = process.env.PORT || 3001;
 
@@ -130,6 +131,7 @@ app.use('/api/', function(req, res, next) {
 // ── Public routes (no auth required) ──
 app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
+app.use('/api/v1/public', publicRoutes); // Online booking portal — no auth
 
 // ── Protected routes (JWT required) ──
 app.use('/api/v1/staff', authenticate, staffRoutes);
@@ -258,21 +260,25 @@ io.on('connection', function(socket) {
   // Provider Admin initiates, salon station accepts and shares screen
   socket.on('screen-share-request', function(data) {
     // Provider asks a salon to share screen — forward to all clients in that salon room
+    console.log('[ScreenShare] request from', socket.id, '→ salon:', data.salon_id);
     if (data.salon_id) {
       socket.to('salon:' + data.salon_id).emit('screen-share-request', { from: socket.id });
     }
   });
   socket.on('screen-share-accept', function(data) {
     // Salon accepted — tell the provider who asked
+    console.log('[ScreenShare] accept from', socket.id, '→', data.to);
     if (data.to) io.to(data.to).emit('screen-share-accept', { from: socket.id });
   });
   socket.on('screen-share-decline', function(data) {
     if (data.to) io.to(data.to).emit('screen-share-decline', {});
   });
   socket.on('screen-share-offer', function(data) {
+    console.log('[ScreenShare] offer from', socket.id, '→', data.to);
     if (data.to) io.to(data.to).emit('screen-share-offer', { from: socket.id, offer: data.offer });
   });
   socket.on('screen-share-answer', function(data) {
+    console.log('[ScreenShare] answer from', socket.id, '→', data.to);
     if (data.to) io.to(data.to).emit('screen-share-answer', { from: socket.id, answer: data.answer });
   });
   socket.on('screen-share-ice', function(data) {
