@@ -407,67 +407,71 @@ router.delete('/salons/:id', requireOwner, async function(req, res, next) {
     var salonId = existing.id;
     var salonName = existing.name;
 
-    // Cascade delete — only delete tables that have salon_id directly.
-    // Child tables with onDelete:Cascade in schema are auto-deleted by PostgreSQL
-    // when their parent is deleted (e.g., TicketItem cascades when Ticket is deleted,
-    // GiftCardTransaction cascades when GiftCard is deleted, etc.)
-    // Order: deepest dependencies first, salon last.
+    // Cascade delete using raw SQL for reliability.
+    // Prisma deleteMany doesn't support nested relation filters, and not all
+    // child tables have onDelete:Cascade. Raw SQL with subqueries is bulletproof.
     await prisma.$transaction(async function(tx) {
-      // Packages (ClientPackage has salon_id; children cascade)
-      await tx.clientPackage.deleteMany({ where: { salon_id: salonId } });
-      await tx.servicePackage.deleteMany({ where: { salon_id: salonId } });
-      // Tickets (has salon_id; TicketItem + TicketPayment cascade)
-      await tx.ticket.deleteMany({ where: { salon_id: salonId } });
-      // Appointments (has salon_id; ServiceLine cascades)
-      await tx.appointment.deleteMany({ where: { salon_id: salonId } });
-      await tx.blockedTime.deleteMany({ where: { salon_id: salonId } });
-      // Gift cards (has salon_id; GiftCardTransaction cascades)
-      await tx.giftCard.deleteMany({ where: { salon_id: salonId } });
-      // Loyalty (LoyaltyTransaction has salon_id; Reward/Tier cascade from Program)
-      await tx.loyaltyTransaction.deleteMany({ where: { salon_id: salonId } });
-      await tx.loyaltyAccount.deleteMany({ where: { salon_id: salonId } });
-      await tx.loyaltyProgram.deleteMany({ where: { salon_id: salonId } });
-      // Memberships (MembershipPlan has salon_id; Perk/Account cascade)
-      await tx.membershipPlan.deleteMany({ where: { salon_id: salonId } });
-      // Commission (both have salon_id)
-      await tx.commissionTier.deleteMany({ where: { salon_id: salonId } });
-      await tx.commissionRule.deleteMany({ where: { salon_id: salonId } });
-      // Timeclock — StaffPresence has salon_id. ClockPunch/PunchAuditLog don't,
-      // but they reference staff_id which we'll delete next. Use raw SQL.
-      await tx.$executeRawUnsafe(
-        'DELETE FROM "PunchAuditLog" WHERE punch_id IN (SELECT id FROM "ClockPunch" WHERE staff_id IN (SELECT id FROM "Staff" WHERE salon_id = $1))',
-        salonId
-      );
-      await tx.$executeRawUnsafe(
-        'DELETE FROM "ClockPunch" WHERE staff_id IN (SELECT id FROM "Staff" WHERE salon_id = $1)',
-        salonId
-      );
-      await tx.staffPresence.deleteMany({ where: { salon_id: salonId } });
-      // Messaging (both have salon_id)
-      await tx.messageLogEntry.deleteMany({ where: { salon_id: salonId } });
-      await tx.messageTemplate.deleteMany({ where: { salon_id: salonId } });
-      // Services — ServiceCatalog/ServiceCategory have salon_id.
-      // Junction tables (ServiceCatalogCategory, ServiceStaffAssignment, CategoryStaffAssignment)
-      // cascade from their parent deletes.
-      await tx.serviceCatalog.deleteMany({ where: { salon_id: salonId } });
-      await tx.serviceCategory.deleteMany({ where: { salon_id: salonId } });
-      // Products + inventory (all have salon_id)
-      await tx.product.deleteMany({ where: { salon_id: salonId } });
-      await tx.productCategory.deleteMany({ where: { salon_id: salonId } });
-      await tx.supplier.deleteMany({ where: { salon_id: salonId } });
-      // Clients (has salon_id)
-      await tx.client.deleteMany({ where: { salon_id: salonId } });
-      // Staff (has salon_id)
-      await tx.staff.deleteMany({ where: { salon_id: salonId } });
+      var s = salonId;
+      // Package system (no cascade on redemptions)
+      await tx.$executeRawUnsafe('DELETE FROM "PackageRedemption" WHERE client_package_id IN (SELECT id FROM "ClientPackage" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ClientPackageItem" WHERE client_package_id IN (SELECT id FROM "ClientPackage" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ClientPackage" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ServicePackageItem" WHERE package_id IN (SELECT id FROM "ServicePackage" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ServicePackage" WHERE salon_id = $1', s);
+      // Tickets
+      await tx.$executeRawUnsafe('DELETE FROM "TicketItem" WHERE ticket_id IN (SELECT id FROM "Ticket" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "TicketPayment" WHERE ticket_id IN (SELECT id FROM "Ticket" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "Ticket" WHERE salon_id = $1', s);
+      // Appointments + service lines
+      await tx.$executeRawUnsafe('DELETE FROM "ServiceLine" WHERE appointment_id IN (SELECT id FROM "Appointment" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "Appointment" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "BlockedTime" WHERE salon_id = $1', s);
+      // Gift cards
+      await tx.$executeRawUnsafe('DELETE FROM "GiftCardTransaction" WHERE gift_card_id IN (SELECT id FROM "GiftCard" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "GiftCard" WHERE salon_id = $1', s);
+      // Loyalty
+      await tx.$executeRawUnsafe('DELETE FROM "LoyaltyTransaction" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "LoyaltyAccount" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "LoyaltyReward" WHERE program_id IN (SELECT id FROM "LoyaltyProgram" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "LoyaltyTier" WHERE program_id IN (SELECT id FROM "LoyaltyProgram" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "LoyaltyProgram" WHERE salon_id = $1', s);
+      // Memberships
+      await tx.$executeRawUnsafe('DELETE FROM "MembershipPerk" WHERE plan_id IN (SELECT id FROM "MembershipPlan" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "MembershipAccount" WHERE plan_id IN (SELECT id FROM "MembershipPlan" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "MembershipPlan" WHERE salon_id = $1', s);
+      // Commission
+      await tx.$executeRawUnsafe('DELETE FROM "CommissionTier" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "CommissionRule" WHERE salon_id = $1', s);
+      // Timeclock
+      await tx.$executeRawUnsafe('DELETE FROM "PunchAuditLog" WHERE punch_id IN (SELECT id FROM "ClockPunch" WHERE staff_id IN (SELECT id FROM "Staff" WHERE salon_id = $1))', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ClockPunch" WHERE staff_id IN (SELECT id FROM "Staff" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "StaffPresence" WHERE salon_id = $1', s);
+      // Messaging
+      await tx.$executeRawUnsafe('DELETE FROM "MessageLogEntry" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "MessageTemplate" WHERE salon_id = $1', s);
+      // Services + junction tables
+      await tx.$executeRawUnsafe('DELETE FROM "ServiceCatalogCategory" WHERE service_catalog_id IN (SELECT id FROM "ServiceCatalog" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ServiceStaffAssignment" WHERE service_catalog_id IN (SELECT id FROM "ServiceCatalog" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "CategoryStaffAssignment" WHERE category_id IN (SELECT id FROM "ServiceCategory" WHERE salon_id = $1)', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ServiceCatalog" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ServiceCategory" WHERE salon_id = $1', s);
+      // Products
+      await tx.$executeRawUnsafe('DELETE FROM "Product" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ProductCategory" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "Supplier" WHERE salon_id = $1', s);
+      // Clients
+      await tx.$executeRawUnsafe('DELETE FROM "Client" WHERE salon_id = $1', s);
+      // Staff
+      await tx.$executeRawUnsafe('DELETE FROM "Staff" WHERE salon_id = $1', s);
       // Settings
-      await tx.salonSettings.deleteMany({ where: { salon_id: salonId } });
+      await tx.$executeRawUnsafe('DELETE FROM "SalonSettings" WHERE salon_id = $1', s);
       // Active sessions
-      await tx.activeSession.deleteMany({ where: { salon_id: salonId } });
-      // Provider notes + billing
-      await tx.providerSalonNote.deleteMany({ where: { salon_id: salonId } });
-      await tx.providerBillingRecord.deleteMany({ where: { salon_id: salonId } });
-      // Finally: the salon itself
-      await tx.salon.delete({ where: { id: salonId } });
+      await tx.$executeRawUnsafe('DELETE FROM "ActiveSession" WHERE salon_id = $1', s);
+      // Provider records
+      await tx.$executeRawUnsafe('DELETE FROM "ProviderSalonNote" WHERE salon_id = $1', s);
+      await tx.$executeRawUnsafe('DELETE FROM "ProviderBillingRecord" WHERE salon_id = $1', s);
+      // Finally: the salon
+      await tx.$executeRawUnsafe('DELETE FROM "Salon" WHERE id = $1', s);
     }, { timeout: 30000 });
 
     await addAudit(req, 'salon_deleted', 'Permanently deleted salon: ' + salonName + ' (id: ' + salonId + ')');
