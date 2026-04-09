@@ -258,21 +258,25 @@ io.on('connection', function(socket) {
   // Provider Admin initiates, salon station accepts and shares screen
   socket.on('screen-share-request', function(data) {
     // Provider asks a salon to share screen — forward to all clients in that salon room
+    console.log('[ScreenShare] request from', socket.id, '→ salon:', data.salon_id);
     if (data.salon_id) {
       socket.to('salon:' + data.salon_id).emit('screen-share-request', { from: socket.id });
     }
   });
   socket.on('screen-share-accept', function(data) {
     // Salon accepted — tell the provider who asked
+    console.log('[ScreenShare] accept from', socket.id, '→', data.to);
     if (data.to) io.to(data.to).emit('screen-share-accept', { from: socket.id });
   });
   socket.on('screen-share-decline', function(data) {
     if (data.to) io.to(data.to).emit('screen-share-decline', {});
   });
   socket.on('screen-share-offer', function(data) {
+    console.log('[ScreenShare] offer from', socket.id, '→', data.to);
     if (data.to) io.to(data.to).emit('screen-share-offer', { from: socket.id, offer: data.offer });
   });
   socket.on('screen-share-answer', function(data) {
+    console.log('[ScreenShare] answer from', socket.id, '→', data.to);
     if (data.to) io.to(data.to).emit('screen-share-answer', { from: socket.id, answer: data.answer });
   });
   socket.on('screen-share-ice', function(data) {
