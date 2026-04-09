@@ -247,7 +247,7 @@ router.post('/salons', async function(req, res, next) {
     var standardFeatures = [
       'appointments', 'client_profiles', 'tech_turn', 'gift_cards',
       'loyalty', 'membership', 'inventory', 'payroll',
-      'barcode_scan', 'pay_services_split', 'print_checks'
+      'barcode_scan', 'provider_pay_services_split', 'provider_print_check'
     ];
 
     var tier = d.plan_tier || 'basic';

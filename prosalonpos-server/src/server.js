@@ -215,18 +215,16 @@ io.on('connection', function(socket) {
     socket.salonId = salonId;
     console.log('[Socket] ' + socket.id + ' joined salon:' + salonId + (staffId ? ' as ' + staffId : ''));
 
-    // Register active session — clean up any stale sessions for this staff first
-    // (handles reconnects where socket ID changes but same person)
-    var cleanupWhere = { salon_id: salonId, socket_id: { not: socket.id } };
-    if (staffId) cleanupWhere.staff_id = staffId;
-    prisma.activeSession.deleteMany({ where: staffId ? { salon_id: salonId, staff_id: staffId, socket_id: { not: socket.id } } : { id: 'skip' } }).then(function() {
-      return prisma.activeSession.create({
-        data: { salon_id: salonId, socket_id: socket.id, staff_id: staffId }
-      });
+    // Register active session for this socket connection.
+    // No staff_id-based cleanup — same person CAN be logged into multiple stations.
+    // Stale sessions are cleaned by the 2-min heartbeat sweep and disconnect handler.
+    prisma.activeSession.create({
+      data: { salon_id: salonId, socket_id: socket.id, staff_id: staffId }
     }).then(function() {
-      console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id);
+      console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id + (staffId ? ' staff:' + staffId : ''));
     }).catch(function(err) {
       if (err.code === 'P2002') {
+        // Same socket reconnected — just update heartbeat
         prisma.activeSession.update({
           where: { socket_id: socket.id },
           data: { last_heartbeat: new Date(), staff_id: staffId }
