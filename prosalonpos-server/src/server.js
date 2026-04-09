@@ -397,4 +397,25 @@ httpServer.listen(PORT, async function() {
   } catch (diagErr) {
     console.error('[Diagnostic] Could not count tickets:', diagErr.message);
   }
+
+  // ── Auto-seed ProviderOwner if none exists ──
+  // Ensures provider login (PIN 90706) works on existing databases
+  // that were created before the ProviderOwner seed was added.
+  try {
+    var providerCount = await prisma.providerOwner.count();
+    if (providerCount === 0) {
+      var { hashPin: _hashPin } = await import('./config/auth.js');
+      await prisma.providerOwner.create({
+        data: {
+          id: 'provider-owner-1',
+          name: 'Andy Tran',
+          email: 'andy@prosalonpos.com',
+          pin_hash: _hashPin('90706'),
+        }
+      });
+      console.log('[Bootstrap] ✅ Created ProviderOwner (PIN: 90706)');
+    }
+  } catch (provErr) {
+    console.error('[Bootstrap] ⚠️  ProviderOwner seed failed:', provErr.message);
+  }
 });
