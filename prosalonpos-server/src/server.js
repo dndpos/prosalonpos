@@ -206,16 +206,21 @@ io.on('connection', function(socket) {
 
   // Client joins their salon's room for targeted broadcasts
   // Also registers an ActiveSession for station enforcement
-  socket.on('join-salon', function(salonId) {
+  socket.on('join-salon', function(data) {
+    // Support both old format (string) and new format (object with salon_id + staff_id)
+    var salonId = typeof data === 'string' ? data : (data && data.salon_id);
+    var staffId = typeof data === 'object' && data ? (data.staff_id || null) : null;
+    if (!salonId) return;
     socket.join('salon:' + salonId);
     socket.salonId = salonId;
-    console.log('[Socket] ' + socket.id + ' joined salon:' + salonId);
+    console.log('[Socket] ' + socket.id + ' joined salon:' + salonId + (staffId ? ' as ' + staffId : ''));
 
     // Register active session
     prisma.activeSession.create({
       data: {
         salon_id: salonId,
         socket_id: socket.id,
+        staff_id: staffId,
       }
     }).then(function() {
       console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id);
