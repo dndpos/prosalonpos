@@ -457,8 +457,14 @@ model GiftCardTransaction {
 model LoyaltyProgram {
   id                  String   @id @default(uuid())
   salon_id            String   @unique
-  enabled             Boolean  @default(false)
-  points_per_dollar   Int      @default(1)     // points earned per dollar spent
+  active              Boolean  @default(false)         // master toggle (Session 11 Decision #222)
+  program_type        String   @default("flat")        // flat | tiered (Decision #222)
+  earn_per_dollar     Float?                           // points per dollar spent (Decision #220)
+  earn_per_visit      Int?                             // flat points per visit (Decision #220)
+  expiration_months   Int?                             // null = never expire (Decision #225)
+  redemption_mode     String   @default("manual")      // manual | automatic (Decision #226)
+  tier_reset          String?                          // annual | permanent, null for flat (Decision #224)
+  show_on_receipt     Boolean  @default(true)          // print points on receipt (Decision #229)
   points_name         String   @default("points")
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt

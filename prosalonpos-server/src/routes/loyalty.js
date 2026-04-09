@@ -1,9 +1,13 @@
 /**
  * ProSalonPOS — Loyalty Routes
- * Session 57 | Phase 2
+ * Session 57 → C11 | Phase 2
  *
  * Manages loyalty program settings, tiers, rewards, and point transactions.
  * Points are earned at checkout and redeemed for rewards.
+ *
+ * C11: Schema expanded to match Session 11 planning doc (Decisions #220–#230).
+ *      PUT /program now accepts all program fields.
+ *      GET /program returns tiers/rewards at top level for store compatibility.
  */
 import { Router } from 'express';
 import prisma from '../config/database.js';
@@ -12,6 +16,7 @@ import { emit } from '../utils/emit.js';
 var router = Router();
 
 // ── GET /program — Get loyalty program with tiers and rewards ──
+// Returns { program, tiers, rewards } at top level for loyaltyStore compatibility
 router.get('/program', async function(req, res, next) {
   try {
     var program = await prisma.loyaltyProgram.findUnique({
@@ -23,37 +28,53 @@ router.get('/program', async function(req, res, next) {
     });
 
     if (!program) {
-      // Return null — frontend handles "no program configured" state
-      return res.json({ program: null });
+      return res.json({ program: null, tiers: [], rewards: [] });
     }
 
-    res.json({ program: program });
+    // Extract tiers/rewards to top level, strip from program object
+    var tiers = program.tiers || [];
+    var rewards = program.rewards || [];
+    var programClean = Object.assign({}, program);
+    delete programClean.tiers;
+    delete programClean.rewards;
+
+    res.json({ program: programClean, tiers: tiers, rewards: rewards });
   } catch (err) { next(err); }
 });
 
 // ── PUT /program — Update program settings (or create if missing) ──
+// Accepts all Session 11 fields: active, program_type, earn_per_dollar,
+// earn_per_visit, expiration_months, redemption_mode, tier_reset, show_on_receipt
 router.put('/program', async function(req, res, next) {
   try {
     var data = req.body;
+
+    // Build update object — only include fields that were sent
+    var updateData = { version: { increment: 1 } };
+    var fields = [
+      'active', 'program_type', 'earn_per_dollar', 'earn_per_visit',
+      'expiration_months', 'redemption_mode', 'tier_reset',
+      'show_on_receipt', 'points_name',
+    ];
+    fields.forEach(function(f) {
+      if (data[f] !== undefined) updateData[f] = data[f];
+    });
 
     var program = await prisma.loyaltyProgram.upsert({
       where: { salon_id: req.salon_id },
       create: {
         salon_id: req.salon_id,
-        enabled: data.enabled !== false,
-        points_per_dollar: data.points_per_dollar || 1,
+        active: data.active !== undefined ? data.active : false,
+        program_type: data.program_type || 'flat',
+        earn_per_dollar: data.earn_per_dollar !== undefined ? data.earn_per_dollar : 1,
+        earn_per_visit: data.earn_per_visit !== undefined ? data.earn_per_visit : null,
+        expiration_months: data.expiration_months !== undefined ? data.expiration_months : null,
+        redemption_mode: data.redemption_mode || 'manual',
+        tier_reset: data.tier_reset || null,
+        show_on_receipt: data.show_on_receipt !== undefined ? data.show_on_receipt : true,
         points_name: data.points_name || 'points',
       },
-      update: {
-        enabled: data.enabled !== undefined ? data.enabled : undefined,
-        points_per_dollar: data.points_per_dollar !== undefined ? data.points_per_dollar : undefined,
-        points_name: data.points_name !== undefined ? data.points_name : undefined,
-        version: { increment: 1 },
-      },
-      include: {
-        tiers: { orderBy: { position: 'asc' } },
-        rewards: { orderBy: { position: 'asc' } },
-      },
+      update: updateData,
     });
 
     emit(req, 'loyalty:updated');
@@ -124,7 +145,6 @@ router.put('/tiers/:id', async function(req, res, next) {
 // ── DELETE /tiers/:id — Delete a tier ──
 router.delete('/tiers/:id', async function(req, res, next) {
   try {
-    // Verify tier belongs to this salon's loyalty program
     var tier = await prisma.loyaltyTier.findFirst({
       where: { id: req.params.id },
       include: { program: { select: { salon_id: true } } }
@@ -192,7 +212,6 @@ router.put('/rewards/:id', async function(req, res, next) {
 // ── DELETE /rewards/:id — Delete a reward ──
 router.delete('/rewards/:id', async function(req, res, next) {
   try {
-    // Verify reward belongs to this salon's loyalty program
     var reward = await prisma.loyaltyReward.findFirst({
       where: { id: req.params.id },
       include: { program: { select: { salon_id: true } } }
@@ -218,7 +237,6 @@ router.post('/earn', async function(req, res, next) {
     var points = data.points || 0;
     if (points <= 0) return res.status(400).json({ error: 'Points must be positive' });
 
-    // Upsert loyalty account
     var account = await prisma.loyaltyAccount.upsert({
       where: { client_id: data.client_id },
       create: {
@@ -234,7 +252,6 @@ router.post('/earn', async function(req, res, next) {
       },
     });
 
-    // Log the transaction
     await prisma.loyaltyTransaction.create({
       data: {
         salon_id: req.salon_id,
