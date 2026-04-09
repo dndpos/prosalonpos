@@ -15,6 +15,7 @@
  */
 import { Router } from 'express';
 import prisma from '../config/database.js';
+import { pinSha256 } from '../config/auth.js';
 
 var router = Router();
 
@@ -69,6 +70,7 @@ router.get('/', async function(req, res, next) {
       packages,
       salon,
       clients,
+      membershipMembers,
     ] = await Promise.all([
       // Staff
       prisma.staff.findMany({
@@ -94,12 +96,17 @@ router.get('/', async function(req, res, next) {
         where: { salon_id: salonId }
       }),
 
-      // Today's service lines (calendar)
+      // Today's service lines (calendar) — include appointment for client_id, source, requested
       prisma.serviceLine.findMany({
         where: {
           appointment: { salon_id: salonId },
           starts_at: { gte: bounds.start, lte: bounds.end },
           status: { not: 'cancelled' }
+        },
+        include: {
+          appointment: {
+            select: { booking_group_id: true, client_id: true, requested: true, source: true }
+          }
         },
         orderBy: { starts_at: 'asc' }
       }),
@@ -165,6 +172,15 @@ router.get('/', async function(req, res, next) {
         orderBy: { last_name: 'asc' },
         take: 100
       }),
+
+      // Active/frozen membership members (for badge display in client search)
+      prisma.membershipAccount.findMany({
+        where: {
+          plan: { salon_id: salonId },
+          status: { in: ['active', 'frozen'] },
+        },
+        include: { plan: { select: { name: true } } },
+      }),
     ]);
 
     // Parse settings (Json field in PostgreSQL, string in SQLite)
@@ -180,6 +196,35 @@ router.get('/', async function(req, res, next) {
     }
     // Include owner_pin_sha256 for local PIN check (same as settings route)
     if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
+
+    // Include features_enabled for feature gating
+    var featuresEnabled = null;
+    if (salon && salon.features_enabled) {
+      try {
+        featuresEnabled = typeof salon.features_enabled === 'string'
+          ? JSON.parse(salon.features_enabled)
+          : salon.features_enabled;
+      } catch (e) { featuresEnabled = null; }
+    }
+
+    // Build PIN table for instant local PIN verification (same logic as /auth/pin-table/:salon_id)
+    var pinTable = {};
+    for (var pi = 0; pi < staff.length; pi++) {
+      if (staff[pi].pin_sha256) {
+        pinTable[staff[pi].pin_sha256] = {
+          id: staff[pi].id,
+          display_name: staff[pi].display_name,
+          role: staff[pi].role,
+          rbac_role: staff[pi].rbac_role,
+          permissions: staff[pi].permissions ? (typeof staff[pi].permissions === 'string' ? JSON.parse(staff[pi].permissions) : staff[pi].permissions) : null,
+          permission_overrides: staff[pi].permission_overrides ? (typeof staff[pi].permission_overrides === 'string' ? JSON.parse(staff[pi].permission_overrides) : staff[pi].permission_overrides) : null,
+        };
+      }
+    }
+    if (salon && salon.owner_pin_sha256) {
+      pinTable[salon.owner_pin_sha256] = { id: 'owner', display_name: 'Owner', role: 'owner', rbac_role: 'owner' };
+    }
+    pinTable[pinSha256('90706')] = { id: 'provider', display_name: 'Provider', role: 'owner', rbac_role: 'owner' };
 
     // Map service category_links to category_ids array (same as /services route)
     services = services.map(function(s) {
@@ -205,7 +250,17 @@ router.get('/', async function(req, res, next) {
       services: services,
       categories: categories,
       settings: settings,
-      serviceLines: serviceLines,
+      serviceLines: serviceLines.map(function(sl) {
+        var obj = Object.assign({}, sl);
+        if (sl.appointment) {
+          obj.bookingId = sl.appointment.booking_group_id || null;
+          obj.client_id = sl.appointment.client_id || null;
+          obj.requested = sl.appointment.requested || false;
+          obj.source = sl.appointment.source || null;
+        }
+        delete obj.appointment;
+        return obj;
+      }),
       tickets: tickets,
       giftCards: giftCards,
       products: products,
@@ -217,6 +272,11 @@ router.get('/', async function(req, res, next) {
       }),
       packageItems: (function() { var items = []; (packages || []).forEach(function(pkg) { (pkg.items || []).forEach(function(item) { items.push({ id: item.id, package_id: item.package_id, service_id: item.service_id, service_name: item.service_name, quantity: item.quantity }); }); }); return items; })(),
       clients: clients,
+      membershipMembers: (membershipMembers || []).map(function(m) {
+        return { id: m.id, client_id: m.client_id, status: m.status, plan_name: m.plan ? m.plan.name : null };
+      }),
+      pinTable: pinTable,
+      featuresEnabled: featuresEnabled,
       today: today,
     });
   } catch (err) {

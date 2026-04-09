@@ -35,6 +35,8 @@ import settingsRoutes from './routes/settings.js';
 import clientRoutes from './routes/clients.js';
 import appointmentRoutes from './routes/appointments.js';
 import checkoutRoutes from './routes/checkout.js';
+import checkoutMergeCloseRoutes from './routes/checkoutMergeClose.js';
+import checkoutVoidRefundTipRoutes from './routes/checkoutVoidRefundTip.js';
 import giftCardRoutes from './routes/giftcards.js';
 import loyaltyRoutes from './routes/loyalty.js';
 import membershipRoutes from './routes/memberships.js';
@@ -113,6 +115,18 @@ app.get('/api/health', function(req, res) {
   res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() });
 });
 
+// ── Request timing — log slow API calls (>500ms target) ──
+app.use('/api/', function(req, res, next) {
+  var start = Date.now();
+  res.on('finish', function() {
+    var elapsed = Date.now() - start;
+    if (elapsed > 500) {
+      console.warn('[SLOW API] ' + req.method + ' ' + req.originalUrl + ' ' + elapsed + 'ms (status: ' + res.statusCode + ')');
+    }
+  });
+  next();
+});
+
 // ── Public routes (no auth required) ──
 app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
@@ -124,6 +138,8 @@ app.use('/api/v1/settings', authenticate, settingsRoutes);
 app.use('/api/v1/clients', authenticate, clientRoutes);
 app.use('/api/v1/appointments', authenticate, appointmentRoutes);
 app.use('/api/v1/checkout', authenticate, checkoutRoutes);
+app.use('/api/v1/checkout', authenticate, checkoutMergeCloseRoutes);
+app.use('/api/v1/checkout', authenticate, checkoutVoidRefundTipRoutes);
 app.use('/api/v1/gift-cards', authenticate, giftCardRoutes);
 app.use('/api/v1/loyalty', authenticate, loyaltyRoutes);
 app.use('/api/v1/memberships', authenticate, membershipRoutes);
@@ -184,15 +200,47 @@ var io = new Server(httpServer, {
 // Register IO instance for broadcasting
 setIO(io);
 
-// ── Socket.io connection handling ──
+// ── Socket.io connection handling (with station enforcement) ──
 io.on('connection', function(socket) {
   console.log('[Socket] Client connected:', socket.id);
 
   // Client joins their salon's room for targeted broadcasts
+  // Also registers an ActiveSession for station enforcement
   socket.on('join-salon', function(salonId) {
     socket.join('salon:' + salonId);
     socket.salonId = salonId;
     console.log('[Socket] ' + socket.id + ' joined salon:' + salonId);
+
+    // Register active session
+    prisma.activeSession.create({
+      data: {
+        salon_id: salonId,
+        socket_id: socket.id,
+      }
+    }).then(function() {
+      console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id);
+    }).catch(function(err) {
+      // Unique constraint = socket reconnected before old record cleaned up
+      if (err.code === 'P2002') {
+        prisma.activeSession.update({
+          where: { socket_id: socket.id },
+          data: { last_heartbeat: new Date() }
+        }).catch(function() {});
+      } else {
+        console.error('[Station] Failed to register session:', err.message);
+      }
+    });
+  });
+
+  // Heartbeat — client sends every 60s to prove it's still alive
+  socket.on('heartbeat', function() {
+    if (!socket.salonId) return;
+    prisma.activeSession.updateMany({
+      where: { socket_id: socket.id },
+      data: { last_heartbeat: new Date() }
+    }).catch(function(err) {
+      console.error('[Station] Heartbeat update failed:', err.message);
+    });
   });
 
   // Print relay: tablet → PC station with QZ Tray
@@ -205,8 +253,34 @@ io.on('connection', function(socket) {
 
   socket.on('disconnect', function() {
     console.log('[Socket] Client disconnected:', socket.id);
+    // Remove active session on clean disconnect
+    prisma.activeSession.deleteMany({
+      where: { socket_id: socket.id }
+    }).then(function(result) {
+      if (result.count > 0) {
+        console.log('[Station] Session removed for socket:' + socket.id);
+      }
+    }).catch(function(err) {
+      console.error('[Station] Failed to remove session:', err.message);
+    });
   });
 });
+
+// ── Stale session cleanup — runs every 2 minutes ──
+// Removes sessions that haven't sent a heartbeat in 3+ minutes.
+// Handles browser crashes, network drops, and zombie sessions.
+setInterval(function() {
+  var cutoff = new Date(Date.now() - 3 * 60 * 1000); // 3 minutes ago
+  prisma.activeSession.deleteMany({
+    where: { last_heartbeat: { lt: cutoff } }
+  }).then(function(result) {
+    if (result.count > 0) {
+      console.log('[Station] Cleaned up ' + result.count + ' stale session(s)');
+    }
+  }).catch(function(err) {
+    console.error('[Station] Stale cleanup failed:', err.message);
+  });
+}, 2 * 60 * 1000); // every 2 minutes
 
 // ════════════════════════════════════════════
 // START SERVER
@@ -251,6 +325,27 @@ httpServer.listen(PORT, async function() {
   }
 
   console.log('');
+
+  // ── Warm up Prisma connection pool so first real request isn't slow ──
+  try {
+    var warmStart = Date.now();
+    await prisma.$queryRaw`SELECT 1`;
+    console.log('[DB] Connection pool warmed up in ' + (Date.now() - warmStart) + 'ms');
+  } catch (e) {
+    console.warn('[DB] Warmup failed:', e.message);
+  }
+
+  // ── Clear all active sessions from previous server runs ──
+  // On restart, all socket connections are gone. Stale records would
+  // permanently block station slots until the 2-minute cleanup fires.
+  try {
+    var cleared = await prisma.activeSession.deleteMany({});
+    if (cleared.count > 0) {
+      console.log('[Station] Cleared ' + cleared.count + ' stale session(s) from previous run');
+    }
+  } catch (e) {
+    console.warn('[Station] Session cleanup failed:', e.message);
+  }
 
   // ── Auto-bootstrap: ensure salon + default data exist ──
   // Runs in ALL modes (dev, cloud, .exe). On a fresh database, creates
@@ -371,5 +466,26 @@ httpServer.listen(PORT, async function() {
     console.log('[Diagnostic] Total tickets in DB:', ticketCount, '| Paid:', paidCount);
   } catch (diagErr) {
     console.error('[Diagnostic] Could not count tickets:', diagErr.message);
+  }
+
+  // ── Auto-seed ProviderOwner if none exists ──
+  // Ensures provider login (PIN 90706) works on existing databases
+  // that were created before the ProviderOwner seed was added.
+  try {
+    var providerCount = await prisma.providerOwner.count();
+    if (providerCount === 0) {
+      var { hashPin: _hashPin } = await import('./config/auth.js');
+      await prisma.providerOwner.create({
+        data: {
+          id: 'provider-owner-1',
+          name: 'Andy Tran',
+          email: 'andy@prosalonpos.com',
+          pin_hash: _hashPin('90706'),
+        }
+      });
+      console.log('[Bootstrap] ✅ Created ProviderOwner (PIN: 90706)');
+    }
+  } catch (provErr) {
+    console.error('[Bootstrap] ⚠️  ProviderOwner seed failed:', provErr.message);
   }
 });
