@@ -196,6 +196,9 @@ router.get('/', async function(req, res, next) {
     }
     // Include owner_pin_sha256 for local PIN check (same as settings route)
     if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
+    // Include owner_pin_plain and salon_code for Salon Settings display
+    if (salon && salon.owner_pin_plain) settings.owner_pin_plain = salon.owner_pin_plain;
+    if (salon && salon.salon_code) settings.salon_code = salon.salon_code;
 
     // Include features_enabled for feature gating
     var featuresEnabled = null;

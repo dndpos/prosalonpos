@@ -265,6 +265,7 @@ router.post('/salons', async function(req, res, next) {
           features_enabled: toDb(features),
           owner_pin_hash: ownerPinHash,
           owner_pin_sha256: ownerPinSha,
+          owner_pin_plain: ownerPin,
         }
       });
 

@@ -32,6 +32,8 @@ router.get('/', async function(req, res, next) {
       var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
       var base = {};
       if (salon && salon.owner_pin_sha256) base.owner_pin_sha256 = salon.owner_pin_sha256;
+      if (salon && salon.owner_pin_plain) base.owner_pin_plain = salon.owner_pin_plain;
+      if (salon && salon.salon_code) base.salon_code = salon.salon_code;
       return res.json({ settings: base });
     }
 
@@ -39,6 +41,8 @@ router.get('/', async function(req, res, next) {
     // Include owner_pin_sha256 for local PIN check at checkout
     var salon = await prisma.salon.findUnique({ where: { id: req.salon_id } });
     if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
+    if (salon && salon.owner_pin_plain) settings.owner_pin_plain = salon.owner_pin_plain;
+    if (salon && salon.salon_code) settings.salon_code = salon.salon_code;
     res.json({ settings: settings });
   } catch (err) { next(err); }
 });

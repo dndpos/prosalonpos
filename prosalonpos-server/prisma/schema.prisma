@@ -44,6 +44,7 @@ model Salon {
   features_enabled          Json?                            // ["appointments", "client_profiles", ...]
   owner_pin_hash            String?                          // Owner PIN stored on salon, not in Staff table
   owner_pin_sha256          String?                          // SHA-256 of owner PIN for fast local lookup
+  owner_pin_plain           String?                          // Plain text PIN for display in Salon Settings
 
   // Relations
   staff              Staff[]

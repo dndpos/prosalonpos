@@ -362,7 +362,7 @@ router.put('/owner-pin', async function(req, res, next) {
     var newSha = pinSha256(String(new_pin));
     await prisma.salon.update({
       where: { id: resolvedSalonId },
-      data: { owner_pin_hash: newHash, owner_pin_sha256: newSha }
+      data: { owner_pin_hash: newHash, owner_pin_sha256: newSha, owner_pin_plain: String(new_pin) }
     });
 
     // Sync to any staff record with role 'owner' (they share the salon owner PIN)
