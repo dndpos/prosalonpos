@@ -408,69 +408,70 @@ router.delete('/salons/:id', requireOwner, async function(req, res, next) {
     var salonName = existing.name;
 
     // Cascade delete in dependency order (children first, salon last)
-    // Using $transaction to ensure atomicity
-    await prisma.$transaction([
+    // Interactive transaction ensures sequential execution — array syntax runs parallel
+    // which causes foreign key violations when parents delete before children
+    await prisma.$transaction(async function(tx) {
       // Package redemptions → package items → client packages → packages
-      prisma.packageRedemption.deleteMany({ where: { clientPackage: { salon_id: salonId } } }),
-      prisma.clientPackageItem.deleteMany({ where: { clientPackage: { salon_id: salonId } } }),
-      prisma.clientPackage.deleteMany({ where: { salon_id: salonId } }),
-      prisma.servicePackageItem.deleteMany({ where: { package: { salon_id: salonId } } }),
-      prisma.servicePackage.deleteMany({ where: { salon_id: salonId } }),
+      await tx.packageRedemption.deleteMany({ where: { clientPackage: { salon_id: salonId } } });
+      await tx.clientPackageItem.deleteMany({ where: { clientPackage: { salon_id: salonId } } });
+      await tx.clientPackage.deleteMany({ where: { salon_id: salonId } });
+      await tx.servicePackageItem.deleteMany({ where: { package: { salon_id: salonId } } });
+      await tx.servicePackage.deleteMany({ where: { salon_id: salonId } });
       // Tickets → items + payments
-      prisma.ticketItem.deleteMany({ where: { ticket: { salon_id: salonId } } }),
-      prisma.ticketPayment.deleteMany({ where: { ticket: { salon_id: salonId } } }),
-      prisma.ticket.deleteMany({ where: { salon_id: salonId } }),
+      await tx.ticketItem.deleteMany({ where: { ticket: { salon_id: salonId } } });
+      await tx.ticketPayment.deleteMany({ where: { ticket: { salon_id: salonId } } });
+      await tx.ticket.deleteMany({ where: { salon_id: salonId } });
       // Appointments + service lines
-      prisma.serviceLine.deleteMany({ where: { salon_id: salonId } }),
-      prisma.appointment.deleteMany({ where: { salon_id: salonId } }),
-      prisma.blockedTime.deleteMany({ where: { salon_id: salonId } }),
+      await tx.serviceLine.deleteMany({ where: { salon_id: salonId } });
+      await tx.appointment.deleteMany({ where: { salon_id: salonId } });
+      await tx.blockedTime.deleteMany({ where: { salon_id: salonId } });
       // Gift cards + transactions
-      prisma.giftCardTransaction.deleteMany({ where: { gift_card: { salon_id: salonId } } }),
-      prisma.giftCard.deleteMany({ where: { salon_id: salonId } }),
+      await tx.giftCardTransaction.deleteMany({ where: { gift_card: { salon_id: salonId } } });
+      await tx.giftCard.deleteMany({ where: { salon_id: salonId } });
       // Loyalty
-      prisma.loyaltyTransaction.deleteMany({ where: { account: { salon_id: salonId } } }),
-      prisma.loyaltyAccount.deleteMany({ where: { salon_id: salonId } }),
-      prisma.loyaltyReward.deleteMany({ where: { program: { salon_id: salonId } } }),
-      prisma.loyaltyTier.deleteMany({ where: { program: { salon_id: salonId } } }),
-      prisma.loyaltyProgram.deleteMany({ where: { salon_id: salonId } }),
+      await tx.loyaltyTransaction.deleteMany({ where: { account: { salon_id: salonId } } });
+      await tx.loyaltyAccount.deleteMany({ where: { salon_id: salonId } });
+      await tx.loyaltyReward.deleteMany({ where: { program: { salon_id: salonId } } });
+      await tx.loyaltyTier.deleteMany({ where: { program: { salon_id: salonId } } });
+      await tx.loyaltyProgram.deleteMany({ where: { salon_id: salonId } });
       // Memberships
-      prisma.membershipPerk.deleteMany({ where: { plan: { salon_id: salonId } } }),
-      prisma.membershipAccount.deleteMany({ where: { plan: { salon_id: salonId } } }),
-      prisma.membershipPlan.deleteMany({ where: { salon_id: salonId } }),
+      await tx.membershipPerk.deleteMany({ where: { plan: { salon_id: salonId } } });
+      await tx.membershipAccount.deleteMany({ where: { plan: { salon_id: salonId } } });
+      await tx.membershipPlan.deleteMany({ where: { salon_id: salonId } });
       // Commission
-      prisma.commissionTier.deleteMany({ where: { rule: { salon_id: salonId } } }),
-      prisma.commissionRule.deleteMany({ where: { salon_id: salonId } }),
+      await tx.commissionTier.deleteMany({ where: { rule: { salon_id: salonId } } });
+      await tx.commissionRule.deleteMany({ where: { salon_id: salonId } });
       // Timeclock
-      prisma.punchAuditLog.deleteMany({ where: { punch: { salon_id: salonId } } }),
-      prisma.clockPunch.deleteMany({ where: { salon_id: salonId } }),
-      prisma.staffPresence.deleteMany({ where: { salon_id: salonId } }),
+      await tx.punchAuditLog.deleteMany({ where: { punch: { salon_id: salonId } } });
+      await tx.clockPunch.deleteMany({ where: { salon_id: salonId } });
+      await tx.staffPresence.deleteMany({ where: { salon_id: salonId } });
       // Messaging
-      prisma.messageLogEntry.deleteMany({ where: { salon_id: salonId } }),
-      prisma.messageTemplate.deleteMany({ where: { salon_id: salonId } }),
+      await tx.messageLogEntry.deleteMany({ where: { salon_id: salonId } });
+      await tx.messageTemplate.deleteMany({ where: { salon_id: salonId } });
       // Services + categories + assignments
-      prisma.serviceCatalogCategory.deleteMany({ where: { service: { salon_id: salonId } } }),
-      prisma.serviceStaffAssignment.deleteMany({ where: { service: { salon_id: salonId } } }),
-      prisma.categoryStaffAssignment.deleteMany({ where: { category: { salon_id: salonId } } }),
-      prisma.serviceCatalog.deleteMany({ where: { salon_id: salonId } }),
-      prisma.serviceCategory.deleteMany({ where: { salon_id: salonId } }),
+      await tx.serviceCatalogCategory.deleteMany({ where: { service: { salon_id: salonId } } });
+      await tx.serviceStaffAssignment.deleteMany({ where: { service: { salon_id: salonId } } });
+      await tx.categoryStaffAssignment.deleteMany({ where: { category: { salon_id: salonId } } });
+      await tx.serviceCatalog.deleteMany({ where: { salon_id: salonId } });
+      await tx.serviceCategory.deleteMany({ where: { salon_id: salonId } });
       // Products + inventory
-      prisma.product.deleteMany({ where: { salon_id: salonId } }),
-      prisma.productCategory.deleteMany({ where: { salon_id: salonId } }),
-      prisma.supplier.deleteMany({ where: { salon_id: salonId } }),
+      await tx.product.deleteMany({ where: { salon_id: salonId } });
+      await tx.productCategory.deleteMany({ where: { salon_id: salonId } });
+      await tx.supplier.deleteMany({ where: { salon_id: salonId } });
       // Clients
-      prisma.client.deleteMany({ where: { salon_id: salonId } }),
+      await tx.client.deleteMany({ where: { salon_id: salonId } });
       // Staff
-      prisma.staff.deleteMany({ where: { salon_id: salonId } }),
+      await tx.staff.deleteMany({ where: { salon_id: salonId } });
       // Settings
-      prisma.salonSettings.deleteMany({ where: { salon_id: salonId } }),
+      await tx.salonSettings.deleteMany({ where: { salon_id: salonId } });
       // Active sessions
-      prisma.activeSession.deleteMany({ where: { salon_id: salonId } }),
+      await tx.activeSession.deleteMany({ where: { salon_id: salonId } });
       // Provider notes + billing for this salon
-      prisma.providerSalonNote.deleteMany({ where: { salon_id: salonId } }),
-      prisma.providerBillingRecord.deleteMany({ where: { salon_id: salonId } }),
+      await tx.providerSalonNote.deleteMany({ where: { salon_id: salonId } });
+      await tx.providerBillingRecord.deleteMany({ where: { salon_id: salonId } });
       // Finally: the salon itself
-      prisma.salon.delete({ where: { id: salonId } }),
-    ], { timeout: 30000 });
+      await tx.salon.delete({ where: { id: salonId } });
+    }, { timeout: 30000 });
 
     await addAudit(req, 'salon_deleted', 'Permanently deleted salon: ' + salonName + ' (id: ' + salonId + ')');
     res.json({ deleted: true, name: salonName });
