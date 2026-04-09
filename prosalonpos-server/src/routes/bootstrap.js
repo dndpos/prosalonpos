@@ -70,6 +70,7 @@ router.get('/', async function(req, res, next) {
       packages,
       salon,
       clients,
+      membershipMembers,
     ] = await Promise.all([
       // Staff
       prisma.staff.findMany({
@@ -95,12 +96,17 @@ router.get('/', async function(req, res, next) {
         where: { salon_id: salonId }
       }),
 
-      // Today's service lines (calendar)
+      // Today's service lines (calendar) — include appointment for client_id, source, requested
       prisma.serviceLine.findMany({
         where: {
           appointment: { salon_id: salonId },
           starts_at: { gte: bounds.start, lte: bounds.end },
           status: { not: 'cancelled' }
+        },
+        include: {
+          appointment: {
+            select: { booking_group_id: true, client_id: true, requested: true, source: true }
+          }
         },
         orderBy: { starts_at: 'asc' }
       }),
@@ -166,6 +172,15 @@ router.get('/', async function(req, res, next) {
         orderBy: { last_name: 'asc' },
         take: 100
       }),
+
+      // Active/frozen membership members (for badge display in client search)
+      prisma.membershipAccount.findMany({
+        where: {
+          plan: { salon_id: salonId },
+          status: { in: ['active', 'frozen'] },
+        },
+        include: { plan: { select: { name: true } } },
+      }),
     ]);
 
     // Parse settings (Json field in PostgreSQL, string in SQLite)
@@ -225,7 +240,17 @@ router.get('/', async function(req, res, next) {
       services: services,
       categories: categories,
       settings: settings,
-      serviceLines: serviceLines,
+      serviceLines: serviceLines.map(function(sl) {
+        var obj = Object.assign({}, sl);
+        if (sl.appointment) {
+          obj.bookingId = sl.appointment.booking_group_id || null;
+          obj.client_id = sl.appointment.client_id || null;
+          obj.requested = sl.appointment.requested || false;
+          obj.source = sl.appointment.source || null;
+        }
+        delete obj.appointment;
+        return obj;
+      }),
       tickets: tickets,
       giftCards: giftCards,
       products: products,
@@ -237,6 +262,9 @@ router.get('/', async function(req, res, next) {
       }),
       packageItems: (function() { var items = []; (packages || []).forEach(function(pkg) { (pkg.items || []).forEach(function(item) { items.push({ id: item.id, package_id: item.package_id, service_id: item.service_id, service_name: item.service_name, quantity: item.quantity }); }); }); return items; })(),
       clients: clients,
+      membershipMembers: (membershipMembers || []).map(function(m) {
+        return { id: m.id, client_id: m.client_id, status: m.status, plan_name: m.plan ? m.plan.name : null };
+      }),
       pinTable: pinTable,
       today: today,
     });
