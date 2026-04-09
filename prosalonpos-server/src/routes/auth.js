@@ -367,10 +367,20 @@ router.put('/owner-pin', async function(req, res, next) {
 
     var newHash = hashPin(String(new_pin));
     var newSha = pinSha256(String(new_pin));
+    
+    // DEBUG: Verify hash works before saving
+    var verifyResult = await comparePinAsync(String(new_pin), newHash);
+    console.log('[Auth] PIN change debug — new_pin:', JSON.stringify(new_pin), '| String(new_pin):', JSON.stringify(String(new_pin)), '| hash (first 20):', newHash.substring(0, 20), '| verify:', verifyResult);
+    
     await prisma.salon.update({
       where: { id: resolvedSalonId },
       data: { owner_pin_hash: newHash, owner_pin_sha256: newSha, owner_pin_plain: String(new_pin) }
     });
+    
+    // DEBUG: Read back from DB and verify
+    var checkSalon = await prisma.salon.findUnique({ where: { id: resolvedSalonId }, select: { owner_pin_hash: true, owner_pin_plain: true } });
+    var readbackVerify = await comparePinAsync(String(new_pin), checkSalon.owner_pin_hash);
+    console.log('[Auth] PIN readback — stored_plain:', checkSalon.owner_pin_plain, '| hash (first 20):', checkSalon.owner_pin_hash.substring(0, 20), '| readback verify:', readbackVerify);
 
     // Sync to any staff record with role 'owner' (they share the salon owner PIN)
     await prisma.staff.updateMany({
