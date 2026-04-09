@@ -256,6 +256,35 @@ io.on('connection', function(socket) {
     }
   });
 
+  // ── WebRTC Screen Sharing Signaling ──
+  // Provider Admin initiates, salon station accepts and shares screen
+  socket.on('screen-share-request', function(data) {
+    // Provider asks a salon to share screen — forward to all clients in that salon room
+    if (data.salon_id) {
+      socket.to('salon:' + data.salon_id).emit('screen-share-request', { from: socket.id });
+    }
+  });
+  socket.on('screen-share-accept', function(data) {
+    // Salon accepted — tell the provider who asked
+    if (data.to) io.to(data.to).emit('screen-share-accept', { from: socket.id });
+  });
+  socket.on('screen-share-decline', function(data) {
+    if (data.to) io.to(data.to).emit('screen-share-decline', {});
+  });
+  socket.on('screen-share-offer', function(data) {
+    if (data.to) io.to(data.to).emit('screen-share-offer', { from: socket.id, offer: data.offer });
+  });
+  socket.on('screen-share-answer', function(data) {
+    if (data.to) io.to(data.to).emit('screen-share-answer', { from: socket.id, answer: data.answer });
+  });
+  socket.on('screen-share-ice', function(data) {
+    if (data.to) io.to(data.to).emit('screen-share-ice', { from: socket.id, candidate: data.candidate });
+  });
+  socket.on('screen-share-stop', function(data) {
+    if (data.to) io.to(data.to).emit('screen-share-stop', {});
+    if (data.salon_id) socket.to('salon:' + data.salon_id).emit('screen-share-stop', {});
+  });
+
   socket.on('disconnect', function() {
     console.log('[Socket] Client disconnected:', socket.id);
     // Remove active session on clean disconnect
