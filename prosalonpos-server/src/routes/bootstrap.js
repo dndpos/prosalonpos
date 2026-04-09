@@ -197,6 +197,16 @@ router.get('/', async function(req, res, next) {
     // Include owner_pin_sha256 for local PIN check (same as settings route)
     if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
 
+    // Include features_enabled for feature gating
+    var featuresEnabled = null;
+    if (salon && salon.features_enabled) {
+      try {
+        featuresEnabled = typeof salon.features_enabled === 'string'
+          ? JSON.parse(salon.features_enabled)
+          : salon.features_enabled;
+      } catch (e) { featuresEnabled = null; }
+    }
+
     // Build PIN table for instant local PIN verification (same logic as /auth/pin-table/:salon_id)
     var pinTable = {};
     for (var pi = 0; pi < staff.length; pi++) {
@@ -266,6 +276,7 @@ router.get('/', async function(req, res, next) {
         return { id: m.id, client_id: m.client_id, status: m.status, plan_name: m.plan ? m.plan.name : null };
       }),
       pinTable: pinTable,
+      featuresEnabled: featuresEnabled,
       today: today,
     });
   } catch (err) {
