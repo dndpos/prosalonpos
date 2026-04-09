@@ -49,6 +49,7 @@ import reportsRoutes from './routes/reports.js';
 import providerRoutes from './routes/provider.js';
 import packageRoutes from './routes/packages.js';
 import bootstrapRoutes from './routes/bootstrap.js';
+import publicRoutes from './routes/public.js';
 
 var PORT = process.env.PORT || 3001;
 
@@ -130,6 +131,7 @@ app.use('/api/', function(req, res, next) {
 // ── Public routes (no auth required) ──
 app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
+app.use('/api/v1/public', publicRoutes); // Online booking portal — no auth
 
 // ── Protected routes (JWT required) ──
 app.use('/api/v1/staff', authenticate, staffRoutes);
