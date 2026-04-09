@@ -384,6 +384,9 @@ router.put('/owner-pin', async function(req, res, next) {
     var io = getIO();
     if (io) {
       io.to('salon:' + resolvedSalonId).emit('owner-pin-changed', { salon_id: resolvedSalonId });
+      console.log('[Auth] Broadcast owner-pin-changed to salon:' + resolvedSalonId);
+    } else {
+      console.log('[Auth] WARNING: io not available for broadcast');
     }
 
     res.json({ success: true });
