@@ -96,7 +96,8 @@ router.put('/:id', async function(req, res, next) {
     var data = req.body;
     var updateData = {};
     var fields = ['first_name', 'last_name', 'phone', 'email',
-      'outstanding_balance_cents', 'promo_opt_out', 'notes'];
+      'outstanding_balance_cents', 'promo_opt_out', 'notes',
+      'is_vip', 'vip_manual_override'];
 
     fields.forEach(function(f) {
       if (data[f] !== undefined) updateData[f] = data[f];

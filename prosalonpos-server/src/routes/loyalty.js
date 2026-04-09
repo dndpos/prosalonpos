@@ -94,6 +94,19 @@ router.get('/members', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── GET /account/:clientId — Get a single client's loyalty account ──
+router.get('/account/:clientId', async function(req, res, next) {
+  try {
+    var account = await prisma.loyaltyAccount.findUnique({
+      where: { client_id: req.params.clientId },
+    });
+    if (!account) {
+      return res.json({ account: null });
+    }
+    res.json({ account: account });
+  } catch (err) { next(err); }
+});
+
 // ════════════════════════════════════════════
 // TIERS
 // ════════════════════════════════════════════

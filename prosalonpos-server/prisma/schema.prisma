@@ -217,6 +217,8 @@ model Client {
   email                    String?
   outstanding_balance_cents Int     @default(0)
   promo_opt_out            Boolean  @default(false)
+  is_vip                   Boolean  @default(false)
+  vip_manual_override      Boolean  @default(false)
   notes                    String?
   active                   Boolean  @default(true)
   created_at               DateTime @default(now())
