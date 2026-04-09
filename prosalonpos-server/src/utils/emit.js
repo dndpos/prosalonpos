@@ -15,6 +15,10 @@ export function setIO(io) {
   _io = io;
 }
 
+export function getIO() {
+  return _io;
+}
+
 export function emit(req, event, data) {
   if (!_io) return;
   var room = 'salon:' + req.salon_id;

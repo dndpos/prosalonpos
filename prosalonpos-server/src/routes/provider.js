@@ -29,6 +29,7 @@ import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
 import { createToken, hashPin, comparePin, pinSha256 } from '../config/auth.js';
 import providerAuth, { requireOwner } from '../middleware/providerAuth.js';
+import { getIO } from '../utils/emit.js';
 
 // SQLite stores JSON as strings
 function toDb(val) {
@@ -346,6 +347,18 @@ router.put('/salons/:id', async function(req, res, next) {
     });
 
     await addAudit(req, 'salon_updated', 'Updated salon details: ' + salon.name, salon.id);
+
+    // If status changed to suspended, force-logout all active sessions for this salon
+    if (updateData.status === 'suspended') {
+      var io = getIO();
+      if (io) {
+        io.to('salon:' + salon.id).emit('force-logout', { reason: 'This salon account has been suspended.' });
+        console.log('[Provider] Force-logout broadcast sent to salon:', salon.name);
+      }
+      // Clear all active sessions for this salon
+      await prisma.activeSession.deleteMany({ where: { salon_id: salon.id } }).catch(function() {});
+    }
+
     res.json({ salon: formatProviderSalon(salon) });
   } catch (err) { next(err); }
 });
