@@ -38,8 +38,18 @@ run('npx prisma generate');
 console.log('[build] ✅ Prisma client generated');
 console.log('');
 
-// ── Step 2: Verify pre-built frontend ──
-console.log('[build] Step 2: Checking for pre-built frontend...');
+// ── Step 2: Prisma migrate deploy ──
+console.log('[build] Step 2: Running database migrations...');
+try {
+  run('npx prisma migrate deploy');
+  console.log('[build] ✅ Migrations applied');
+} catch (err) {
+  console.error('[build] ⚠️  Migration failed (may already be applied):', err.message);
+}
+console.log('');
+
+// ── Step 3: Verify pre-built frontend ──
+console.log('[build] Step 3: Checking for pre-built frontend...');
 if (existsSync(join(publicDir, 'index.html'))) {
   console.log('[build] ✅ Pre-built frontend found in public/');
 } else {
