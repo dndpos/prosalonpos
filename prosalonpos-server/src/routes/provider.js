@@ -1,29 +1,7 @@
 /**
  * ProSalonPOS — Provider Admin Routes
  * ISO-level management: salons, agents, billing, audit, notes.
- *
  * Auth: /auth/login is public. All other endpoints require provider JWT.
- * Owner-only endpoints use requireOwner middleware.
- *
- * Route structure:
- *   POST /auth/login              → { token, user }
- *   GET  /salons                  → { salons: [...] }
- *   GET  /salons/:id              → { salon: {...} }
- *   POST /salons                  → { salon: {...} }
- *   PUT  /salons/:id              → { salon: {...} }
- *   PUT  /salons/:id/features     → { salon: {...} }
- *   PUT  /salons/:id/status       → { salon: {...} }
- *   GET  /agents                  → { agents: [...] }
- *   GET  /agents/:id              → { agent: {...} }
- *   POST /agents                  → { agent: {...} }
- *   PUT  /agents/:id              → { agent: {...} }
- *   DELETE /agents/:id            → { agent: {...} }
- *   GET  /salons/:id/notes        → { notes: [...] }
- *   POST /salons/:id/notes        → { note: {...} }
- *   GET  /billing                 → { records: [...] }
- *   GET  /billing/:salonId        → { records: [...] }
- *   POST /billing                 → { record: {...} }
- *   GET  /audit                   → { entries: [...] }
  */
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
@@ -183,10 +161,52 @@ router.get('/salons/:id', async function(req, res, next) {
       where: { id: req.params.id }
     });
     if (!salon) return res.status(404).json({ error: 'Salon not found' });
-    var activeCount = await prisma.activeSession.count({ where: { salon_id: salon.id } });
+    // Get active sessions with detail
+    var sessions = await prisma.activeSession.findMany({
+      where: { salon_id: salon.id },
+      orderBy: { created_at: 'asc' }
+    });
+    // Look up staff display names for each session
+    var staffIds = sessions.map(function(s) { return s.staff_id; }).filter(function(id) { return id && id !== 'owner' && id !== 'provider'; });
+    var staffMap = {};
+    if (staffIds.length > 0) {
+      var staffRecords = await prisma.staff.findMany({ where: { id: { in: staffIds } }, select: { id: true, display_name: true } });
+      staffRecords.forEach(function(s) { staffMap[s.id] = s.display_name; });
+    }
     var formatted = formatProviderSalon(salon);
-    formatted.active_sessions = activeCount;
+    formatted.active_sessions = sessions.length;
+    formatted.sessions = sessions.map(function(s) {
+      return {
+        id: s.id,
+        staff_name: s.staff_id === 'owner' ? 'Owner' : s.staff_id === 'provider' ? 'Provider' : (staffMap[s.staff_id] || s.staff_id || 'Unknown'),
+        station_label: s.station_label || null,
+        connected_at: s.created_at,
+        last_heartbeat: s.last_heartbeat,
+      };
+    });
     res.json({ salon: formatted });
+  } catch (err) { next(err); }
+});
+
+// ── DELETE /salons/:id/sessions/:sessionId — Kick a station ──
+router.delete('/salons/:id/sessions/:sessionId', async function(req, res, next) {
+  try {
+    var session = await prisma.activeSession.findUnique({ where: { id: req.params.sessionId } });
+    if (!session || session.salon_id !== req.params.id) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    // Force-disconnect via Socket.io if possible
+    var io = getIO();
+    if (io && session.socket_id) {
+      var target = io.sockets.sockets.get(session.socket_id);
+      if (target) {
+        target.emit('force-logout', { reason: 'Station disconnected by provider' });
+        target.disconnect(true);
+      }
+    }
+    await prisma.activeSession.delete({ where: { id: req.params.sessionId } });
+    await addAudit(req, 'station_kicked', 'Kicked station session ' + (session.station_label || session.id), req.params.id);
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 
