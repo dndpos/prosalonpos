@@ -122,8 +122,10 @@ router.post('/login', async function(req, res, next) {
         where: { id: salon_id },
         select: { status: true, trial_end_date: true }
       });
+      console.log('[Auth] Status gate — salon status:', salonCheck ? salonCheck.status : 'NOT FOUND');
       if (salonCheck) {
         if (salonCheck.status === 'suspended') {
+          console.log('[Auth] BLOCKED — salon is suspended');
           return res.status(403).json({
             error: 'This salon account is suspended. Contact your provider.',
             code: 'SALON_SUSPENDED',
