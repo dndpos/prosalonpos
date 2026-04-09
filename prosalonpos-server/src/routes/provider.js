@@ -408,28 +408,30 @@ router.delete('/salons/:id', requireOwner, async function(req, res, next) {
     var salonName = existing.name;
 
     // Cascade delete in dependency order (children first, salon last)
-    // Interactive transaction ensures sequential execution — array syntax runs parallel
-    // which causes foreign key violations when parents delete before children
+    // Only use salon_id filter on models that have it directly.
+    // Models without salon_id use relation filters through their parent.
+    // Many children auto-cascade from parent delete (onDelete: Cascade in schema),
+    // but we explicitly delete them first to be safe.
     await prisma.$transaction(async function(tx) {
-      // Package redemptions → package items → client packages → packages
+      // Package redemptions (no salon_id — via clientPackage)
       await tx.packageRedemption.deleteMany({ where: { clientPackage: { salon_id: salonId } } });
       await tx.clientPackageItem.deleteMany({ where: { clientPackage: { salon_id: salonId } } });
       await tx.clientPackage.deleteMany({ where: { salon_id: salonId } });
       await tx.servicePackageItem.deleteMany({ where: { package: { salon_id: salonId } } });
       await tx.servicePackage.deleteMany({ where: { salon_id: salonId } });
-      // Tickets → items + payments
+      // Tickets — items/payments cascade from ticket delete, but delete explicitly
       await tx.ticketItem.deleteMany({ where: { ticket: { salon_id: salonId } } });
       await tx.ticketPayment.deleteMany({ where: { ticket: { salon_id: salonId } } });
       await tx.ticket.deleteMany({ where: { salon_id: salonId } });
-      // Appointments + service lines
-      await tx.serviceLine.deleteMany({ where: { salon_id: salonId } });
+      // Service lines cascade from appointment delete, but delete explicitly
+      await tx.serviceLine.deleteMany({ where: { appointment: { salon_id: salonId } } });
       await tx.appointment.deleteMany({ where: { salon_id: salonId } });
       await tx.blockedTime.deleteMany({ where: { salon_id: salonId } });
-      // Gift cards + transactions
+      // Gift card transactions cascade from gift card delete
       await tx.giftCardTransaction.deleteMany({ where: { gift_card: { salon_id: salonId } } });
       await tx.giftCard.deleteMany({ where: { salon_id: salonId } });
       // Loyalty
-      await tx.loyaltyTransaction.deleteMany({ where: { account: { salon_id: salonId } } });
+      await tx.loyaltyTransaction.deleteMany({ where: { salon_id: salonId } });
       await tx.loyaltyAccount.deleteMany({ where: { salon_id: salonId } });
       await tx.loyaltyReward.deleteMany({ where: { program: { salon_id: salonId } } });
       await tx.loyaltyTier.deleteMany({ where: { program: { salon_id: salonId } } });
@@ -439,16 +441,16 @@ router.delete('/salons/:id', requireOwner, async function(req, res, next) {
       await tx.membershipAccount.deleteMany({ where: { plan: { salon_id: salonId } } });
       await tx.membershipPlan.deleteMany({ where: { salon_id: salonId } });
       // Commission
-      await tx.commissionTier.deleteMany({ where: { rule: { salon_id: salonId } } });
+      await tx.commissionTier.deleteMany({ where: { salon_id: salonId } });
       await tx.commissionRule.deleteMany({ where: { salon_id: salonId } });
-      // Timeclock
-      await tx.punchAuditLog.deleteMany({ where: { punch: { salon_id: salonId } } });
-      await tx.clockPunch.deleteMany({ where: { salon_id: salonId } });
+      // Timeclock — ClockPunch/PunchAuditLog have no salon_id, filter via staff
+      await tx.punchAuditLog.deleteMany({ where: { punch: { staff: { salon_id: salonId } } } });
+      await tx.clockPunch.deleteMany({ where: { staff: { salon_id: salonId } } });
       await tx.staffPresence.deleteMany({ where: { salon_id: salonId } });
       // Messaging
       await tx.messageLogEntry.deleteMany({ where: { salon_id: salonId } });
       await tx.messageTemplate.deleteMany({ where: { salon_id: salonId } });
-      // Services + categories + assignments
+      // Services — junction tables have no salon_id, filter via parent
       await tx.serviceCatalogCategory.deleteMany({ where: { service: { salon_id: salonId } } });
       await tx.serviceStaffAssignment.deleteMany({ where: { service: { salon_id: salonId } } });
       await tx.categoryStaffAssignment.deleteMany({ where: { category: { salon_id: salonId } } });
@@ -462,11 +464,11 @@ router.delete('/salons/:id', requireOwner, async function(req, res, next) {
       await tx.client.deleteMany({ where: { salon_id: salonId } });
       // Staff
       await tx.staff.deleteMany({ where: { salon_id: salonId } });
-      // Settings
+      // Settings + program
       await tx.salonSettings.deleteMany({ where: { salon_id: salonId } });
       // Active sessions
       await tx.activeSession.deleteMany({ where: { salon_id: salonId } });
-      // Provider notes + billing for this salon
+      // Provider notes + billing
       await tx.providerSalonNote.deleteMany({ where: { salon_id: salonId } });
       await tx.providerBillingRecord.deleteMany({ where: { salon_id: salonId } });
       // Finally: the salon itself
