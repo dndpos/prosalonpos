@@ -159,7 +159,19 @@ router.get('/salons', async function(req, res, next) {
       orderBy: { name: 'asc' }
     });
 
-    res.json({ salons: salons.map(formatProviderSalon) });
+    // Get active session counts for all salons in one query
+    var sessionCounts = await prisma.activeSession.groupBy({
+      by: ['salon_id'],
+      _count: { id: true }
+    });
+    var countMap = {};
+    sessionCounts.forEach(function(sc) { countMap[sc.salon_id] = sc._count.id; });
+
+    res.json({ salons: salons.map(function(s) {
+      var formatted = formatProviderSalon(s);
+      formatted.active_sessions = countMap[s.id] || 0;
+      return formatted;
+    }) });
   } catch (err) { next(err); }
 });
 
@@ -170,7 +182,10 @@ router.get('/salons/:id', async function(req, res, next) {
       where: { id: req.params.id }
     });
     if (!salon) return res.status(404).json({ error: 'Salon not found' });
-    res.json({ salon: formatProviderSalon(salon) });
+    var activeCount = await prisma.activeSession.count({ where: { salon_id: salon.id } });
+    var formatted = formatProviderSalon(salon);
+    formatted.active_sessions = activeCount;
+    res.json({ salon: formatted });
   } catch (err) { next(err); }
 });
 
@@ -209,9 +224,9 @@ router.post('/salons', async function(req, res, next) {
 
     // Default features based on plan tier
     var defaultFeatures = {
-      basic: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'inventory', 'payroll', 'barcode_scan', 'provider_pay_services_split', 'provider_print_check'],
-      professional: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'text_messaging', 'inventory', 'payroll', 'deposits', 'barcode_scan', 'provider_pay_services_split', 'provider_print_check'],
-      premium: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'group_booking', 'text_messaging', 'inventory', 'payroll', 'deposits', 'commission_tiers', 'advanced_reports', 'barcode_scan', 'multi_location', 'purchase_orders', 'confirmation_system', 'provider_pay_services_split', 'provider_print_check'],
+      basic: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards'],
+      professional: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'text_messaging', 'inventory', 'payroll', 'deposits'],
+      premium: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'group_booking', 'text_messaging', 'inventory', 'payroll', 'deposits', 'commission_tiers', 'advanced_reports', 'barcode_scan'],
     };
 
     var tier = d.plan_tier || 'basic';
@@ -379,6 +394,86 @@ router.put('/salons/:id/status', async function(req, res, next) {
 
     await addAudit(req, 'salon_' + newStatus, 'Changed status of ' + salon.name + ' to ' + newStatus, salon.id);
     res.json({ salon: formatProviderSalon(salon) });
+  } catch (err) { next(err); }
+});
+
+// ── DELETE /salons/:id — Permanently delete a salon and all related data ──
+// Owner only. Cascade deletes all records for this salon.
+router.delete('/salons/:id', requireOwner, async function(req, res, next) {
+  try {
+    var existing = await prisma.salon.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Salon not found' });
+
+    var salonId = existing.id;
+    var salonName = existing.name;
+
+    // Cascade delete in dependency order (children first, salon last)
+    // Using $transaction to ensure atomicity
+    await prisma.$transaction([
+      // Package redemptions → package items → client packages → packages
+      prisma.packageRedemption.deleteMany({ where: { clientPackage: { salon_id: salonId } } }),
+      prisma.clientPackageItem.deleteMany({ where: { clientPackage: { salon_id: salonId } } }),
+      prisma.clientPackage.deleteMany({ where: { salon_id: salonId } }),
+      prisma.servicePackageItem.deleteMany({ where: { package: { salon_id: salonId } } }),
+      prisma.servicePackage.deleteMany({ where: { salon_id: salonId } }),
+      // Tickets → items + payments
+      prisma.ticketItem.deleteMany({ where: { ticket: { salon_id: salonId } } }),
+      prisma.ticketPayment.deleteMany({ where: { ticket: { salon_id: salonId } } }),
+      prisma.ticket.deleteMany({ where: { salon_id: salonId } }),
+      // Appointments + service lines
+      prisma.serviceLine.deleteMany({ where: { salon_id: salonId } }),
+      prisma.appointment.deleteMany({ where: { salon_id: salonId } }),
+      prisma.blockedTime.deleteMany({ where: { salon_id: salonId } }),
+      // Gift cards + transactions
+      prisma.giftCardTransaction.deleteMany({ where: { gift_card: { salon_id: salonId } } }),
+      prisma.giftCard.deleteMany({ where: { salon_id: salonId } }),
+      // Loyalty
+      prisma.loyaltyTransaction.deleteMany({ where: { account: { salon_id: salonId } } }),
+      prisma.loyaltyAccount.deleteMany({ where: { salon_id: salonId } }),
+      prisma.loyaltyReward.deleteMany({ where: { program: { salon_id: salonId } } }),
+      prisma.loyaltyTier.deleteMany({ where: { program: { salon_id: salonId } } }),
+      prisma.loyaltyProgram.deleteMany({ where: { salon_id: salonId } }),
+      // Memberships
+      prisma.membershipPerk.deleteMany({ where: { plan: { salon_id: salonId } } }),
+      prisma.membershipAccount.deleteMany({ where: { plan: { salon_id: salonId } } }),
+      prisma.membershipPlan.deleteMany({ where: { salon_id: salonId } }),
+      // Commission
+      prisma.commissionTier.deleteMany({ where: { rule: { salon_id: salonId } } }),
+      prisma.commissionRule.deleteMany({ where: { salon_id: salonId } }),
+      // Timeclock
+      prisma.punchAuditLog.deleteMany({ where: { punch: { salon_id: salonId } } }),
+      prisma.clockPunch.deleteMany({ where: { salon_id: salonId } }),
+      prisma.staffPresence.deleteMany({ where: { salon_id: salonId } }),
+      // Messaging
+      prisma.messageLogEntry.deleteMany({ where: { salon_id: salonId } }),
+      prisma.messageTemplate.deleteMany({ where: { salon_id: salonId } }),
+      // Services + categories + assignments
+      prisma.serviceCatalogCategory.deleteMany({ where: { service: { salon_id: salonId } } }),
+      prisma.serviceStaffAssignment.deleteMany({ where: { service: { salon_id: salonId } } }),
+      prisma.categoryStaffAssignment.deleteMany({ where: { category: { salon_id: salonId } } }),
+      prisma.serviceCatalog.deleteMany({ where: { salon_id: salonId } }),
+      prisma.serviceCategory.deleteMany({ where: { salon_id: salonId } }),
+      // Products + inventory
+      prisma.product.deleteMany({ where: { salon_id: salonId } }),
+      prisma.productCategory.deleteMany({ where: { salon_id: salonId } }),
+      prisma.supplier.deleteMany({ where: { salon_id: salonId } }),
+      // Clients
+      prisma.client.deleteMany({ where: { salon_id: salonId } }),
+      // Staff
+      prisma.staff.deleteMany({ where: { salon_id: salonId } }),
+      // Settings
+      prisma.salonSettings.deleteMany({ where: { salon_id: salonId } }),
+      // Active sessions
+      prisma.activeSession.deleteMany({ where: { salon_id: salonId } }),
+      // Provider notes + billing for this salon
+      prisma.providerSalonNote.deleteMany({ where: { salon_id: salonId } }),
+      prisma.providerBillingRecord.deleteMany({ where: { salon_id: salonId } }),
+      // Finally: the salon itself
+      prisma.salon.delete({ where: { id: salonId } }),
+    ], { timeout: 30000 });
+
+    await addAudit(req, 'salon_deleted', 'Permanently deleted salon: ' + salonName + ' (id: ' + salonId + ')');
+    res.json({ deleted: true, name: salonName });
   } catch (err) { next(err); }
 });
 

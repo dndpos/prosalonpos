@@ -115,6 +115,37 @@ router.post('/login', async function(req, res, next) {
       return res.status(400).json({ error: 'salon_id and pin are required' });
     }
 
+    // ── Salon status + trial expiration check ──
+    // Provider master code (90706) bypasses — you always need a way in to manage
+    if (pin !== '90706') {
+      var salonCheck = await prisma.salon.findUnique({
+        where: { id: salon_id },
+        select: { status: true, trial_end_date: true }
+      });
+      if (salonCheck) {
+        if (salonCheck.status === 'suspended') {
+          return res.status(403).json({
+            error: 'This salon account is suspended. Contact your provider.',
+            code: 'SALON_SUSPENDED',
+          });
+        }
+        if (salonCheck.status === 'cancelled') {
+          return res.status(403).json({
+            error: 'This salon account has been cancelled. Contact your provider.',
+            code: 'SALON_CANCELLED',
+          });
+        }
+        if (salonCheck.status === 'trial' && salonCheck.trial_end_date) {
+          if (new Date() > new Date(salonCheck.trial_end_date)) {
+            return res.status(403).json({
+              error: 'Your trial has expired. Contact your provider to activate your account.',
+              code: 'TRIAL_EXPIRED',
+            });
+          }
+        }
+      }
+    }
+
     // 1. Check staff PINs (async — non-blocking)
     var staff = await prisma.staff.findMany({
       where: { salon_id: salon_id, active: true }
@@ -140,6 +171,21 @@ router.post('/login', async function(req, res, next) {
     }
 
     if (matched) {
+      // ── Station enforcement: check active session count before allowing login ──
+      // Provider master code (90706) bypasses — you always need a way in
+      var salonRecord = await prisma.salon.findUnique({ where: { id: salon_id }, select: { station_count: true, status: true, trial_end_date: true } });
+      if (salonRecord) {
+        var activeCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
+        if (activeCount >= salonRecord.station_count) {
+          return res.status(403).json({
+            error: 'Station limit reached (' + activeCount + '/' + salonRecord.station_count + '). Close another station or contact your provider.',
+            code: 'STATION_LIMIT',
+            active: activeCount,
+            limit: salonRecord.station_count,
+          });
+        }
+      }
+
       var token = createToken({
         salon_id: matched.salon_id,
         staff_id: matched.id,
@@ -163,6 +209,17 @@ router.post('/login', async function(req, res, next) {
       var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
       console.log('[Auth] Owner PIN compare result:', ownerMatch);
       if (ownerMatch) {
+        // ── Station enforcement for owner login ──
+        var ownerActiveCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
+        if (ownerActiveCount >= salon.station_count) {
+          return res.status(403).json({
+            error: 'Station limit reached (' + ownerActiveCount + '/' + salon.station_count + '). Close another station or contact your provider.',
+            code: 'STATION_LIMIT',
+            active: ownerActiveCount,
+            limit: salon.station_count,
+          });
+        }
+
         // Rehash if using old slow rounds (fire and forget)
         if (needsRehash(salon.owner_pin_hash)) {
           hashPinAsync(pin).then(function(newHash) {
