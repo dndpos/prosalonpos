@@ -153,9 +153,7 @@ router.post('/login', async function(req, res, next) {
     var matched = null;
     for (var i = 0; i < staff.length; i++) {
       if (staff[i].pin_hash) {
-        console.log('[Auth] Checking staff:', staff[i].display_name, '| role:', staff[i].role, '| rbac_role:', staff[i].rbac_role);
         var isMatch = await comparePinAsync(pin, staff[i].pin_hash);
-        console.log('[Auth] Staff PIN match:', isMatch);
         if (isMatch) {
           matched = staff[i];
           console.log('[Auth] MATCHED staff:', matched.display_name, '| role:', matched.role, '| rbac_role:', matched.rbac_role);
@@ -204,11 +202,8 @@ router.post('/login', async function(req, res, next) {
 
     // 2. Check owner PIN on Salon record
     var salon = await prisma.salon.findUnique({ where: { id: salon_id } });
-    console.log('[Auth] Salon found:', !!salon, '| Has owner_pin_hash:', !!(salon && salon.owner_pin_hash), '| owner_pin_plain:', salon ? salon.owner_pin_plain : 'N/A');
     if (salon && salon.owner_pin_hash) {
-      console.log('[Auth] Comparing PIN "' + pin + '" against owner hash (first 20 chars):', salon.owner_pin_hash.substring(0, 20));
       var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
-      console.log('[Auth] Owner PIN compare result:', ownerMatch);
       if (ownerMatch) {
         // ── Station enforcement for owner login ──
         var ownerActiveCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
@@ -367,20 +362,10 @@ router.put('/owner-pin', async function(req, res, next) {
 
     var newHash = hashPin(String(new_pin));
     var newSha = pinSha256(String(new_pin));
-    
-    // DEBUG: Verify hash works before saving
-    var verifyResult = await comparePinAsync(String(new_pin), newHash);
-    console.log('[Auth] PIN change debug — new_pin:', JSON.stringify(new_pin), '| String(new_pin):', JSON.stringify(String(new_pin)), '| hash (first 20):', newHash.substring(0, 20), '| verify:', verifyResult);
-    
     await prisma.salon.update({
       where: { id: resolvedSalonId },
       data: { owner_pin_hash: newHash, owner_pin_sha256: newSha, owner_pin_plain: String(new_pin) }
     });
-    
-    // DEBUG: Read back from DB and verify
-    var checkSalon = await prisma.salon.findUnique({ where: { id: resolvedSalonId }, select: { owner_pin_hash: true, owner_pin_plain: true } });
-    var readbackVerify = await comparePinAsync(String(new_pin), checkSalon.owner_pin_hash);
-    console.log('[Auth] PIN readback — stored_plain:', checkSalon.owner_pin_plain, '| hash (first 20):', checkSalon.owner_pin_hash.substring(0, 20), '| readback verify:', readbackVerify);
 
     // Sync to any staff record with role 'owner' (they share the salon owner PIN)
     await prisma.staff.updateMany({
@@ -394,9 +379,6 @@ router.put('/owner-pin', async function(req, res, next) {
     var io = getIO();
     if (io) {
       io.to('salon:' + resolvedSalonId).emit('owner-pin-changed', { salon_id: resolvedSalonId });
-      console.log('[Auth] Broadcast owner-pin-changed to salon:' + resolvedSalonId);
-    } else {
-      console.log('[Auth] WARNING: io not available for broadcast');
     }
 
     res.json({ success: true });
