@@ -407,64 +407,59 @@ router.delete('/salons/:id', requireOwner, async function(req, res, next) {
     var salonId = existing.id;
     var salonName = existing.name;
 
-    // Cascade delete in dependency order (children first, salon last)
-    // Only use salon_id filter on models that have it directly.
-    // Models without salon_id use relation filters through their parent.
-    // Many children auto-cascade from parent delete (onDelete: Cascade in schema),
-    // but we explicitly delete them first to be safe.
+    // Cascade delete — only delete tables that have salon_id directly.
+    // Child tables with onDelete:Cascade in schema are auto-deleted by PostgreSQL
+    // when their parent is deleted (e.g., TicketItem cascades when Ticket is deleted,
+    // GiftCardTransaction cascades when GiftCard is deleted, etc.)
+    // Order: deepest dependencies first, salon last.
     await prisma.$transaction(async function(tx) {
-      // Package redemptions (no salon_id — via clientPackage)
-      await tx.packageRedemption.deleteMany({ where: { clientPackage: { salon_id: salonId } } });
-      await tx.clientPackageItem.deleteMany({ where: { clientPackage: { salon_id: salonId } } });
+      // Packages (ClientPackage has salon_id; children cascade)
       await tx.clientPackage.deleteMany({ where: { salon_id: salonId } });
-      await tx.servicePackageItem.deleteMany({ where: { package: { salon_id: salonId } } });
       await tx.servicePackage.deleteMany({ where: { salon_id: salonId } });
-      // Tickets — items/payments cascade from ticket delete, but delete explicitly
-      await tx.ticketItem.deleteMany({ where: { ticket: { salon_id: salonId } } });
-      await tx.ticketPayment.deleteMany({ where: { ticket: { salon_id: salonId } } });
+      // Tickets (has salon_id; TicketItem + TicketPayment cascade)
       await tx.ticket.deleteMany({ where: { salon_id: salonId } });
-      // Service lines cascade from appointment delete, but delete explicitly
-      await tx.serviceLine.deleteMany({ where: { appointment: { salon_id: salonId } } });
+      // Appointments (has salon_id; ServiceLine cascades)
       await tx.appointment.deleteMany({ where: { salon_id: salonId } });
       await tx.blockedTime.deleteMany({ where: { salon_id: salonId } });
-      // Gift card transactions cascade from gift card delete
-      await tx.giftCardTransaction.deleteMany({ where: { gift_card: { salon_id: salonId } } });
+      // Gift cards (has salon_id; GiftCardTransaction cascades)
       await tx.giftCard.deleteMany({ where: { salon_id: salonId } });
-      // Loyalty
+      // Loyalty (LoyaltyTransaction has salon_id; Reward/Tier cascade from Program)
       await tx.loyaltyTransaction.deleteMany({ where: { salon_id: salonId } });
       await tx.loyaltyAccount.deleteMany({ where: { salon_id: salonId } });
-      await tx.loyaltyReward.deleteMany({ where: { program: { salon_id: salonId } } });
-      await tx.loyaltyTier.deleteMany({ where: { program: { salon_id: salonId } } });
       await tx.loyaltyProgram.deleteMany({ where: { salon_id: salonId } });
-      // Memberships
-      await tx.membershipPerk.deleteMany({ where: { plan: { salon_id: salonId } } });
-      await tx.membershipAccount.deleteMany({ where: { plan: { salon_id: salonId } } });
+      // Memberships (MembershipPlan has salon_id; Perk/Account cascade)
       await tx.membershipPlan.deleteMany({ where: { salon_id: salonId } });
-      // Commission
+      // Commission (both have salon_id)
       await tx.commissionTier.deleteMany({ where: { salon_id: salonId } });
       await tx.commissionRule.deleteMany({ where: { salon_id: salonId } });
-      // Timeclock — ClockPunch/PunchAuditLog have no salon_id, filter via staff
-      await tx.punchAuditLog.deleteMany({ where: { punch: { staff: { salon_id: salonId } } } });
-      await tx.clockPunch.deleteMany({ where: { staff: { salon_id: salonId } } });
+      // Timeclock — StaffPresence has salon_id. ClockPunch/PunchAuditLog don't,
+      // but they reference staff_id which we'll delete next. Use raw SQL.
+      await tx.$executeRawUnsafe(
+        'DELETE FROM "PunchAuditLog" WHERE punch_id IN (SELECT id FROM "ClockPunch" WHERE staff_id IN (SELECT id FROM "Staff" WHERE salon_id = $1))',
+        salonId
+      );
+      await tx.$executeRawUnsafe(
+        'DELETE FROM "ClockPunch" WHERE staff_id IN (SELECT id FROM "Staff" WHERE salon_id = $1)',
+        salonId
+      );
       await tx.staffPresence.deleteMany({ where: { salon_id: salonId } });
-      // Messaging
+      // Messaging (both have salon_id)
       await tx.messageLogEntry.deleteMany({ where: { salon_id: salonId } });
       await tx.messageTemplate.deleteMany({ where: { salon_id: salonId } });
-      // Services — junction tables have no salon_id, filter via parent
-      await tx.serviceCatalogCategory.deleteMany({ where: { service: { salon_id: salonId } } });
-      await tx.serviceStaffAssignment.deleteMany({ where: { service: { salon_id: salonId } } });
-      await tx.categoryStaffAssignment.deleteMany({ where: { category: { salon_id: salonId } } });
+      // Services — ServiceCatalog/ServiceCategory have salon_id.
+      // Junction tables (ServiceCatalogCategory, ServiceStaffAssignment, CategoryStaffAssignment)
+      // cascade from their parent deletes.
       await tx.serviceCatalog.deleteMany({ where: { salon_id: salonId } });
       await tx.serviceCategory.deleteMany({ where: { salon_id: salonId } });
-      // Products + inventory
+      // Products + inventory (all have salon_id)
       await tx.product.deleteMany({ where: { salon_id: salonId } });
       await tx.productCategory.deleteMany({ where: { salon_id: salonId } });
       await tx.supplier.deleteMany({ where: { salon_id: salonId } });
-      // Clients
+      // Clients (has salon_id)
       await tx.client.deleteMany({ where: { salon_id: salonId } });
-      // Staff
+      // Staff (has salon_id)
       await tx.staff.deleteMany({ where: { salon_id: salonId } });
-      // Settings + program
+      // Settings
       await tx.salonSettings.deleteMany({ where: { salon_id: salonId } });
       // Active sessions
       await tx.activeSession.deleteMany({ where: { salon_id: salonId } });
