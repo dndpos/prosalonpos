@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { createHash } from 'crypto';
 import prisma, { isSQLite } from '../config/database.js';
 import { createToken, verifyToken, comparePin, hashPin, comparePinAsync, hashPinAsync, pinSha256 } from '../config/auth.js';
+import { getIO } from '../utils/emit.js';
 
 function fromDb(val) {
   if (val === null || val === undefined) return null;
@@ -152,9 +153,12 @@ router.post('/login', async function(req, res, next) {
     var matched = null;
     for (var i = 0; i < staff.length; i++) {
       if (staff[i].pin_hash) {
+        console.log('[Auth] Checking staff:', staff[i].display_name, '| role:', staff[i].role, '| rbac_role:', staff[i].rbac_role);
         var isMatch = await comparePinAsync(pin, staff[i].pin_hash);
+        console.log('[Auth] Staff PIN match:', isMatch);
         if (isMatch) {
           matched = staff[i];
+          console.log('[Auth] MATCHED staff:', matched.display_name, '| role:', matched.role, '| rbac_role:', matched.rbac_role);
           // Rehash if using old slow rounds (fire and forget)
           if (needsRehash(staff[i].pin_hash)) {
             hashPinAsync(pin).then(function(newHash) {
@@ -200,8 +204,9 @@ router.post('/login', async function(req, res, next) {
 
     // 2. Check owner PIN on Salon record
     var salon = await prisma.salon.findUnique({ where: { id: salon_id } });
-    console.log('[Auth] Salon found:', !!salon, '| Has owner_pin_hash:', !!(salon && salon.owner_pin_hash));
+    console.log('[Auth] Salon found:', !!salon, '| Has owner_pin_hash:', !!(salon && salon.owner_pin_hash), '| owner_pin_plain:', salon ? salon.owner_pin_plain : 'N/A');
     if (salon && salon.owner_pin_hash) {
+      console.log('[Auth] Comparing PIN "' + pin + '" against owner hash (first 20 chars):', salon.owner_pin_hash.substring(0, 20));
       var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
       console.log('[Auth] Owner PIN compare result:', ownerMatch);
       if (ownerMatch) {
@@ -374,6 +379,13 @@ router.put('/owner-pin', async function(req, res, next) {
     });
 
     console.log('[Auth] Owner PIN updated for salon', resolvedSalonId);
+
+    // Broadcast to all stations in this salon so they refresh their pin table + settings
+    var io = getIO();
+    if (io) {
+      io.to('salon:' + resolvedSalonId).emit('owner-pin-changed', { salon_id: resolvedSalonId });
+    }
+
     res.json({ success: true });
   } catch (err) { next(err); }
 });
