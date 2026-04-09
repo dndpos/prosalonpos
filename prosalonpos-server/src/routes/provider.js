@@ -209,9 +209,9 @@ router.post('/salons', async function(req, res, next) {
 
     // Default features based on plan tier
     var defaultFeatures = {
-      basic: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards'],
-      professional: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'text_messaging', 'inventory', 'payroll', 'deposits'],
-      premium: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'group_booking', 'text_messaging', 'inventory', 'payroll', 'deposits', 'commission_tiers', 'advanced_reports', 'barcode_scan'],
+      basic: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'inventory', 'payroll', 'barcode_scan', 'provider_pay_services_split', 'provider_print_check'],
+      professional: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'text_messaging', 'inventory', 'payroll', 'deposits', 'barcode_scan', 'provider_pay_services_split', 'provider_print_check'],
+      premium: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'group_booking', 'text_messaging', 'inventory', 'payroll', 'deposits', 'commission_tiers', 'advanced_reports', 'barcode_scan', 'multi_location', 'purchase_orders', 'confirmation_system', 'provider_pay_services_split', 'provider_print_check'],
     };
 
     var tier = d.plan_tier || 'basic';
