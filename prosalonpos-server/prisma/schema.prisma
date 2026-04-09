@@ -956,19 +956,3 @@ model PackageRedemption {
   @@index([client_package_id])
   @@index([client_package_item_id])
 }
-
-// ════════════════════════════════════════════
-// STATION ENFORCEMENT
-// ════════════════════════════════════════════
-
-model ActiveSession {
-  id              String   @id @default(uuid())
-  salon_id        String
-  staff_id        String?
-  socket_id       String   @unique
-  station_label   String?                      // e.g. "Station 1", "Tablet 3"
-  last_heartbeat  DateTime @default(now())
-  created_at      DateTime @default(now())
-
-  @@index([salon_id])
-}

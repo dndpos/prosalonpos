@@ -286,7 +286,7 @@ router.post('/sell', async function(req, res, next) {
       }));
 
       return { cp: cp, items: cpItems };
-    }, { timeout: 20000 });
+    });
 
     emit(req, 'package:sold', { clientPackage: formatClientPackage(result.cp) });
     res.status(201).json({
@@ -355,7 +355,7 @@ router.post('/redeem', async function(req, res, next) {
       }
 
       return { redemption: redemption, updatedItem: updatedItem };
-    }, { timeout: 20000 });
+    });
 
     emit(req, 'package:redeemed', { redemption: formatRedemption(result.redemption) });
     res.status(201).json({

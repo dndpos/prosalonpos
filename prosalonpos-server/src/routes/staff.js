@@ -214,6 +214,11 @@ router.post('/', async function(req, res, next) {
 // ── PUT /:id — Update staff member ──
 router.put('/:id', async function(req, res, next) {
   try {
+    var existing = await prisma.staff.findFirst({
+      where: { id: req.params.id, salon_id: req.salon_id }
+    });
+    if (!existing) return res.status(404).json({ error: 'Staff not found' });
+
     var data = req.body;
     var updateData = {};
 
@@ -233,79 +238,66 @@ router.put('/:id', async function(req, res, next) {
 
     // Handle PIN change separately (needs hashing + duplicate check)
     // Owner role staff always uses salon owner PIN — never a separate PIN
-    if (data.pin) {
-      // Need existing record to check role
-      var existing = await prisma.staff.findFirst({
-        where: { id: req.params.id, salon_id: req.salon_id },
-        select: { role: true }
+    var effectiveRole = data.role || existing.role;
+    if (effectiveRole === 'owner') {
+      // Sync owner PIN from salon record
+      var salonForOwner = await prisma.salon.findUnique({
+        where: { id: req.salon_id },
+        select: { owner_pin_hash: true, owner_pin_sha256: true }
       });
-      if (!existing) return res.status(404).json({ error: 'Staff not found' });
-
-      var effectiveRole = data.role || existing.role;
-      if (effectiveRole === 'owner') {
-        var salonForOwner = await prisma.salon.findUnique({
-          where: { id: req.salon_id },
-          select: { owner_pin_hash: true, owner_pin_sha256: true }
-        });
-        if (salonForOwner && salonForOwner.owner_pin_hash) {
-          updateData.pin_hash = salonForOwner.owner_pin_hash;
-          updateData.pin_sha256 = salonForOwner.owner_pin_sha256;
-        }
-      } else {
-        var newPinSha = pinSha256(data.pin);
-        var [otherStaff, salon2, pinHashResult] = await Promise.all([
-          prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true, id: { not: req.params.id }, role: { not: 'owner' } }, select: { pin_sha256: true, display_name: true } }),
-          prisma.salon.findUnique({ where: { id: req.salon_id }, select: { owner_pin_sha256: true } }),
-          hashPinAsync(data.pin)
-        ]);
-        var dupStaff = otherStaff.find(function(s) { return s.pin_sha256 === newPinSha; });
-        if (dupStaff) {
-          return res.status(409).json({ error: 'PIN already in use by ' + dupStaff.display_name });
-        }
-        if (salon2 && salon2.owner_pin_sha256 && salon2.owner_pin_sha256 === newPinSha) {
-          return res.status(409).json({ error: 'PIN already in use by Owner' });
-        }
-        updateData.pin_hash = pinHashResult;
-        updateData.pin_sha256 = newPinSha;
-        updateData.pin_plain = data.pin;
+      if (salonForOwner && salonForOwner.owner_pin_hash) {
+        updateData.pin_hash = salonForOwner.owner_pin_hash;
+        updateData.pin_sha256 = salonForOwner.owner_pin_sha256;
       }
+    } else if (data.pin) {
+      var newPinSha = pinSha256(data.pin);
+      // Run duplicate check + bcrypt hash in PARALLEL
+      var [otherStaff, salon2, pinHashResult] = await Promise.all([
+        prisma.staff.findMany({ where: { salon_id: req.salon_id, active: true, id: { not: req.params.id }, role: { not: 'owner' } }, select: { pin_sha256: true, display_name: true } }),
+        prisma.salon.findUnique({ where: { id: req.salon_id }, select: { owner_pin_sha256: true } }),
+        hashPinAsync(data.pin)
+      ]);
+      var dupStaff = otherStaff.find(function(s) { return s.pin_sha256 === newPinSha; });
+      if (dupStaff) {
+        return res.status(409).json({ error: 'PIN already in use by ' + dupStaff.display_name });
+      }
+      if (salon2 && salon2.owner_pin_sha256 && salon2.owner_pin_sha256 === newPinSha) {
+        return res.status(409).json({ error: 'PIN already in use by Owner' });
+      }
+      updateData.pin_hash = pinHashResult;
+      updateData.pin_sha256 = newPinSha;
+      updateData.pin_plain = data.pin;
     }
 
     updateData.version = { increment: 1 };
 
-    // Use a transaction to batch update + service assignment into one DB round trip
-    var s = await prisma.$transaction(async function(tx) {
-      var updated = await tx.staff.update({
-        where: { id: req.params.id },
-        data: updateData,
-        include: { service_staff: true }
+    var s = await prisma.staff.update({
+      where: { id: req.params.id },
+      data: updateData,
+      include: { service_staff: true }
+    });
+
+    // Handle assigned_service_ids if provided (replace all assignments)
+    if (data.assigned_service_ids !== undefined) {
+      // Delete existing assignments
+      await prisma.serviceStaffAssignment.deleteMany({
+        where: { staff_id: req.params.id }
       });
-
-      // Only replace service assignments if provided AND changed
-      if (data.assigned_service_ids !== undefined) {
-        var oldIds = (updated.service_staff || []).map(function(ss) { return ss.service_catalog_id; }).sort();
-        var newIds = (data.assigned_service_ids || []).slice().sort();
-        var changed = oldIds.length !== newIds.length || oldIds.some(function(id, i) { return id !== newIds[i]; });
-
-        if (changed) {
-          await tx.serviceStaffAssignment.deleteMany({ where: { staff_id: req.params.id } });
-          if (newIds.length > 0) {
-            await tx.serviceStaffAssignment.createMany({
-              data: newIds.map(function(svcId) {
-                return { service_catalog_id: svcId, staff_id: req.params.id };
-              })
-            });
-          }
-        }
-        updated.assigned_service_ids = data.assigned_service_ids || [];
-      } else {
-        updated.assigned_service_ids = (updated.service_staff || []).map(function(ss) {
-          return ss.service_catalog_id;
+      // Create new assignments
+      var assignedIds = data.assigned_service_ids || [];
+      if (assignedIds.length > 0) {
+        await prisma.serviceStaffAssignment.createMany({
+          data: assignedIds.map(function(svcId) {
+            return { service_catalog_id: svcId, staff_id: req.params.id };
+          })
         });
       }
-
-      return updated;
-    }, { timeout: 20000 });
+      s.assigned_service_ids = assignedIds;
+    } else {
+      s.assigned_service_ids = (s.service_staff || []).map(function(ss) {
+        return ss.service_catalog_id;
+      });
+    }
 
     delete s.pin_hash;
     delete s.service_staff;
