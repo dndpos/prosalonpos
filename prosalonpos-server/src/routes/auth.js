@@ -153,7 +153,9 @@ router.post('/login', async function(req, res, next) {
     var matched = null;
     for (var i = 0; i < staff.length; i++) {
       if (staff[i].pin_hash) {
+        console.log('[Auth] Checking staff:', staff[i].display_name, '| role:', staff[i].role, '| rbac_role:', staff[i].rbac_role);
         var isMatch = await comparePinAsync(pin, staff[i].pin_hash);
+        console.log('[Auth] Staff PIN match:', isMatch);
         if (isMatch) {
           matched = staff[i];
           console.log('[Auth] MATCHED staff:', matched.display_name, '| role:', matched.role, '| rbac_role:', matched.rbac_role);
@@ -202,8 +204,11 @@ router.post('/login', async function(req, res, next) {
 
     // 2. Check owner PIN on Salon record
     var salon = await prisma.salon.findUnique({ where: { id: salon_id } });
+    console.log('[Auth] Salon found:', !!salon, '| Has owner_pin_hash:', !!(salon && salon.owner_pin_hash), '| owner_pin_plain:', salon ? salon.owner_pin_plain : 'N/A');
     if (salon && salon.owner_pin_hash) {
+      console.log('[Auth] Comparing PIN "' + pin + '" against owner hash (first 20 chars):', salon.owner_pin_hash.substring(0, 20));
       var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
+      console.log('[Auth] Owner PIN compare result:', ownerMatch);
       if (ownerMatch) {
         // ── Station enforcement for owner login ──
         var ownerActiveCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
