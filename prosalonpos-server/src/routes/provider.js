@@ -223,15 +223,15 @@ router.post('/salons', async function(req, res, next) {
       for (var ci2 = 0; ci2 < 6; ci2++) salonCode += 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)];
     }
 
-    // Default features based on plan tier
-    var defaultFeatures = {
-      basic: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards'],
-      professional: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'text_messaging', 'inventory', 'payroll', 'deposits'],
-      premium: ['appointments', 'client_profiles', 'tech_turn', 'gift_cards', 'loyalty', 'membership', 'online_booking', 'group_booking', 'text_messaging', 'inventory', 'payroll', 'deposits', 'commission_tiers', 'advanced_reports', 'barcode_scan'],
-    };
+    // Default features — all new salons get this standard set
+    var standardFeatures = [
+      'appointments', 'client_profiles', 'tech_turn', 'gift_cards',
+      'loyalty', 'membership', 'inventory', 'payroll',
+      'barcode_scan', 'pay_services_split', 'print_checks'
+    ];
 
     var tier = d.plan_tier || 'basic';
-    var features = d.features_enabled || defaultFeatures[tier] || defaultFeatures.basic;
+    var features = d.features_enabled || standardFeatures;
 
     // Monthly fee based on tier
     var feeMap = { basic: 7900, professional: 14900, premium: 24900 };
@@ -276,12 +276,35 @@ router.post('/salons', async function(req, res, next) {
           salon_id: salon.id,
           settings: {
             salon_name: d.name || 'New Salon',
+            salon_phone: d.phone || '',
+            salon_email: d.email || '',
+            salon_address: d.address1 || d.address || '',
             tax_rate_percentage: 7.5,
             tip_presets_array: [18, 20, 25],
             booking_increment_minutes: 15,
             rotation_mode: 'round_robin',
             opening_time: '09:00',
             closing_time: '19:00',
+            clearance_required: {
+              void_ticket: true,
+              process_refunds: true,
+              view_tickets: true,
+              salon_settings: true,
+              staff_management: true,
+              service_catalog: true,
+              payroll: true,
+              bill_pay: true,
+              reports: true,
+              inventory: true,
+              online_booking_settings: true,
+              packages_management: true,
+              delete_cancel_appointments: true,
+              delete_clients: true,
+              gift_card_management: true,
+              loyalty_membership: true,
+              edit_timesheets: true,
+              view_timesheet_reports: true,
+            },
           }
         }
       });
