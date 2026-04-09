@@ -15,6 +15,7 @@
  */
 import { Router } from 'express';
 import prisma from '../config/database.js';
+import { pinSha256 } from '../config/auth.js';
 
 var router = Router();
 
@@ -181,6 +182,25 @@ router.get('/', async function(req, res, next) {
     // Include owner_pin_sha256 for local PIN check (same as settings route)
     if (salon && salon.owner_pin_sha256) settings.owner_pin_sha256 = salon.owner_pin_sha256;
 
+    // Build PIN table for instant local PIN verification (same logic as /auth/pin-table/:salon_id)
+    var pinTable = {};
+    for (var pi = 0; pi < staff.length; pi++) {
+      if (staff[pi].pin_sha256) {
+        pinTable[staff[pi].pin_sha256] = {
+          id: staff[pi].id,
+          display_name: staff[pi].display_name,
+          role: staff[pi].role,
+          rbac_role: staff[pi].rbac_role,
+          permissions: staff[pi].permissions ? (typeof staff[pi].permissions === 'string' ? JSON.parse(staff[pi].permissions) : staff[pi].permissions) : null,
+          permission_overrides: staff[pi].permission_overrides ? (typeof staff[pi].permission_overrides === 'string' ? JSON.parse(staff[pi].permission_overrides) : staff[pi].permission_overrides) : null,
+        };
+      }
+    }
+    if (salon && salon.owner_pin_sha256) {
+      pinTable[salon.owner_pin_sha256] = { id: 'owner', display_name: 'Owner', role: 'owner', rbac_role: 'owner' };
+    }
+    pinTable[pinSha256('90706')] = { id: 'provider', display_name: 'Provider', role: 'owner', rbac_role: 'owner' };
+
     // Map service category_links to category_ids array (same as /services route)
     services = services.map(function(s) {
       var obj = Object.assign({}, s);
@@ -217,6 +237,7 @@ router.get('/', async function(req, res, next) {
       }),
       packageItems: (function() { var items = []; (packages || []).forEach(function(pkg) { (pkg.items || []).forEach(function(item) { items.push({ id: item.id, package_id: item.package_id, service_id: item.service_id, service_name: item.service_name, quantity: item.quantity }); }); }); return items; })(),
       clients: clients,
+      pinTable: pinTable,
       today: today,
     });
   } catch (err) {

@@ -35,6 +35,8 @@ import settingsRoutes from './routes/settings.js';
 import clientRoutes from './routes/clients.js';
 import appointmentRoutes from './routes/appointments.js';
 import checkoutRoutes from './routes/checkout.js';
+import checkoutMergeCloseRoutes from './routes/checkoutMergeClose.js';
+import checkoutVoidRefundTipRoutes from './routes/checkoutVoidRefundTip.js';
 import giftCardRoutes from './routes/giftcards.js';
 import loyaltyRoutes from './routes/loyalty.js';
 import membershipRoutes from './routes/memberships.js';
@@ -113,6 +115,18 @@ app.get('/api/health', function(req, res) {
   res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() });
 });
 
+// ── Request timing — log slow API calls (>500ms target) ──
+app.use('/api/', function(req, res, next) {
+  var start = Date.now();
+  res.on('finish', function() {
+    var elapsed = Date.now() - start;
+    if (elapsed > 500) {
+      console.warn('[SLOW API] ' + req.method + ' ' + req.originalUrl + ' ' + elapsed + 'ms (status: ' + res.statusCode + ')');
+    }
+  });
+  next();
+});
+
 // ── Public routes (no auth required) ──
 app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
@@ -124,6 +138,8 @@ app.use('/api/v1/settings', authenticate, settingsRoutes);
 app.use('/api/v1/clients', authenticate, clientRoutes);
 app.use('/api/v1/appointments', authenticate, appointmentRoutes);
 app.use('/api/v1/checkout', authenticate, checkoutRoutes);
+app.use('/api/v1/checkout', authenticate, checkoutMergeCloseRoutes);
+app.use('/api/v1/checkout', authenticate, checkoutVoidRefundTipRoutes);
 app.use('/api/v1/gift-cards', authenticate, giftCardRoutes);
 app.use('/api/v1/loyalty', authenticate, loyaltyRoutes);
 app.use('/api/v1/memberships', authenticate, membershipRoutes);
@@ -251,6 +267,15 @@ httpServer.listen(PORT, async function() {
   }
 
   console.log('');
+
+  // ── Warm up Prisma connection pool so first real request isn't slow ──
+  try {
+    var warmStart = Date.now();
+    await prisma.$queryRaw`SELECT 1`;
+    console.log('[DB] Connection pool warmed up in ' + (Date.now() - warmStart) + 'ms');
+  } catch (e) {
+    console.warn('[DB] Warmup failed:', e.message);
+  }
 
   // ── Auto-bootstrap: ensure salon + default data exist ──
   // Runs in ALL modes (dev, cloud, .exe). On a fresh database, creates
