@@ -287,6 +287,26 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
       return res.status(400).json({ error: 'Date and time are required.' });
     }
 
+    // ── Validate business hours — reject bookings on closed days ──
+    var settingsRow2 = await prisma.salonSettings.findUnique({ where: { salon_id: salonId } });
+    var _settings2 = {};
+    if (settingsRow2 && settingsRow2.settings) {
+      _settings2 = typeof settingsRow2.settings === 'string' ? JSON.parse(settingsRow2.settings) : settingsRow2.settings;
+    }
+    var bh = _settings2.business_hours;
+    if (bh) {
+      var _dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+      var bookDate = new Date(body.date + 'T12:00:00');
+      var dayKey = _dayKeys[bookDate.getDay()];
+      if (!bh[dayKey] || !bh[dayKey].open) {
+        return res.status(400).json({ error: 'The salon is closed on this day. Please select a different date.' });
+      }
+      // Validate time is within business hours
+      if (body.time < bh[dayKey].start || body.time >= bh[dayKey].end) {
+        return res.status(400).json({ error: 'The selected time is outside business hours.' });
+      }
+    }
+
     // ── Find or create client ──
     var phoneDigits = body.client.phone.replace(/\D/g, '').slice(0, 10);
     var existingClient = await prisma.client.findFirst({
@@ -409,13 +429,20 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
       return appointments;
     }, { timeout: 15000 });
 
-    // Emit socket event so the calendar updates in real-time
+    // Emit socket events so the calendar refreshes in real-time
     try {
       var _io = getIO();
       if (_io) {
-        _io.to('salon:' + salonId).emit('appointments:changed', {
-          action: 'online-booking',
+        // Emit appointment:created for each appointment so existing calendar listeners pick it up
+        createdAppointments.forEach(function(a) {
+          _io.to('salon:' + salonId).emit('appointment:created', {
+            id: a.id, source: 'online',
+          });
+        });
+        // Also emit a notification event for the Online Bookings tab
+        _io.to('salon:' + salonId).emit('online-booking:received', {
           count: createdAppointments.length,
+          client_name: clientName,
         });
       }
     } catch (socketErr) {
