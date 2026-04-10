@@ -34,7 +34,8 @@ router.post('/categories', async function(req, res, next) {
         name: data.name,
         calendar_color: data.calendar_color || '#3B82F6',
         position: data.position || 0,
-        active: data.active !== false
+        active: data.active !== false,
+        show_on_online_booking: data.show_on_online_booking !== false
       }
     });
     emit(req, 'category:created');

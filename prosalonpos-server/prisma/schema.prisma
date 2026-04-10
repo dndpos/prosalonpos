@@ -125,15 +125,16 @@ model Staff {
 // ════════════════════════════════════════════
 
 model ServiceCategory {
-  id             String  @id @default(uuid())
-  salon_id       String
-  name           String
-  calendar_color String  @default("#3B82F6")
-  position       Int     @default(0)
-  active         Boolean @default(true)
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-  version        Int      @default(1)
+  id                       String  @id @default(uuid())
+  salon_id                 String
+  name                     String
+  calendar_color           String  @default("#3B82F6")
+  position                 Int     @default(0)
+  active                   Boolean @default(true)
+  show_on_online_booking   Boolean @default(true)
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  version                  Int      @default(1)
 
   salon          Salon                      @relation(fields: [salon_id], references: [id])
   service_links  ServiceCatalogCategory[]

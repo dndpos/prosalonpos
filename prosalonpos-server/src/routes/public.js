@@ -76,17 +76,18 @@ router.get('/salon/:salonCode/booking-data', async function(req, res, next) {
         orderBy: { position: 'asc' },
       }),
 
-      // Only active categories
+      // Only active categories visible for online booking
       prisma.serviceCategory.findMany({
-        where: { salon_id: salonId, active: true },
+        where: { salon_id: salonId, active: true, show_on_online_booking: true },
         select: { id: true, name: true, calendar_color: true, position: true },
         orderBy: { position: 'asc' },
       }),
 
-      // Category links for mapping services → categories
+      // Category links for mapping services → categories (only online-enabled cats + services)
       prisma.serviceCatalogCategory.findMany({
         where: {
-          service: { salon_id: salonId, active: true, online_booking_enabled: true }
+          service: { salon_id: salonId, active: true, online_booking_enabled: true },
+          category: { salon_id: salonId, active: true, show_on_online_booking: true }
         },
         select: { service_catalog_id: true, category_id: true },
       }),
@@ -130,14 +131,16 @@ router.get('/salon/:salonCode/booking-data', async function(req, res, next) {
     }
 
     // Build category_ids on each service using the junction table
+    // (categoryLinks already filtered to online-enabled categories + services)
     var svcCatMap = {};
     categoryLinks.forEach(function(link) {
       if (!svcCatMap[link.service_catalog_id]) svcCatMap[link.service_catalog_id] = [];
       svcCatMap[link.service_catalog_id].push(link.category_id);
     });
-    var servicesWithCats = services.map(function(svc) {
-      return Object.assign({}, svc, { category_ids: svcCatMap[svc.id] || [] });
-    });
+    // Only include services that have at least one online-visible category
+    var servicesWithCats = services
+      .map(function(svc) { return Object.assign({}, svc, { category_ids: svcCatMap[svc.id] || [] }); })
+      .filter(function(svc) { return svc.category_ids.length > 0; });
 
     // Filter categories to only those that have at least one online service
     var usedCatIds = {};
