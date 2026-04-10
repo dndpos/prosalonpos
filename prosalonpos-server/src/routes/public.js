@@ -196,6 +196,45 @@ router.get('/salon/:salonCode/booking-data', async function(req, res, next) {
 
 
 // ══════════════════════════════════════════
+// GET /public/salon/:salonCode/client-lookup/:phone
+// ══════════════════════════════════════════
+// Checks if a client exists by phone number. Returns name only — no sensitive data.
+
+router.get('/salon/:salonCode/client-lookup/:phone', async function(req, res, next) {
+  try {
+    var salon = await findSalonByCode(req.params.salonCode);
+    if (!salon) return res.status(404).json({ error: 'Salon not found' });
+
+    var phoneDigits = (req.params.phone || '').replace(/\D/g, '').slice(0, 10);
+    if (phoneDigits.length < 10) {
+      return res.json({ found: false });
+    }
+
+    // Search by phone or phone_digits
+    var client = await prisma.client.findFirst({
+      where: {
+        salon_id: salon.id,
+        OR: [
+          { phone: phoneDigits },
+          { phone_digits: phoneDigits },
+        ],
+      },
+      select: {
+        first_name: true,
+        last_name: true,
+      },
+    });
+
+    if (client) {
+      res.json({ found: true, first_name: client.first_name, last_name: client.last_name });
+    } else {
+      res.json({ found: false });
+    }
+  } catch (err) { next(err); }
+});
+
+
+// ══════════════════════════════════════════
 // GET /public/salon/:salonCode/availability/:date
 // ══════════════════════════════════════════
 // Returns service lines for a specific date so the portal can
