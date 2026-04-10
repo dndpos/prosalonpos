@@ -253,7 +253,6 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
           first_name: body.client.first_name,
           last_name: body.client.last_name || null,
           email: body.client.email || null,
-          source: 'online',
         }
       });
       clientId = newClient.id;
