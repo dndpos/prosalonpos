@@ -205,6 +205,10 @@ router.post('/', async function(req, res, next) {
     }
 
     delete s.pin_hash;
+    if (s.role !== 'owner' && s.pin_plain) {
+      s.pin_display = s.pin_plain;
+    }
+    delete s.pin_plain;
     s.assigned_service_ids = assignedIds;
     emit(req, 'staff:created');
     res.status(201).json({ staff: s });
