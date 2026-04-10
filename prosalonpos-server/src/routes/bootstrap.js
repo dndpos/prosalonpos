@@ -111,11 +111,14 @@ router.get('/', async function(req, res, next) {
         orderBy: { starts_at: 'asc' }
       }),
 
-      // Today's tickets
+      // Today's tickets + any open tickets from previous days
       prisma.ticket.findMany({
         where: {
           salon_id: salonId,
-          created_at: { gte: bounds.start, lte: bounds.end }
+          OR: [
+            { created_at: { gte: bounds.start, lte: bounds.end } },
+            { status: 'open' }
+          ]
         },
         include: {
           items: true,
