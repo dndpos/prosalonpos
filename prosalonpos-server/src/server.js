@@ -50,6 +50,7 @@ import providerRoutes from './routes/provider.js';
 import packageRoutes from './routes/packages.js';
 import bootstrapRoutes from './routes/bootstrap.js';
 import publicRoutes from './routes/public.js';
+import printRoutes from './routes/print.js';
 
 var PORT = process.env.PORT || 3001;
 
@@ -154,6 +155,7 @@ app.use('/api/v1/reports', authenticate, reportsRoutes);
 app.use('/api/v1/packages', authenticate, packageRoutes);
 app.use('/api/v1/bootstrap', authenticate, bootstrapRoutes);
 app.use('/api/v1/provider', providerRoutes); // Provider auth handled internally (login is public)
+app.use('/api/v1/print', authenticate, printRoutes);
 
 // ── Global error handler (must be last middleware) ──
 app.use(errorHandler);
@@ -248,7 +250,7 @@ io.on('connection', function(socket) {
     });
   });
 
-  // Print relay: tablet → PC station with QZ Tray
+  // Print relay: tablet/secondary device → station PC with IP printer
   socket.on('print:request', function(data) {
     if (socket.salonId) {
       socket.to('salon:' + socket.salonId).emit('print:request', data);

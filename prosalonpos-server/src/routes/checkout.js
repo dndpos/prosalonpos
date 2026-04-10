@@ -12,25 +12,19 @@ var router = Router();
 // ── ROUTES ──
 
 // ── GET /tickets — List tickets for a date or date range ──
-// Always includes ALL open tickets regardless of creation date.
 router.get('/tickets', async function(req, res, next) {
   try {
     var where = { salon_id: req.salon_id };
     if (req.query.start && req.query.end) {
       // Date range query — for reports, payroll, etc.
+      // Use dayBounds for each date to get correct Eastern time boundaries
       var rangeBoundsStart = dayBounds(req.query.start);
       var rangeBoundsEnd = dayBounds(req.query.end);
-      where.OR = [
-        { created_at: { gte: rangeBoundsStart.start, lte: rangeBoundsEnd.end } },
-        { status: 'open' }
-      ];
+      where.created_at = { gte: rangeBoundsStart.start, lte: rangeBoundsEnd.end };
     } else {
-      // Single day (default: today) + any open tickets from previous days
+      // Single day (default: today)
       var bounds = dayBounds(req.query.date);
-      where.OR = [
-        { created_at: { gte: bounds.start, lte: bounds.end } },
-        { status: 'open' }
-      ];
+      where.created_at = { gte: bounds.start, lte: bounds.end };
     }
     var tickets = await prisma.ticket.findMany({
       where: where,
