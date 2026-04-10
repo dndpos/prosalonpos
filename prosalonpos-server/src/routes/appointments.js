@@ -205,6 +205,23 @@ router.put('/:id', async function(req, res, next) {
         where: { appointment_id: req.params.id },
         data: { status: data.status }
       });
+
+      // When marked no_show, append a note to the client's record
+      if (data.status === 'no_show' && (existing.client_id || appt.client_id)) {
+        try {
+          var _clientId = appt.client_id || existing.client_id;
+          var _client = await prisma.client.findUnique({ where: { id: _clientId }, select: { notes: true } });
+          // Build note with date and services
+          var svcNames = (appt.service_lines || []).map(function(sl) { return sl.service_name || 'Service'; }).join(', ');
+          var dateStr = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: 'numeric' });
+          var noShowNote = 'No-show on ' + dateStr + (svcNames ? ' - ' + svcNames : '');
+          var existingNotes = (_client && _client.notes) ? _client.notes.trim() : '';
+          var updatedNotes = existingNotes ? existingNotes + '\n' + noShowNote : noShowNote;
+          await prisma.client.update({ where: { id: _clientId }, data: { notes: updatedNotes } });
+        } catch (noteErr) {
+          console.error('[No-show note] Failed to append client note:', noteErr.message);
+        }
+      }
     }
 
     emit(req, 'appointment:updated');
