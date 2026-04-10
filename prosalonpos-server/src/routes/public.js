@@ -196,6 +196,60 @@ router.get('/salon/:salonCode/booking-data', async function(req, res, next) {
 
 
 // ══════════════════════════════════════════
+// GET /public/salon/:salonCode/availability/:date
+// ══════════════════════════════════════════
+// Returns service lines for a specific date so the portal can
+// calculate available time slots. Called when user picks a date.
+
+router.get('/salon/:salonCode/availability/:date', async function(req, res, next) {
+  try {
+    var salon = await findSalonByCode(req.params.salonCode);
+    if (!salon) return res.status(404).json({ error: 'Salon not found' });
+
+    var salonId = salon.id;
+    var dateStr = req.params.date; // "2026-04-15"
+    var dateParts = dateStr.split('-');
+    var year = parseInt(dateParts[0]);
+    var month = parseInt(dateParts[1]) - 1;
+    var day = parseInt(dateParts[2]);
+
+    // Determine ET offset for the requested date
+    var probe = new Date(Date.UTC(year, month, day, 12, 0, 0));
+    var probeStr = probe.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+    var etOffset = probeStr.indexOf('EDT') >= 0 ? 240 : 300;
+
+    // Build day bounds in UTC
+    var dayStart = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+    dayStart.setUTCMinutes(dayStart.getUTCMinutes() + etOffset);
+    var dayEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+    dayEnd.setUTCMinutes(dayEnd.getUTCMinutes() + etOffset);
+
+    var serviceLines = await prisma.serviceLine.findMany({
+      where: {
+        appointment: { salon_id: salonId, status: { notIn: ['cancelled', 'no_show'] } },
+        starts_at: { gte: dayStart, lte: dayEnd },
+      },
+      select: {
+        staff_id: true, starts_at: true, duration_minutes: true,
+        appointment: { select: { requested: true } },
+      },
+    });
+
+    var result = serviceLines.map(function(sl) {
+      return {
+        staff_id: sl.staff_id,
+        starts_at: sl.starts_at.toISOString(),
+        dur: sl.duration_minutes,
+        requested: sl.appointment ? sl.appointment.requested : false,
+      };
+    });
+
+    res.json({ date: dateStr, serviceLines: result });
+  } catch (err) { next(err); }
+});
+
+
+// ══════════════════════════════════════════
 // POST /public/salon/:salonCode/book
 // ══════════════════════════════════════════
 // Creates appointment(s) + service lines from an online booking.
@@ -250,8 +304,9 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
         data: {
           salon_id: salonId,
           phone: phoneDigits,
+          phone_digits: phoneDigits,
           first_name: body.client.first_name,
-          last_name: body.client.last_name || null,
+          last_name: body.client.last_name || '',
           email: body.client.email || null,
         }
       });
