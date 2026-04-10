@@ -91,12 +91,12 @@ router.get('/salon/:salonCode/booking-data', async function(req, res, next) {
         select: { service_catalog_id: true, category_id: true },
       }),
 
-      // Active, calendar-visible techs — names only (no PINs, no pay info)
+      // Active techs visible for online booking — names only (no PINs, no pay info)
       prisma.staff.findMany({
-        where: { salon_id: salonId, active: true, show_on_calendar: { not: false } },
+        where: { salon_id: salonId, active: true, show_on_online_booking: { not: false } },
         select: {
           id: true, display_name: true, photo_url: true,
-          tech_turn_eligible: true,
+          tech_turn_eligible: true, show_on_online_booking: true,
         },
         orderBy: { display_name: 'asc' },
       }),
@@ -401,7 +401,7 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
         // who is also free at the requested time slot.
         if (!techId) {
           var availableTechs = await tx.staff.findMany({
-            where: { salon_id: salonId, active: true, tech_turn_eligible: true, show_on_calendar: { not: false } },
+            where: { salon_id: salonId, active: true, show_on_online_booking: { not: false } },
             select: { id: true, display_name: true },
             orderBy: { display_name: 'asc' },
           });

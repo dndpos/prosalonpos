@@ -114,6 +114,7 @@ router.post('/', async function(req, res, next) {
           active: data.active !== false,
           tech_turn_eligible: data.tech_turn_eligible !== false,
           show_on_calendar: data.show_on_calendar !== false,
+          show_on_online_booking: data.show_on_online_booking !== false,
           pay_type: data.pay_type || 'commission',
           commission_pct: data.commission_pct || 0,
           daily_guarantee_cents: data.daily_guarantee_cents || 0,
@@ -177,6 +178,7 @@ router.post('/', async function(req, res, next) {
         active: data.active !== false,
         tech_turn_eligible: data.tech_turn_eligible !== false,
         show_on_calendar: data.show_on_calendar !== false,
+        show_on_online_booking: data.show_on_online_booking !== false,
         pay_type: data.pay_type || 'commission',
         commission_pct: data.commission_pct || 0,
         daily_guarantee_cents: data.daily_guarantee_cents || 0,
@@ -223,7 +225,7 @@ router.put('/:id', async function(req, res, next) {
 
     // Only include fields that were sent
     var fields = ['display_name', 'legal_name', 'photo_url', 'role', 'rbac_role',
-      'badge_id', 'active', 'status', 'tech_turn_eligible', 'show_on_calendar', 'pay_type',
+      'badge_id', 'active', 'status', 'tech_turn_eligible', 'show_on_calendar', 'show_on_online_booking', 'pay_type',
       'commission_pct', 'daily_guarantee_cents', 'hourly_rate_cents',
       'commission_bonus_enabled', 'salary_amount_cents', 'salary_period',
       'payout_check_pct', 'payout_bonus_pct', 'category_commission_rates',

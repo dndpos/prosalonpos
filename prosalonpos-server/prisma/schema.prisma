@@ -91,6 +91,7 @@ model Staff {
   status                    String   @default("active")     // active | deactivated | deleted
   tech_turn_eligible        Boolean  @default(true)
   show_on_calendar          Boolean  @default(true)
+  show_on_online_booking    Boolean  @default(true)
   pay_type                  String   @default("commission") // commission | hourly | salary
   commission_pct            Int      @default(0)
   daily_guarantee_cents     Int      @default(0)
