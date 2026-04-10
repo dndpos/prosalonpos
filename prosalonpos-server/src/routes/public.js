@@ -397,20 +397,82 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
         var techId = booking.tech_id;
         var isRequested = booking.requested || false;
 
-        // If no tech specified, we need to assign one. For now, pick the first available tech.
-        // In the future, tech turn logic could be applied here.
+        // If no tech specified, assign the least-busy available tech for this day
+        // who is also free at the requested time slot.
         if (!techId) {
           var availableTechs = await tx.staff.findMany({
             where: { salon_id: salonId, active: true, tech_turn_eligible: true, show_on_calendar: { not: false } },
-            select: { id: true },
+            select: { id: true, display_name: true },
             orderBy: { display_name: 'asc' },
           });
-          if (availableTechs.length > 0) {
-            // Simple round-robin: pick based on booking index
-            techId = availableTechs[bi % availableTechs.length].id;
-          } else {
+          if (availableTechs.length === 0) {
             throw new Error('No available technicians for this booking.');
           }
+
+          // Build day boundaries in UTC for the booking date
+          var dayStartUTC = new Date(Date.UTC(year, month, day, 0, 0, 0));
+          dayStartUTC = new Date(dayStartUTC.getTime() + etOffset * 60000); // midnight ET in UTC
+          var dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60000);
+
+          // Fetch all service lines for the day for these techs (need times for conflict check)
+          var dayLines = await tx.serviceLine.findMany({
+            where: {
+              staff_id: { in: availableTechs.map(function(t) { return t.id; }) },
+              starts_at: { gte: dayStartUTC, lt: dayEndUTC },
+              status: { notIn: ['cancelled', 'no_show'] },
+            },
+            select: { staff_id: true, starts_at: true, duration_minutes: true },
+          });
+
+          // Build per-tech appointment list (start/end in minutes from midnight ET)
+          var techAppts = {};
+          availableTechs.forEach(function(t) { techAppts[t.id] = []; });
+          dayLines.forEach(function(sl) {
+            var slTime = new Date(sl.starts_at);
+            var slMinET = Math.round((slTime.getTime() - dayStartUTC.getTime()) / 60000);
+            techAppts[sl.staff_id].push({ start: slMinET, end: slMinET + sl.duration_minutes });
+          });
+
+          // Calculate this booking's total duration and time range
+          var bookingDuration = booking.services.reduce(function(sum, svc) {
+            return sum + (svc.duration || svc.default_duration_minutes || 30);
+          }, 0);
+          var bookingStart = body.time; // minutes from midnight ET
+          var bookingEnd = bookingStart + bookingDuration;
+
+          // Filter to techs who are free at this time slot
+          var freeTechs = availableTechs.filter(function(t) {
+            var appts = techAppts[t.id];
+            for (var ai = 0; ai < appts.length; ai++) {
+              var a = appts[ai];
+              // Overlap check: new booking overlaps if it starts before existing ends AND ends after existing starts
+              if (bookingStart < a.end && bookingEnd > a.start) return false;
+            }
+            return true;
+          });
+
+          // If no tech is free at this exact slot, fall back to all available techs
+          // (the availability check on the portal should prevent this, but just in case)
+          var candidates = freeTechs.length > 0 ? freeTechs : availableTechs;
+
+          // Also count any techs already assigned earlier in THIS transaction (same booking batch)
+          var txAssigned = {};
+          appointments.forEach(function(a) {
+            if (a.techId) txAssigned[a.techId] = (txAssigned[a.techId] || 0) + 1;
+          });
+
+          // Pick candidate with fewest total appointments (existing + in-transaction)
+          var bestTech = null;
+          var bestCount = Infinity;
+          for (var ti = 0; ti < candidates.length; ti++) {
+            var t = candidates[ti];
+            var total = (techAppts[t.id] || []).length + (txAssigned[t.id] || 0);
+            if (total < bestCount) {
+              bestCount = total;
+              bestTech = t;
+            }
+          }
+          techId = bestTech.id;
         }
 
         // Create appointment
@@ -462,7 +524,7 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
           cumulativeOffset += svcDuration;
         }
 
-        appointments.push(appt);
+        appointments.push(Object.assign({}, appt, { techId: techId }));
       }
 
       return appointments;
