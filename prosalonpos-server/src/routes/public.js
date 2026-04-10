@@ -491,6 +491,7 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
         // Create service lines
         var slotMinutes = body.time;
         var cumulativeOffset = 0;
+        var firstSlId = null;
 
         for (var si = 0; si < booking.services.length; si++) {
           var svc = booking.services[si];
@@ -505,7 +506,7 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
           var startsAt = new Date(Date.UTC(year, month, day, svcHour, svcMin, 0, 0));
           startsAt.setUTCMinutes(startsAt.getUTCMinutes() + etOffset);
 
-          await tx.serviceLine.create({
+          var createdSL = await tx.serviceLine.create({
             data: {
               appointment_id: appt.id,
               service_catalog_id: svc.id || null,
@@ -520,11 +521,16 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
               position: si,
             }
           });
+          if (si === 0) firstSlId = createdSL.id;
 
           cumulativeOffset += svcDuration;
         }
 
-        appointments.push(Object.assign({}, appt, { techId: techId }));
+        appointments.push(Object.assign({}, appt, {
+          techId: techId,
+          firstSlId: firstSlId,
+          serviceNames: booking.services.map(function(s) { return s.name; }),
+        }));
       }
 
       return appointments;
@@ -540,10 +546,41 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
             id: a.id, source: 'online',
           });
         });
-        // Also emit a notification event for the Online Bookings tab
-        _io.to('salon:' + salonId).emit('online-booking:received', {
-          count: createdAppointments.length,
-          client_name: clientName,
+
+        // Look up tech display names for the notification
+        var techIds = createdAppointments.map(function(a) { return a.techId; }).filter(Boolean);
+        var uniqueTechIds = techIds.filter(function(id, i) { return techIds.indexOf(id) === i; });
+        var techRows = uniqueTechIds.length > 0 ? await prisma.staff.findMany({
+          where: { id: { in: uniqueTechIds } },
+          select: { id: true, display_name: true },
+        }) : [];
+        var techNameMap = {};
+        techRows.forEach(function(t) { techNameMap[t.id] = t.display_name; });
+
+        // Format booking time for display
+        var timeHour = Math.floor(body.time / 60);
+        var timeMin = body.time % 60;
+        var ampm = timeHour >= 12 ? 'PM' : 'AM';
+        var displayHour = timeHour > 12 ? timeHour - 12 : (timeHour === 0 ? 12 : timeHour);
+        var timeStr = displayHour + ':' + (timeMin < 10 ? '0' : '') + timeMin + ' ' + ampm;
+
+        // Format booked_at timestamp
+        var now = new Date();
+        var bookedStr = now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
+
+        // Emit one notification per booking (supports group bookings)
+        createdAppointments.forEach(function(a) {
+          _io.to('salon:' + salonId).emit('online-booking:received', {
+            id: a.id,
+            slId: a.firstSlId,
+            client: clientName,
+            phone: phoneDigits,
+            service: (a.serviceNames || []).join(', '),
+            tech: techNameMap[a.techId] || 'No Preference',
+            time: timeStr,
+            date: body.date,
+            booked_at: bookedStr,
+          });
         });
       }
     } catch (socketErr) {
