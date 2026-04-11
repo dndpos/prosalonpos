@@ -78,9 +78,9 @@ function generateIconSvg(salonName) {
 <rect width="192" height="192" rx="40" fill="url(#bg)"/>
 <circle cx="96" cy="88" r="58" fill="none" stroke="url(#rg)" stroke-width="2.5" opacity="0.8"/>
 <circle cx="96" cy="88" r="48" fill="url(#in)"/>
-<text x="96" y="92" text-anchor="middle" font-family="Inter,Helvetica Neue,sans-serif" font-size="${fs}" font-weight="700" fill="#93c5fd" letter-spacing="2">${esc(initials)}</text>
+<text x="96" y="92" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="${fs}" font-weight="bold" fill="#93c5fd" letter-spacing="2">${esc(initials)}</text>
 <rect x="${pillX}" y="158" width="${pillW}" height="22" rx="11" fill="#1e3a5f" opacity="0.9"/>
-<text x="96" y="172" text-anchor="middle" font-family="Inter,Helvetica Neue,sans-serif" font-size="11" font-weight="600" fill="#93c5fd" letter-spacing="0.5">${esc(label)}</text>
+<text x="96" y="172" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" font-weight="bold" fill="#93c5fd" letter-spacing="0.5">${esc(label)}</text>
 </svg>`;
 }
 
@@ -102,8 +102,8 @@ async function getIconPng(salonName, code) {
 
 function generateManifest(salonName, salonCode) {
   return JSON.stringify({
-    name: salonName + ' Tech',
-    short_name: salonName.length > 12 ? getInitials(salonName) + ' Tech' : salonName,
+    name: salonName,
+    short_name: salonName,
     start_url: '/tech/' + salonCode,
     display: 'standalone',
     background_color: '#0B1220',
@@ -126,7 +126,7 @@ function generateTechHtml(salonName, salonCode) {
   html = html.replace(/href="\/manifest\.json"/, 'href="/tech-manifest/' + salonCode + '"');
   html = html.replace(/content="SalonTech"/, 'content="' + esc(salonName) + '"');
   html = html.replace(/content="SalonPOS"/, 'content="' + esc(salonName) + '"');
-  html = html.replace(/<title>[^<]*<\/title>/, '<title>' + esc(salonName) + ' Tech</title>');
+  html = html.replace(/<title>[^<]*<\/title>/, '<title>' + esc(salonName) + '</title>');
   html = html.replace(/href="\/icons\/icon-192\.png"/g, 'href="/tech-icon/' + salonCode + '.png"');
   return html;
 }
