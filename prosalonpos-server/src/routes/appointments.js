@@ -272,6 +272,62 @@ router.put('/service-line/:id', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── PUT /:id/service-lines — Replace service lines on appointment (tech phone edit) ──
+router.put('/:id/service-lines', async function(req, res, next) {
+  try {
+    var existing = await prisma.appointment.findFirst({
+      where: { id: req.params.id, salon_id: req.salon_id },
+      include: { service_lines: { orderBy: { position: 'asc' } } }
+    });
+    if (!existing) return res.status(404).json({ error: 'Appointment not found' });
+
+    var newLines = req.body.service_lines || [];
+    if (newLines.length === 0) return res.status(400).json({ error: 'At least one service is required' });
+
+    // Use the first existing service line's starts_at as the base time
+    var baseStart = (existing.service_lines && existing.service_lines[0])
+      ? existing.service_lines[0].starts_at
+      : new Date();
+
+    // Delete old service lines and create new ones
+    await prisma.serviceLine.deleteMany({ where: { appointment_id: req.params.id } });
+
+    var runningStart = new Date(baseStart);
+    var creates = newLines.map(function(sl, i) {
+      var dur = sl.duration_minutes || 30;
+      var lineStart = new Date(runningStart);
+      runningStart = new Date(runningStart.getTime() + dur * 60000);
+      return {
+        appointment_id: req.params.id,
+        service_catalog_id: sl.service_id || null,
+        staff_id: sl.tech_id || req.staff_id,
+        starts_at: lineStart,
+        duration_minutes: dur,
+        calendar_color: sl.color || '#3B82F6',
+        status: existing.status || 'pending',
+        client_name: existing.client_name || null,
+        service_name: sl.name || 'Service',
+        price_cents: sl.price_cents || 0,
+        position: i,
+      };
+    });
+
+    await prisma.serviceLine.createMany({ data: creates });
+    await prisma.appointment.update({
+      where: { id: req.params.id },
+      data: { version: { increment: 1 } }
+    });
+
+    var appt = await prisma.appointment.findFirst({
+      where: { id: req.params.id },
+      include: { service_lines: { orderBy: { position: 'asc' } } }
+    });
+
+    emit(req, 'appointment:updated');
+    res.json({ appointment: appt });
+  } catch (err) { next(err); }
+});
+
 // ── DELETE /:id — Soft cancel (never hard delete) ──
 router.delete('/:id', async function(req, res, next) {
   try {
