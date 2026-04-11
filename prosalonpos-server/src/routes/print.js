@@ -12,11 +12,52 @@
 import { Router } from 'express';
 import net from 'net';
 import os from 'os';
+import fs from 'fs';
+import { exec } from 'child_process';
 
 var router = Router();
 var DEFAULT_PORT = 9100; // Standard raw print port for thermal printers
 var CONNECT_TIMEOUT = 5000; // 5 seconds to connect
 var SEND_TIMEOUT = 10000; // 10 seconds to send data
+
+/**
+ * Send raw data to a local port (COM3, ESDPRT001, /dev/usb/lp0, etc).
+ * Works on Windows and Linux for USB-connected receipt printers.
+ */
+function sendToLocalPort(portName, dataBuffer) {
+  return new Promise(function(resolve, reject) {
+    var isWindows = os.platform() === 'win32';
+    // Write data to a temp file, then copy to the port
+    var tmpFile = os.tmpdir() + '/prosalonpos_print_' + Date.now() + '.bin';
+    fs.writeFile(tmpFile, dataBuffer, function(err) {
+      if (err) { reject(new Error('Failed to write temp print file: ' + err.message)); return; }
+      var cmd;
+      if (isWindows) {
+        // Windows: copy /b to the port device
+        var winPort = portName;
+        // COM ports need \\.\COM3 format for port numbers > 9, but works for all
+        if (/^COM\d+$/i.test(winPort)) winPort = '\\\\.\\' + winPort;
+        cmd = 'copy /b "' + tmpFile.replace(/\//g, '\\') + '" "' + winPort + '"';
+      } else {
+        // Linux/Mac: write to device file
+        cmd = 'cat "' + tmpFile + '" > "' + portName + '"';
+      }
+      exec(cmd, { timeout: 10000 }, function(execErr, stdout, stderr) {
+        // Clean up temp file
+        fs.unlink(tmpFile, function() {});
+        if (execErr) {
+          var msg = 'Failed to send to ' + portName;
+          if (execErr.message && execErr.message.indexOf('Access is denied') !== -1) {
+            msg += ' — another program may be using the printer. Close other POS software and try again.';
+          }
+          reject(new Error(msg));
+        } else {
+          resolve();
+        }
+      });
+    });
+  });
+}
 
 /**
  * Send raw data to a printer IP via TCP.
@@ -60,26 +101,32 @@ function sendToPrinter(ip, port, dataBuffer) {
   });
 }
 
-// ── POST /print — Send ESC/POS data to printer ──
+// ── POST /print — Send ESC/POS data to printer (IP or local port) ──
 router.post('/', async function(req, res, next) {
   try {
     var ip = req.body.ip;
-    var port = req.body.port || DEFAULT_PORT;
+    var portName = req.body.port_name; // COM3, ESDPRT001, etc.
     var data = req.body.data; // base64-encoded ESC/POS data
-
-    if (!ip) return res.status(400).json({ error: 'Printer IP address is required' });
     if (!data) return res.status(400).json({ error: 'Print data is required' });
+    var buffer = Buffer.from(data, 'base64');
 
-    // Validate IP format (basic check)
+    // Local port printing (USB via COM/ESDPRT)
+    if (portName) {
+      // Validate port name — only allow safe characters
+      if (!/^[A-Za-z0-9_\-\\\/\.:]+$/.test(portName)) return res.status(400).json({ error: 'Invalid port name' });
+      console.log('[Print] Sending', buffer.length, 'bytes to local port', portName);
+      await sendToLocalPort(portName, buffer);
+      console.log('[Print] Success → local port', portName);
+      return res.json({ success: true, method: 'local_port', port_name: portName });
+    }
+
+    // Network IP printing
+    if (!ip) return res.status(400).json({ error: 'Printer IP or port name is required' });
+    var port = req.body.port || DEFAULT_PORT;
     var ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
     if (!ipPattern.test(ip)) return res.status(400).json({ error: 'Invalid IP address format' });
-
-    // Decode base64 to buffer
-    var buffer = Buffer.from(data, 'base64');
     console.log('[Print] Sending', buffer.length, 'bytes to', ip + ':' + port);
-
     await sendToPrinter(ip, port, buffer);
-
     console.log('[Print] Success →', ip);
     res.json({ success: true, method: 'ip_direct', ip: ip });
   } catch (err) {
@@ -92,9 +139,10 @@ router.post('/', async function(req, res, next) {
 router.post('/test', async function(req, res, next) {
   try {
     var ip = req.body.ip;
+    var portName = req.body.port_name;
     var port = req.body.port || DEFAULT_PORT;
 
-    if (!ip) return res.status(400).json({ error: 'Printer IP address is required' });
+    if (!ip && !portName) return res.status(400).json({ error: 'Printer IP or port name is required' });
 
     // Build a simple test receipt
     var ESC = '\x1B';
@@ -116,12 +164,17 @@ router.post('/test', async function(req, res, next) {
     testData += '\n\n';
     testData += ESC + 'd' + '\x03'; // Feed
     testData += GS + 'V' + '\x41' + '\x03'; // Cut
-
     var buffer = Buffer.from(testData, 'binary');
+
+    if (portName) {
+      console.log('[Print] Test page → local port', portName);
+      await sendToLocalPort(portName, buffer);
+      console.log('[Print] Test success → local port', portName);
+      return res.json({ success: true, port_name: portName, message: 'Test page sent — check your printer' });
+    }
+
     console.log('[Print] Test page →', ip + ':' + port);
-
     await sendToPrinter(ip, port, buffer);
-
     console.log('[Print] Test success →', ip);
     res.json({ success: true, ip: ip, message: 'Test page sent — check your printer' });
   } catch (err) {
@@ -134,18 +187,19 @@ router.post('/test', async function(req, res, next) {
 router.post('/drawer', async function(req, res, next) {
   try {
     var ip = req.body.ip;
+    var portName = req.body.port_name;
     var port = req.body.port || DEFAULT_PORT;
-
-    if (!ip) return res.status(400).json({ error: 'Printer IP address is required' });
-
-    // Cash drawer kick command
+    if (!ip && !portName) return res.status(400).json({ error: 'Printer IP or port name is required' });
     var ESC = '\x1B';
     var drawerCmd = ESC + 'p' + '\x00' + '\x19' + '\xFA';
     var buffer = Buffer.from(drawerCmd, 'binary');
-
+    if (portName) {
+      console.log('[Print] Cash drawer kick → local port', portName);
+      await sendToLocalPort(portName, buffer);
+      return res.json({ success: true, port_name: portName });
+    }
     console.log('[Print] Cash drawer kick →', ip + ':' + port);
     await sendToPrinter(ip, port, buffer);
-
     res.json({ success: true, ip: ip });
   } catch (err) {
     console.error('[Print] Drawer kick failed →', err.message);
