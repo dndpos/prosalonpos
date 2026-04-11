@@ -9,7 +9,7 @@
  *   GET /tech-manifest/:code → PWA manifest with salon-specific start_url + name
  *   GET /tech-icon/:code.png → 192x192 PNG icon with salon initials + gradient
  */
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import prisma from '../config/database.js';
@@ -141,7 +141,26 @@ function generateTechHtml(salonName, salonCode) {
   return html;
 }
 
+// ── Build version — derived from hashed JS filename in public/assets/ ──
+var _buildVersion = 'unknown';
+try {
+  var _assetsDir = join(staticPath, 'assets');
+  if (existsSync(_assetsDir)) {
+    var _assetFiles = readdirSync(_assetsDir);
+    var _jsFile = _assetFiles.find(function(f) { return f.startsWith('index-') && f.endsWith('.js'); });
+    if (_jsFile) _buildVersion = _jsFile.replace('index-', '').replace('.js', '');
+  }
+} catch (e) {
+  console.warn('[TechPortal] Could not read build version:', e.message);
+}
+
 export default function registerTechPortalRoutes(app) {
+
+  // ── Tech app version check (no auth, lightweight) ──
+  app.get('/api/v1/tech-version', function(req, res) {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({ version: _buildVersion });
+  });
 
   app.get('/tech-manifest/:code', async function(req, res) {
     var salon = await getSalonByCode(req.params.code);
