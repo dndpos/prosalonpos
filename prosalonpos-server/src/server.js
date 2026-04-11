@@ -51,6 +51,7 @@ import packageRoutes from './routes/packages.js';
 import bootstrapRoutes from './routes/bootstrap.js';
 import publicRoutes from './routes/public.js';
 import printRoutes from './routes/print.js';
+import registerTechPortalRoutes from './routes/techPortal.js';
 
 var PORT = process.env.PORT || 3001;
 
@@ -176,6 +177,10 @@ if (existsSync(staticPath)) {
   app.use('/assets', express.static(join(staticPath, 'assets'), { maxAge: '1y', immutable: true }));
   // Everything else (index.html) — no cache so browser always gets latest
   app.use(express.static(staticPath, { maxAge: 0, etag: false }));
+
+  // Tech portal routes — dynamic per-salon HTML, manifest, and icon
+  // Must be registered BEFORE the SPA wildcard fallback
+  registerTechPortalRoutes(app);
 
   // SPA fallback — any non-API route serves index.html with no-cache headers
   app.get('*', function(req, res) {
