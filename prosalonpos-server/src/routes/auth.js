@@ -421,14 +421,21 @@ router.post('/tech-login', async function(req, res, next) {
       return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
     }
 
-    var { name, pin } = req.body;
+    var { name, pin, salon_code } = req.body;
     if (!name || !pin) return res.status(400).json({ error: 'Name and PIN are required' });
 
     var searchName = name.trim().toLowerCase();
 
+    // Build query — scope to salon if salon_code provided
+    var staffWhere = { active: true };
+    if (salon_code) {
+      var salon = await prisma.salon.findFirst({ where: { salon_code: salon_code.toUpperCase().trim() } });
+      if (salon) staffWhere.salon_id = salon.id;
+    }
+
     // Find all active staff matching the display name (case-insensitive)
     var allStaff = await prisma.staff.findMany({
-      where: { active: true },
+      where: staffWhere,
       include: { salon: { select: { id: true, name: true, status: true, trial_end_date: true } } }
     });
 

@@ -51,6 +51,7 @@ import packageRoutes from './routes/packages.js';
 import bootstrapRoutes from './routes/bootstrap.js';
 import publicRoutes from './routes/public.js';
 import printRoutes from './routes/print.js';
+import registerTechPortalRoutes from './routes/techPortal.js';
 
 var PORT = process.env.PORT || 3001;
 
@@ -177,19 +178,11 @@ if (existsSync(staticPath)) {
   // Everything else (index.html) — no cache so browser always gets latest
   app.use(express.static(staticPath, { maxAge: 0, etag: false }));
 
-  // SPA fallback — any non-API route serves index.html with no-cache headers
-  // /tech gets its own index.html with tech-manifest.json for iOS home screen
-  app.get('/tech', function(req, res) {
-    var techHtml = join(staticPath, 'tech', 'index.html');
-    if (existsSync(techHtml)) {
-      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.sendFile(techHtml);
-    } else {
-      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.sendFile(join(staticPath, 'index.html'));
-    }
-  });
+  // Tech portal routes — dynamic per-salon HTML, manifest, and icon
+  // Must be registered BEFORE the SPA wildcard fallback
+  registerTechPortalRoutes(app);
 
+  // SPA fallback — any non-API route serves index.html with no-cache headers
   app.get('*', function(req, res) {
     if (!req.path.startsWith('/api/')) {
       res.set('Cache-Control', 'no-cache, no-store, must-revalidate');

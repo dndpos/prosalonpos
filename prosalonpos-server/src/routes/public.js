@@ -602,5 +602,23 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── GET /public/salon-info/:salonCode — basic salon info (name only, no sensitive data) ──
+// Used by tech phone login to display salon name from URL code
+router.get('/salon-info/:salonCode', async function(req, res, next) {
+  try {
+    var code = (req.params.salonCode || '').toUpperCase().trim();
+    if (!code) return res.status(400).json({ error: 'Missing salon code' });
+
+    var salon = await prisma.salon.findFirst({
+      where: { salon_code: code },
+      select: { name: true }
+    });
+
+    if (!salon) return res.status(404).json({ error: 'Salon not found' });
+
+    res.json({ name: salon.name });
+  } catch (err) { next(err); }
+});
+
 
 export default router;
