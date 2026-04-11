@@ -129,7 +129,7 @@ router.put('/tickets/:id', async function(req, res, next) {
     // Simple fields that can be updated on an open ticket
     var fields = ['client_id', 'client_name', 'appointment_id', 'subtotal_cents',
       'tax_cents', 'discount_cents', 'tip_cents', 'surcharge_cents', 'deposit_cents',
-      'total_cents', 'cashier_id', 'cashier_name'];
+      'total_cents', 'cashier_id', 'cashier_name', 'edited_by_id', 'edited_by_name'];
     fields.forEach(function(f) {
       if (data[f] !== undefined) updateData[f] = data[f];
     });
@@ -462,6 +462,8 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       cashier_name: data.cashier_name || null,
       created_by_id: data.created_by_id || null,
       created_by_name: data.created_by_name || null,
+      edited_by_id: data.edited_by_id || null,
+      edited_by_name: data.edited_by_name || null,
       tip_distributions: toDb(data.tip_distributions || null),
       items: { create: itemsCreate },
       payments: { create: paymentsCreate },

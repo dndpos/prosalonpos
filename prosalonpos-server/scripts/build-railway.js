@@ -38,8 +38,19 @@ run('npx prisma generate');
 console.log('[build] ✅ Prisma client generated');
 console.log('');
 
-// ── Step 2: Verify pre-built frontend ──
-console.log('[build] Step 2: Checking for pre-built frontend...');
+// ── Step 2: Push schema to database ──
+console.log('[build] Step 2: Pushing schema to database...');
+try {
+  run('npx prisma db push --accept-data-loss');
+  console.log('[build] ✅ Database schema up to date');
+} catch (e) {
+  console.warn('[build] ⚠️ prisma db push failed (may not have DATABASE_URL at build time)');
+  console.warn('[build]    Schema will be pushed at runtime if needed.');
+}
+console.log('');
+
+// ── Step 3: Verify pre-built frontend ──
+console.log('[build] Step 3: Checking for pre-built frontend...');
 if (existsSync(join(publicDir, 'index.html'))) {
   console.log('[build] ✅ Pre-built frontend found in public/');
 } else {
