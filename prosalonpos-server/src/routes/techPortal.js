@@ -67,33 +67,30 @@ function getInitials(name) {
 function truncateName(name) {
   if (!name) return 'TECH';
   var upper = name.toUpperCase();
-  return upper.length > 14 ? upper.substring(0, 13) + '\u2026' : upper;
+  return upper.length > 18 ? upper.substring(0, 17) + '\u2026' : upper;
 }
 
 function esc(str) {
   return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
-// ── Generate SVG icon with salon initials ──
+// ── Generate SVG icon with salon initials — blue gradient style ──
 function generateIconSvg(salonName) {
   var initials = getInitials(salonName);
-  var fs = initials.length <= 2 ? 72 : 56;
+  var fs = initials.length <= 2 ? 76 : 58;
   var label = truncateName(salonName);
-  var pillW = Math.max(80, Math.min(144, label.length * 10 + 24));
+  var pillW = Math.max(80, Math.min(168, label.length * 9 + 24));
   var pillX = 96 - pillW / 2;
+  var labelSize = label.length > 14 ? 10 : 12;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
 <defs>
-<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1a2744"/><stop offset="100%" stop-color="#0d1829"/></linearGradient>
-<linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#3b82f6"/></linearGradient>
-<linearGradient id="in" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0%" stop-color="#1e3a5f"/><stop offset="100%" stop-color="#0f2440"/></linearGradient>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
 </defs>
-<rect width="192" height="192" rx="40" fill="url(#bg)"/>
-<circle cx="96" cy="88" r="58" fill="none" stroke="url(#rg)" stroke-width="2.5" opacity="0.8"/>
-<circle cx="96" cy="88" r="48" fill="url(#in)"/>
-<text x="96" y="92" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="${fs}" font-weight="bold" fill="#93c5fd" letter-spacing="2">${esc(initials)}</text>
-<rect x="${pillX}" y="158" width="${pillW}" height="22" rx="11" fill="#1e3a5f" opacity="0.9"/>
-<text x="96" y="172" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" font-weight="bold" fill="#93c5fd" letter-spacing="0.5">${esc(label)}</text>
+<rect width="192" height="192" rx="38" fill="url(#bg)"/>
+<text x="96" y="96" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="${fs}" font-weight="bold" fill="#ffffff">${esc(initials)}</text>
+<rect x="${pillX}" y="148" width="${pillW}" height="28" rx="14" fill="#1e40af"/>
+<text x="96" y="167" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="${labelSize}" font-weight="bold" fill="#dbeafe" letter-spacing="0.5">${esc(label)}</text>
 </svg>`;
 }
 
