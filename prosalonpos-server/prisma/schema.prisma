@@ -766,6 +766,7 @@ model StaffPresence {
 model MessageTemplate {
   id       String @id @default(uuid())
   salon_id String
+  name     String   @default("")
   type     String // booking_confirm | reminder | cancel | noshow | receipt | waitlist | promo
   channel  String @default("sms") // sms | email | both
   subject  String?
