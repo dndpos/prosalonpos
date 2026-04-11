@@ -611,12 +611,24 @@ router.get('/salon-info/:salonCode', async function(req, res, next) {
 
     var salon = await prisma.salon.findFirst({
       where: { salon_code: code },
-      select: { name: true }
+      select: { id: true, name: true }
     });
 
     if (!salon) return res.status(404).json({ error: 'Salon not found' });
 
-    res.json({ name: salon.name });
+    // Prefer salon_name from SalonSettings (what owner edits) over Salon table name
+    var displayName = salon.name;
+    try {
+      var ss = await prisma.salonSettings.findUnique({ where: { salon_id: salon.id } });
+      if (ss && ss.settings) {
+        var parsed = typeof ss.settings === 'string' ? JSON.parse(ss.settings) : ss.settings;
+        if (parsed && parsed.salon_name && parsed.salon_name.trim()) {
+          displayName = parsed.salon_name.trim();
+        }
+      }
+    } catch (e) { /* use Salon table name */ }
+
+    res.json({ name: displayName });
   } catch (err) { next(err); }
 });
 

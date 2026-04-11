@@ -35,7 +35,20 @@ async function getSalonByCode(code) {
   try {
     var salon = await prisma.salon.findFirst({ where: { salon_code: upper } });
     if (!salon) return null;
-    var entry = { name: salon.name, id: salon.id, code: upper, fetched: Date.now() };
+
+    // Prefer salon_name from SalonSettings (what owner edits) over Salon table name
+    var displayName = salon.name;
+    try {
+      var ss = await prisma.salonSettings.findUnique({ where: { salon_id: salon.id } });
+      if (ss && ss.settings) {
+        var parsed = typeof ss.settings === 'string' ? JSON.parse(ss.settings) : ss.settings;
+        if (parsed && parsed.salon_name && parsed.salon_name.trim()) {
+          displayName = parsed.salon_name.trim();
+        }
+      }
+    } catch (e) { /* use Salon table name */ }
+
+    var entry = { name: displayName, id: salon.id, code: upper, fetched: Date.now() };
     _salonCache[upper] = entry;
     return entry;
   } catch (e) {
