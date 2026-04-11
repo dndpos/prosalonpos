@@ -1,10 +1,10 @@
 {
-  "name": "Pro Salon POS",
-  "short_name": "SalonPOS",
-  "start_url": "/",
+  "name": "Salon Tech View",
+  "short_name": "SalonTech",
+  "start_url": "/tech",
   "display": "standalone",
-  "background_color": "#0F172A",
-  "theme_color": "#0F172A",
+  "background_color": "#0B1220",
+  "theme_color": "#0B1220",
   "icons": [
     {
       "src": "/icons/icon-192.png",

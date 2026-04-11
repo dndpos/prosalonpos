@@ -178,6 +178,18 @@ if (existsSync(staticPath)) {
   app.use(express.static(staticPath, { maxAge: 0, etag: false }));
 
   // SPA fallback — any non-API route serves index.html with no-cache headers
+  // /tech gets its own index.html with tech-manifest.json for iOS home screen
+  app.get('/tech', function(req, res) {
+    var techHtml = join(staticPath, 'tech', 'index.html');
+    if (existsSync(techHtml)) {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.sendFile(techHtml);
+    } else {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.sendFile(join(staticPath, 'index.html'));
+    }
+  });
+
   app.get('*', function(req, res) {
     if (!req.path.startsWith('/api/')) {
       res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
