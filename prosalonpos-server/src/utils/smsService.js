@@ -11,52 +11,26 @@
  * If env vars are missing, messages are logged but not sent (dev mode).
  */
 
+import twilio from 'twilio';
+
 var twilioClient = null;
 var twilioFrom = null;
 var configured = false;
 
-function init() {
-  var sid = process.env.TWILIO_ACCOUNT_SID;
-  var token = process.env.TWILIO_AUTH_TOKEN;
-  twilioFrom = process.env.TWILIO_PHONE_NUMBER;
+var sid = process.env.TWILIO_ACCOUNT_SID;
+var token = process.env.TWILIO_AUTH_TOKEN;
+twilioFrom = process.env.TWILIO_PHONE_NUMBER;
 
-  if (sid && token && twilioFrom) {
-    try {
-      var twilio = (await import('twilio')).default;
-      twilioClient = twilio(sid, token);
-      configured = true;
-      console.log('[smsService] Twilio configured — from:', twilioFrom);
-    } catch (err) {
-      console.warn('[smsService] Twilio SDK not available:', err.message);
-    }
-  } else {
-    console.log('[smsService] Twilio env vars not set — SMS will be logged only (dev mode)');
+if (sid && token && twilioFrom) {
+  try {
+    twilioClient = twilio(sid, token);
+    configured = true;
+    console.log('[smsService] Twilio configured — from:', twilioFrom);
+  } catch (err) {
+    console.warn('[smsService] Twilio init failed:', err.message);
   }
-}
-
-// Use dynamic import for ESM compatibility
-var initPromise = null;
-async function ensureInit() {
-  if (initPromise) return initPromise;
-  initPromise = (async function() {
-    var sid = process.env.TWILIO_ACCOUNT_SID;
-    var token = process.env.TWILIO_AUTH_TOKEN;
-    twilioFrom = process.env.TWILIO_PHONE_NUMBER;
-
-    if (sid && token && twilioFrom) {
-      try {
-        var twilio = (await import('twilio')).default;
-        twilioClient = twilio(sid, token);
-        configured = true;
-        console.log('[smsService] Twilio configured — from:', twilioFrom);
-      } catch (err) {
-        console.warn('[smsService] Twilio SDK not available:', err.message);
-      }
-    } else {
-      console.log('[smsService] Twilio env vars not set — SMS logged only (dev mode)');
-    }
-  })();
-  return initPromise;
+} else {
+  console.log('[smsService] Twilio env vars not set — SMS logged only (dev mode)');
 }
 
 /**
@@ -66,15 +40,13 @@ async function ensureInit() {
  * @returns {{ success: boolean, sid?: string, error?: string }}
  */
 export async function sendSms(to, body) {
-  await ensureInit();
-
   // Normalize phone number — strip to digits, prepend +1 if needed
   var digits = (to || '').replace(/\D/g, '');
   if (digits.length === 10) digits = '1' + digits;
   if (digits.length === 11 && digits[0] === '1') digits = '+' + digits;
-  else digits = '+' + digits;
+  else if (digits[0] !== '+') digits = '+' + digits;
 
-  if (digits.length < 11) {
+  if (digits.length < 12) {
     return { success: false, error: 'Invalid phone number: ' + to };
   }
 
@@ -98,7 +70,7 @@ export async function sendSms(to, body) {
 }
 
 /**
- * Check if Twilio is configured (for status display in settings).
+ * Check if Twilio is configured.
  */
 export function isConfigured() {
   return configured;
