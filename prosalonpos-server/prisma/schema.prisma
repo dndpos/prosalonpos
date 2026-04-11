@@ -342,6 +342,8 @@ model Ticket {
   payment_method    String?                    // cash | credit | giftcard | zelle | split
   cashier_id        String?
   cashier_name      String?
+  created_by_id     String?                    // staff_id who originally created/held the ticket
+  created_by_name   String?                    // display name of creator
   tip_distributions Json?                      // [{staff_id, staff_name, amount_cents}]
   void_reason       String?
   void_by           String?                    // staff_id who voided
