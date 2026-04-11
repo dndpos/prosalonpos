@@ -386,40 +386,83 @@ router.put('/owner-pin', async function(req, res, next) {
 });
 
 // ════════════════════════════════════════════
-// TECH PHONE LOGIN — phone number + PIN → JWT
+// TECH PHONE LOGIN — display name + PIN → JWT
+// Rate limited: 5 failed attempts per IP = 15 min lockout
 // ════════════════════════════════════════════
+var _techLoginAttempts = {}; // { ip: { count, lastAttempt } }
+var TECH_LOGIN_MAX = 5;
+var TECH_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+function checkTechRateLimit(ip) {
+  var entry = _techLoginAttempts[ip];
+  if (!entry) return true;
+  if (Date.now() - entry.lastAttempt > TECH_LOGIN_WINDOW_MS) {
+    delete _techLoginAttempts[ip];
+    return true;
+  }
+  return entry.count < TECH_LOGIN_MAX;
+}
+
+function recordTechFail(ip) {
+  if (!_techLoginAttempts[ip]) _techLoginAttempts[ip] = { count: 0, lastAttempt: 0 };
+  _techLoginAttempts[ip].count++;
+  _techLoginAttempts[ip].lastAttempt = Date.now();
+}
+
+function clearTechFails(ip) {
+  delete _techLoginAttempts[ip];
+}
+
 router.post('/tech-login', async function(req, res, next) {
   try {
-    var { phone, pin } = req.body;
-    if (!phone || !pin) return res.status(400).json({ error: 'Phone and PIN are required' });
+    var ip = req.ip || req.connection.remoteAddress || 'unknown';
 
-    // Strip phone to digits
-    var digits = phone.replace(/\D/g, '');
-    if (digits.length === 11 && digits[0] === '1') digits = digits.slice(1);
+    if (!checkTechRateLimit(ip)) {
+      return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+    }
 
-    // Find staff by phone number
-    var staff = await prisma.staff.findFirst({
-      where: {
-        phone: { contains: digits },
-        active: true,
-      },
+    var { name, pin } = req.body;
+    if (!name || !pin) return res.status(400).json({ error: 'Name and PIN are required' });
+
+    var searchName = name.trim().toLowerCase();
+
+    // Find all active staff matching the display name (case-insensitive)
+    var allStaff = await prisma.staff.findMany({
+      where: { active: true },
       include: { salon: { select: { id: true, name: true, status: true, trial_end_date: true } } }
     });
 
-    if (!staff) return res.status(401).json({ error: 'No account found for this phone number' });
+    // Case-insensitive name match
+    var matches = allStaff.filter(function(s) {
+      return s.display_name && s.display_name.toLowerCase() === searchName;
+    });
+
+    if (matches.length === 0) {
+      recordTechFail(ip);
+      return res.status(401).json({ error: 'Name not found. Use the name your salon has on file.' });
+    }
+
+    // Try PIN against each match (handles same name at different salons)
+    var inputHash = pinSha256(pin);
+    var staff = null;
+    for (var i = 0; i < matches.length; i++) {
+      if (matches[i].pin_sha256 === inputHash) { staff = matches[i]; break; }
+    }
+
+    if (!staff) {
+      recordTechFail(ip);
+      var remaining = TECH_LOGIN_MAX - ((_techLoginAttempts[ip] || {}).count || 0);
+      return res.status(401).json({ error: 'Incorrect PIN. ' + (remaining > 0 ? remaining + ' attempts remaining.' : 'Account locked for 15 minutes.') });
+    }
 
     // Check salon status
     if (staff.salon && staff.salon.status === 'suspended') {
       return res.status(403).json({ error: 'This salon account is suspended' });
     }
 
-    // Verify PIN — compare SHA-256
-    var inputHash = pinSha256(pin);
-    if (staff.pin_sha256 !== inputHash) {
-      return res.status(401).json({ error: 'Incorrect PIN' });
-    }
+    // Success — clear rate limit and create JWT
+    clearTechFails(ip);
 
-    // Create JWT
     var tokenPayload = {
       staff_id: staff.id,
       salon_id: staff.salon_id,
