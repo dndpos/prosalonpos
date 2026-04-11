@@ -385,4 +385,59 @@ router.put('/owner-pin', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ════════════════════════════════════════════
+// TECH PHONE LOGIN — phone number + PIN → JWT
+// ════════════════════════════════════════════
+router.post('/tech-login', async function(req, res, next) {
+  try {
+    var { phone, pin } = req.body;
+    if (!phone || !pin) return res.status(400).json({ error: 'Phone and PIN are required' });
+
+    // Strip phone to digits
+    var digits = phone.replace(/\D/g, '');
+    if (digits.length === 11 && digits[0] === '1') digits = digits.slice(1);
+
+    // Find staff by phone number
+    var staff = await prisma.staff.findFirst({
+      where: {
+        phone: { contains: digits },
+        active: true,
+      },
+      include: { salon: { select: { id: true, name: true, status: true, trial_end_date: true } } }
+    });
+
+    if (!staff) return res.status(401).json({ error: 'No account found for this phone number' });
+
+    // Check salon status
+    if (staff.salon && staff.salon.status === 'suspended') {
+      return res.status(403).json({ error: 'This salon account is suspended' });
+    }
+
+    // Verify PIN — compare SHA-256
+    var inputHash = pinSha256(pin);
+    if (staff.pin_sha256 !== inputHash) {
+      return res.status(401).json({ error: 'Incorrect PIN' });
+    }
+
+    // Create JWT
+    var tokenPayload = {
+      staff_id: staff.id,
+      salon_id: staff.salon_id,
+      role: staff.role || 'tech',
+      display_name: staff.display_name,
+    };
+    var token = createToken(tokenPayload);
+
+    res.json({
+      token: token,
+      staff_id: staff.id,
+      staff_name: staff.display_name,
+      salon_id: staff.salon_id,
+      salon_name: staff.salon ? staff.salon.name : '',
+      commission_rate: staff.commission_pct || 0,
+      role: staff.role || 'tech',
+    });
+  } catch (err) { next(err); }
+});
+
 export default router;
