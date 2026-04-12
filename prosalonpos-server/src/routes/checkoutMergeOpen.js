@@ -1,8 +1,7 @@
 /**
  * checkoutMergeOpen.js — Merge 2+ open tickets into 1 new OPEN ticket
- * C38: Called immediately when user selects multiple tickets to combine.
+ * C38: Called when user hits Hold/Print on a checkout with combined tickets.
  * Creates a new open ticket with all items, marks old tickets as merged.
- * The new ticket is just a normal open ticket — pay, hold, cancel all work normally.
  *
  * Endpoint: POST /api/v1/checkout/tickets/merge-open
  *
@@ -39,7 +38,7 @@ router.post('/tickets/merge-open', async function(req, res, next) {
     var displayNum = numbers.join('&');
     var totalDeposit = tickets.reduce(function(sum, t) { return sum + (t.deposit_cents || 0); }, 0);
 
-    // Collect ALL items from all tickets
+    // Collect ALL items from all tickets — keep everything as-is
     var combinedItems = [];
     tickets.forEach(function(t) {
       (t.items || []).forEach(function(item) {
