@@ -141,7 +141,13 @@ router.post('/', async function(req, res) {
     res.json({ block: block });
   } catch (err) {
     console.error('[TimeOff] POST error:', err.message);
-    res.status(500).json({ error: 'Failed to create time-off' });
+    var userMsg = 'Failed to create time-off';
+    if (err.message && err.message.indexOf('Unknown arg') >= 0) {
+      userMsg = 'Database needs update — please redeploy or contact support';
+    } else if (err.message) {
+      userMsg = 'Failed to create time-off: ' + err.message.slice(0, 120);
+    }
+    res.status(500).json({ error: userMsg });
   }
 });
 
