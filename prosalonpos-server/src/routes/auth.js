@@ -486,6 +486,7 @@ router.post('/tech-login', async function(req, res, next) {
       salon_name: staff.salon ? staff.salon.name : '',
       commission_rate: staff.commission_pct || 0,
       role: staff.role || 'tech',
+      salary_period: staff.salary_period || 'biweekly',
     });
   } catch (err) { next(err); }
 });

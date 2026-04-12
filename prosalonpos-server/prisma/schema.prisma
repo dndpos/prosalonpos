@@ -308,6 +308,13 @@ model BlockedTime {
   start_min Int      // minutes from midnight (for grid rendering)
   end_min   Int
   block_type String  @default("blocked") // blocked | reserved
+  reason    String?
+  date_from DateTime?  // start of date range
+  date_to   DateTime?  // end of date range
+  repeat_type String @default("none") // none | daily | weekly | biweekly | monthly
+  repeat_days String?  // comma-separated day numbers: 0=Sun,...6=Sat
+  repeat_day_of_month Int?  // 1-31 for monthly
+  repeat_start_week DateTime? // reference date for biweekly cycle
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   version    Int      @default(1)
