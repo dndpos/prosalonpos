@@ -117,9 +117,10 @@ function generateManifest(salonName, salonCode) {
     start_url: '/tech/' + salonCode,
     display: 'standalone',
     background_color: '#0B1220',
-    theme_color: '#0B1220',
+    theme_color: '#1E40AF',
     icons: [
-      { src: '/tech-icon/' + salonCode + '.png', sizes: '192x192', type: 'image/png' }
+      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }
     ]
   }, null, 2);
 }
@@ -137,7 +138,7 @@ function generateTechHtml(salonName, salonCode) {
   html = html.replace(/content="SalonTech"/, 'content="' + esc(salonName) + '"');
   html = html.replace(/content="SalonPOS"/, 'content="' + esc(salonName) + '"');
   html = html.replace(/<title>[^<]*<\/title>/, '<title>' + esc(salonName) + '</title>');
-  html = html.replace(/href="\/icons\/icon-192\.png"/g, 'href="/tech-icon/' + salonCode + '.png"');
+  html = html.replace(/href="\/icons\/icon-192\.png"/g, 'href="/icons/apple-touch-icon.png"');
   // Inject iOS cache-busting meta tags right after <head> to prevent PWA stale cache
   var cacheMeta = '\n    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">'
     + '\n    <meta http-equiv="Pragma" content="no-cache">'
