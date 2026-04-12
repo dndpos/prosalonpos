@@ -4,6 +4,7 @@
  * Used by tech phone app and station calendar.
  */
 import { Router } from 'express';
+import prisma from '../config/database.js';
 var router = Router();
 
 // GET /api/v1/time-off?staff_id=xxx — list all time-off for a staff member
@@ -13,7 +14,7 @@ router.get('/', async function(req, res) {
     var staff_id = req.query.staff_id;
     if (!staff_id) return res.status(400).json({ error: 'staff_id required' });
 
-    var blocks = await req.prisma.blockedTime.findMany({
+    var blocks = await prisma.blockedTime.findMany({
       where: { salon_id: salon_id, staff_id: staff_id, block_type: 'blocked' },
       orderBy: { created_at: 'desc' },
     });
@@ -36,7 +37,7 @@ router.get('/date', async function(req, res) {
     var dayOfMonth = queryDate.getUTCDate();
 
     // Fetch all blocked times for this salon
-    var allBlocks = await req.prisma.blockedTime.findMany({
+    var allBlocks = await prisma.blockedTime.findMany({
       where: { salon_id: salon_id, block_type: 'blocked' },
     });
 
@@ -114,7 +115,7 @@ router.post('/', async function(req, res) {
     startsAt.setUTCHours(0, 0, 0, 0);
     startsAt.setUTCMinutes(b.start_min);
 
-    var block = await req.prisma.blockedTime.create({
+    var block = await prisma.blockedTime.create({
       data: {
         salon_id: salon_id,
         staff_id: b.staff_id,
@@ -155,12 +156,12 @@ router.post('/', async function(req, res) {
 router.delete('/:id', async function(req, res) {
   try {
     var salon_id = req.salon_id;
-    var block = await req.prisma.blockedTime.findFirst({
+    var block = await prisma.blockedTime.findFirst({
       where: { id: req.params.id, salon_id: salon_id },
     });
     if (!block) return res.status(404).json({ error: 'Not found' });
 
-    await req.prisma.blockedTime.delete({ where: { id: req.params.id } });
+    await prisma.blockedTime.delete({ where: { id: req.params.id } });
 
     var io = req.app.get('io');
     if (io) io.to('salon:' + salon_id).emit('timeoff:updated', { staff_id: block.staff_id });
