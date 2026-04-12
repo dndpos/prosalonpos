@@ -43,12 +43,23 @@ router.get('/date', async function(req, res) {
 
     // Filter to blocks that apply to this date
     var applicable = allBlocks.filter(function(b) {
-      // Check date range bounds
+      // Check date range bounds — only if date_from/date_to are set
       if (b.date_from && queryDate < new Date(b.date_from)) return false;
-      if (b.date_to) {
+      // For recurring blocks, skip date_to check if not set or same as date_from
+      if (b.date_to && b.repeat_type === 'none') {
         var endDate = new Date(b.date_to);
         endDate.setUTCHours(23, 59, 59, 999);
         if (queryDate > endDate) return false;
+      }
+      if (b.date_to && b.repeat_type !== 'none') {
+        // Only enforce date_to if it's different from date_from (user set an end date)
+        var dfStr = b.date_from ? b.date_from.toISOString().slice(0, 10) : null;
+        var dtStr = b.date_to.toISOString().slice(0, 10);
+        if (dfStr && dtStr !== dfStr) {
+          var endDate2 = new Date(b.date_to);
+          endDate2.setUTCHours(23, 59, 59, 999);
+          if (queryDate > endDate2) return false;
+        }
       }
 
       if (b.repeat_type === 'none') {
@@ -126,7 +137,7 @@ router.post('/', async function(req, res) {
         block_type: 'blocked',
         reason: b.reason || null,
         date_from: b.date_from ? new Date(b.date_from + 'T00:00:00Z') : startsAt,
-        date_to: b.date_to ? new Date(b.date_to + 'T00:00:00Z') : (b.date_from ? new Date(b.date_from + 'T00:00:00Z') : startsAt),
+        date_to: b.date_to ? new Date(b.date_to + 'T00:00:00Z') : (b.repeat_type && b.repeat_type !== 'none' ? null : (b.date_from ? new Date(b.date_from + 'T00:00:00Z') : startsAt)),
         repeat_type: b.repeat_type || 'none',
         repeat_days: b.repeat_days || null,
         repeat_day_of_month: b.repeat_day_of_month || null,
