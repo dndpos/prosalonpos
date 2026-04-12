@@ -229,6 +229,9 @@ router.put('/:id', async function(req, res, next) {
     if (data.status) {
       emitData.status = data.status;
       emitData.staff_ids = (appt.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean);
+      // De-duplicate staff IDs
+      emitData.staff_ids = emitData.staff_ids.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; });
+      console.log('[Appointments] Status changed to ' + data.status + ', staff_ids:', emitData.staff_ids);
     }
     emit(req, 'appointment:updated', emitData);
     res.json({ appointment: appt });
