@@ -224,7 +224,13 @@ router.put('/:id', async function(req, res, next) {
       }
     }
 
-    emit(req, 'appointment:updated');
+    // Include status + staff IDs so stations can update tech turn rotation
+    var emitData = {};
+    if (data.status) {
+      emitData.status = data.status;
+      emitData.staff_ids = (appt.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean);
+    }
+    emit(req, 'appointment:updated', emitData);
     res.json({ appointment: appt });
   } catch (err) { next(err); }
 });
