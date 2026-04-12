@@ -14,8 +14,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/assets/index-CAXGA_p6.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BN8yV6Bs.css">
+    <script type="module" crossorigin src="/assets/index-BP_gUMJY.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BxOJxD4T.css">
   </head>
   <body>
     <div id="root"></div>
@@ -45,18 +45,12 @@
         document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
       }
     </script>
-    <!-- Network IP printing — no extra software needed (QZ Tray removed C24) -->
+    <!-- Build: C32-clean | Service worker removed — PWA offline deferred to Phase 4 -->
     <script>
-      // Register Service Worker for PWA (cache app shell, survive wifi blips)
+      // Clean up any previously registered service workers (prevents stale cache)
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/sw.js').then(function(reg) {
-            console.log('[SW] Registered, scope:', reg.scope);
-            // Check for updates every 30 minutes
-            setInterval(function() { reg.update(); }, 30 * 60 * 1000);
-          }).catch(function(err) {
-            console.warn('[SW] Registration failed:', err.message);
-          });
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          regs.forEach(function(reg) { reg.unregister(); });
         });
       }
     </script>

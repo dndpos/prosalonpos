@@ -13,7 +13,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -175,8 +175,14 @@ if (existsSync(staticPath)) {
   console.log('[Static] Serving frontend from:', staticPath);
   // Hashed assets (JS/CSS) — cache for 1 year (filename changes on rebuild)
   app.use('/assets', express.static(join(staticPath, 'assets'), { maxAge: '1y', immutable: true }));
-  // Everything else (index.html) — no cache so browser always gets latest
-  app.use(express.static(staticPath, { maxAge: 0, etag: false }));
+  // Everything else (index.html, manifest, icons) — no cache so browser always gets latest
+  app.use(express.static(staticPath, { maxAge: 0, etag: false, lastModified: false }));
+
+  // Version endpoint — frontend can poll this to detect new deployments
+  var BUILD_ID = readdirSync(join(staticPath, 'assets')).find(function(f) { return f.endsWith('.js'); }) || 'unknown';
+  app.get('/api/version', function(req, res) {
+    res.json({ build: BUILD_ID });
+  });
 
   // Tech portal routes — dynamic per-salon HTML, manifest, and icon
   // Must be registered BEFORE the SPA wildcard fallback
