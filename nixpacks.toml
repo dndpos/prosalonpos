@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm"]
+
+[phases.build]
+cmds = ["cd prosalonpos-server && npm install && node scripts/build-railway.js"]
+
+[start]
+cmd = "cd prosalonpos-server && node src/server.js"
