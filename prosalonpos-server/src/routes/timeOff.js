@@ -18,6 +18,7 @@ router.get('/', async function(req, res) {
       where: { salon_id: salon_id, staff_id: staff_id, block_type: 'blocked' },
       orderBy: { created_at: 'desc' },
     });
+    console.log('[TimeOff] GET staff_id=' + staff_id + ' salon_id=' + salon_id + ' found=' + blocks.length);
     res.json({ blocks: blocks });
   } catch (err) {
     console.error('[TimeOff] GET error:', err.message);
