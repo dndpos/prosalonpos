@@ -138,6 +138,11 @@ function generateTechHtml(salonName, salonCode) {
   html = html.replace(/content="SalonPOS"/, 'content="' + esc(salonName) + '"');
   html = html.replace(/<title>[^<]*<\/title>/, '<title>' + esc(salonName) + '</title>');
   html = html.replace(/href="\/icons\/icon-192\.png"/g, 'href="/tech-icon/' + salonCode + '.png"');
+  // Inject iOS cache-busting meta tags right after <head> to prevent PWA stale cache
+  var cacheMeta = '\n    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">'
+    + '\n    <meta http-equiv="Pragma" content="no-cache">'
+    + '\n    <meta http-equiv="Expires" content="0">';
+  html = html.replace('<head>', '<head>' + cacheMeta);
   return html;
 }
 
