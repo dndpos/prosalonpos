@@ -197,11 +197,12 @@ Check server terminal for details.`),null}},mergeTickets:async function(o,i){var
 `),t.tipCents?n.push(gn("Tip",qn(t.tipCents),r)+`
 `):t.tipAutoRemoved&&(n.push(_t.ALIGN_CENTER),n.push(`Tip collected outside system
 `),n.push(_t.ALIGN_LEFT)),n.push(ci(r)+`
+`),n.push(`
 `),n.push(_t.BOLD_ON),n.push(_t.DOUBLE_ON),n.push(gn("TOTAL",qn(t.totalCents||0),o)+`
-`),n.push(_t.DOUBLE_OFF),n.push(`
-`),n.push(_t.ALIGN_RIGHT),(t.payments||[]).forEach(function(g){var x=i[g.method]||(g.method?g.method.charAt(0).toUpperCase()+g.method.slice(1):"Payment");g.card_brand&&g.last4&&(x=g.card_brand+" ****"+g.last4,g.entry_method&&(x+=" ("+g.entry_method+")")),n.push("Paid ("+x+") "+qn(g.amount_cents||0)+`
+`),n.push(_t.DOUBLE_OFF),n.push(_t.BOLD_OFF),n.push(`
+`),n.push(_t.ALIGN_RIGHT),n.push(_t.BOLD_ON),(t.payments||[]).forEach(function(g){var x=i[g.method]||(g.method?g.method.charAt(0).toUpperCase()+g.method.slice(1):"Payment");g.card_brand&&g.last4&&(x=g.card_brand+" ****"+g.last4,g.entry_method&&(x+=" ("+g.entry_method+")")),n.push("Paid ("+x+") "+qn(g.amount_cents||0)+`
 `),g.auth_code&&n.push("Auth: "+g.auth_code+`
-`)}),n.push(_t.BOLD_OFF),n.push(_t.DOUBLE_OFF),n.push(_t.ALIGN_LEFT),t.changeCents&&n.push(gn("Change",qn(t.changeCents),r)+`
+`)}),n.push(_t.BOLD_OFF),n.push(_t.ALIGN_LEFT),t.changeCents&&n.push(gn("Change",qn(t.changeCents),r)+`
 `),n.push(ci(r)+`
 `),n.push(_t.ALIGN_CENTER),t.footerMessage?n.push(t.footerMessage+`
 `):(n.push(`Thank you for visiting!
