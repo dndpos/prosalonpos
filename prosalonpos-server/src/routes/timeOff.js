@@ -9,7 +9,7 @@ var router = Router();
 // GET /api/v1/time-off?staff_id=xxx — list all time-off for a staff member
 router.get('/', async function(req, res) {
   try {
-    var salon_id = req.salonId;
+    var salon_id = req.salon_id;
     var staff_id = req.query.staff_id;
     if (!staff_id) return res.status(400).json({ error: 'staff_id required' });
 
@@ -27,7 +27,7 @@ router.get('/', async function(req, res) {
 // GET /api/v1/time-off/date?date=YYYY-MM-DD — get all blocked times for a date (all staff)
 router.get('/date', async function(req, res) {
   try {
-    var salon_id = req.salonId;
+    var salon_id = req.salon_id;
     var dateStr = req.query.date;
     if (!dateStr) return res.status(400).json({ error: 'date required' });
 
@@ -99,7 +99,7 @@ router.get('/date', async function(req, res) {
 // POST /api/v1/time-off — create a new time-off block
 router.post('/', async function(req, res) {
   try {
-    var salon_id = req.salonId;
+    var salon_id = req.salon_id;
     var b = req.body;
     if (!b.staff_id || b.start_min == null || b.end_min == null) {
       return res.status(400).json({ error: 'staff_id, start_min, end_min required' });
@@ -148,7 +148,7 @@ router.post('/', async function(req, res) {
 // DELETE /api/v1/time-off/:id — delete a time-off block
 router.delete('/:id', async function(req, res) {
   try {
-    var salon_id = req.salonId;
+    var salon_id = req.salon_id;
     var block = await req.prisma.blockedTime.findFirst({
       where: { id: req.params.id, salon_id: salon_id },
     });
