@@ -253,7 +253,13 @@ router.post('/tickets/:id/close', async function(req, res, next) {
       }
     }
 
-    emit(req, 'ticket:closed');
+    var closeStaffIds = (ticket.items || []).map(function(it) { return it.tech_id; }).filter(Boolean);
+    closeStaffIds = closeStaffIds.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; });
+    emit(req, 'ticket:closed', {
+      staff_ids: closeStaffIds,
+      client_name: ticket.client_name || 'Walk-in',
+      ticket_number: ticket.ticket_number,
+    });
     
     // Mark appointment + service lines as checked_out (same as quick-close path)
     var apptId = existing.appointment_id || data.appointment_id;
@@ -266,7 +272,11 @@ router.post('/tickets/:id/close', async function(req, res, next) {
         where: { appointment_id: apptId },
         data: { status: 'checked_out', payment_method: data.payment_method || null },
       }).catch(function() {}); // non-fatal
-      emit(req, 'appointment:updated');
+      emit(req, 'appointment:updated', {
+        staff_ids: closeStaffIds,
+        client_name: ticket.client_name || 'Walk-in',
+        status: 'checked_out',
+      });
     }
 
     res.json({ ticket: formatTicket(ticket) });
@@ -498,6 +508,8 @@ router.post('/tickets/quick-close', async function(req, res, next) {
     }
 
     // Mark appointment + service lines as checked_out (prevents re-checkout from calendar)
+    var qcStaffIds = (ticket.items || []).map(function(it) { return it.tech_id; }).filter(Boolean);
+    qcStaffIds = qcStaffIds.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; });
     if (data.appointment_id) {
       await prisma.appointment.update({
         where: { id: data.appointment_id },
@@ -507,10 +519,18 @@ router.post('/tickets/quick-close', async function(req, res, next) {
         where: { appointment_id: data.appointment_id },
         data: { status: 'checked_out', payment_method: data.payment_method || null },
       }).catch(function() {}); // non-fatal
-      emit(req, 'appointment:updated');
+      emit(req, 'appointment:updated', {
+        staff_ids: qcStaffIds,
+        client_name: ticket.client_name || 'Walk-in',
+        status: 'checked_out',
+      });
     }
 
-    emit(req, 'ticket:closed');
+    emit(req, 'ticket:closed', {
+      staff_ids: qcStaffIds,
+      client_name: ticket.client_name || 'Walk-in',
+      ticket_number: ticket.ticket_number,
+    });
     res.status(201).json({ ticket: formatTicket(ticket) });
   } catch (err) {
     console.error('[Quick-Close] FAILED:', err.message, err.stack);

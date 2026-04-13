@@ -165,7 +165,12 @@ router.post('/', async function(req, res, next) {
       include: { service_lines: true }
     });
 
-    emit(req, 'appointment:created');
+    emit(req, 'appointment:created', {
+      staff_ids: (appt.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean),
+      client_name: appt.client_name || 'Walk-in',
+      status: appt.status || 'pending',
+      requested: appt.requested || false,
+    });
     res.status(201).json({ appointment: appt });
   } catch (err) { next(err); }
 });
@@ -225,12 +230,16 @@ router.put('/:id', async function(req, res, next) {
     }
 
     // Include status + staff IDs so stations can update tech turn rotation
-    var emitData = {};
+    var emitData = {
+      staff_ids: (appt.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean),
+      client_name: appt.client_name || 'Walk-in',
+      requested: appt.requested || false,
+      old_status: existing.status || null,
+    };
+    // De-duplicate staff IDs
+    emitData.staff_ids = emitData.staff_ids.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; });
     if (data.status) {
       emitData.status = data.status;
-      emitData.staff_ids = (appt.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean);
-      // De-duplicate staff IDs
-      emitData.staff_ids = emitData.staff_ids.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; });
       console.log('[Appointments] Status changed to ' + data.status + ', staff_ids:', emitData.staff_ids);
     }
     emit(req, 'appointment:updated', emitData);
@@ -341,7 +350,8 @@ router.put('/:id/service-lines', async function(req, res, next) {
 router.delete('/:id', async function(req, res, next) {
   try {
     var existing = await prisma.appointment.findFirst({
-      where: { id: req.params.id, salon_id: req.salon_id }
+      where: { id: req.params.id, salon_id: req.salon_id },
+      include: { service_lines: { select: { staff_id: true } } }
     });
     if (!existing) return res.status(404).json({ error: 'Appointment not found' });
 
@@ -356,7 +366,12 @@ router.delete('/:id', async function(req, res, next) {
       data: { status: 'cancelled' }
     });
 
-    emit(req, 'appointment:deleted');
+    var delStaffIds = (existing.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean);
+    emit(req, 'appointment:deleted', {
+      staff_ids: delStaffIds.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; }),
+      client_name: existing.client_name || 'Walk-in',
+      requested: existing.requested || false,
+    });
     res.json({ appointment: appt });
   } catch (err) { next(err); }
 });

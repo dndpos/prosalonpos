@@ -176,9 +176,19 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
       });
     }, { timeout: 20000 });
 
-    emit(req, 'ticket:closed');
+    var closedStaffIds = (result.items || []).map(function(it) { return it.tech_id; }).filter(Boolean);
+    closedStaffIds = closedStaffIds.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; });
+    emit(req, 'ticket:closed', {
+      staff_ids: closedStaffIds,
+      client_name: result.client_name || 'Walk-in',
+      ticket_number: result.ticket_number,
+    });
     if (uniqueApptIds.length > 0) {
-      emit(req, 'appointment:updated');
+      emit(req, 'appointment:updated', {
+        staff_ids: closedStaffIds,
+        client_name: result.client_name || 'Walk-in',
+        status: 'checked_out',
+      });
     }
     res.json({ ticket: formatTicket(result) });
   } catch (err) {
