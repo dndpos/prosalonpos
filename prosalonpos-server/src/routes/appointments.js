@@ -15,6 +15,7 @@
 import { Router } from 'express';
 import prisma from '../config/database.js';
 import { emit } from '../utils/emit.js';
+import { sendPushToStaffList } from '../utils/pushService.js';
 
 var router = Router();
 
@@ -165,12 +166,19 @@ router.post('/', async function(req, res, next) {
       include: { service_lines: true }
     });
 
+    var createStaffIds = (appt.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean);
     emit(req, 'appointment:created', {
-      staff_ids: (appt.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean),
+      staff_ids: createStaffIds,
       client_name: appt.client_name || 'Walk-in',
       status: appt.status || 'pending',
       requested: appt.requested || false,
     });
+    // Push notification to involved techs
+    sendPushToStaffList(req.salon_id, createStaffIds, {
+      title: 'New Appointment',
+      body: (appt.client_name || 'Walk-in') + ' booked',
+      tag: 'appt-created-' + appt.id,
+    }).catch(function() {});
     res.status(201).json({ appointment: appt });
   } catch (err) { next(err); }
 });
@@ -243,6 +251,17 @@ router.put('/:id', async function(req, res, next) {
       console.log('[Appointments] Status changed to ' + data.status + ', staff_ids:', emitData.staff_ids);
     }
     emit(req, 'appointment:updated', emitData);
+    // Push notification for meaningful status changes
+    if (data.status) {
+      var pushStatuses = { checked_in: ' checked in', in_progress: ' — started', completed: ' — completed', no_show: ' — no show', cancelled: ' — cancelled' };
+      if (pushStatuses[data.status]) {
+        sendPushToStaffList(req.salon_id, emitData.staff_ids, {
+          title: 'Appointment Update',
+          body: (appt.client_name || 'Walk-in') + pushStatuses[data.status],
+          tag: 'appt-' + appt.id + '-' + data.status,
+        }).catch(function() {});
+      }
+    }
     res.json({ appointment: appt });
   } catch (err) { next(err); }
 });
@@ -367,11 +386,17 @@ router.delete('/:id', async function(req, res, next) {
     });
 
     var delStaffIds = (existing.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean);
+    var delStaffUnique = delStaffIds.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; });
     emit(req, 'appointment:deleted', {
-      staff_ids: delStaffIds.filter(function(id, idx, arr) { return arr.indexOf(id) === idx; }),
+      staff_ids: delStaffUnique,
       client_name: existing.client_name || 'Walk-in',
       requested: existing.requested || false,
     });
+    sendPushToStaffList(req.salon_id, delStaffUnique, {
+      title: 'Appointment Cancelled',
+      body: (existing.client_name || 'Walk-in') + ' — cancelled',
+      tag: 'appt-del-' + existing.id,
+    }).catch(function() {});
     res.json({ appointment: appt });
   } catch (err) { next(err); }
 });

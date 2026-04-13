@@ -15,6 +15,7 @@
 import { Router } from 'express';
 import prisma from '../config/database.js';
 import { emit } from '../utils/emit.js';
+import { sendPushToStaffList } from '../utils/pushService.js';
 import { toDb, dayBounds, formatTicket } from './checkoutHelpers.js';
 
 var router = Router();
@@ -190,6 +191,11 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
         status: 'checked_out',
       });
     }
+    sendPushToStaffList(req.salon_id, closedStaffIds, {
+      title: 'Checked Out',
+      body: (result.client_name || 'Walk-in') + ' — checked out',
+      tag: 'ticket-closed-' + result.id,
+    }).catch(function() {});
     res.json({ ticket: formatTicket(result) });
   } catch (err) {
     console.error('[merge-and-close] FAILED:', err.message, err.stack);

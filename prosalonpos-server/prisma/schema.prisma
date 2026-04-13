@@ -988,3 +988,19 @@ model ActiveSession {
 
   @@index([salon_id])
 }
+
+// ════════════════════════════════════════════
+// PUSH NOTIFICATIONS
+// ════════════════════════════════════════════
+
+model PushSubscription {
+  id           String   @id @default(uuid())
+  salon_id     String
+  staff_id     String
+  endpoint     String   @unique
+  keys_p256dh  String
+  keys_auth    String
+  created_at   DateTime @default(now())
+
+  @@index([salon_id, staff_id])
+}

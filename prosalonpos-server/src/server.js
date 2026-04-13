@@ -53,6 +53,7 @@ import bootstrapRoutes from './routes/bootstrap.js';
 import publicRoutes from './routes/public.js';
 import printRoutes from './routes/print.js';
 import timeOffRoutes from './routes/timeOff.js';
+import pushRoutes from './routes/push.js';
 import registerTechPortalRoutes from './routes/techPortal.js';
 
 var PORT = process.env.PORT || 3001;
@@ -161,6 +162,7 @@ app.use('/api/v1/bootstrap', authenticate, bootstrapRoutes);
 app.use('/api/v1/provider', providerRoutes); // Provider auth handled internally (login is public)
 app.use('/api/v1/print', authenticate, printRoutes);
 app.use('/api/v1/time-off', authenticate, timeOffRoutes);
+app.use('/api/v1/push', pushRoutes); // vapid-key is public, subscribe/unsubscribe use authenticate middleware inside
 
 // ── Global error handler (must be last middleware) ──
 app.use(errorHandler);

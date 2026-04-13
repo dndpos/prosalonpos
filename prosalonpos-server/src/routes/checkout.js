@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
 import { emit } from '../utils/emit.js';
+import { sendPushToStaffList } from '../utils/pushService.js';
 import { toDb, fromDb, dayBounds, getEasternOffset, formatTicket } from './checkoutHelpers.js';
 var router = Router();
 
@@ -279,6 +280,11 @@ router.post('/tickets/:id/close', async function(req, res, next) {
       });
     }
 
+    sendPushToStaffList(req.salon_id, closeStaffIds, {
+      title: 'Checked Out',
+      body: (ticket.client_name || 'Walk-in') + ' — checked out',
+      tag: 'ticket-closed-' + ticket.id,
+    }).catch(function() {});
     res.json({ ticket: formatTicket(ticket) });
   } catch (err) {
     console.error('[Close] FAILED:', err.message);
@@ -531,6 +537,11 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       client_name: ticket.client_name || 'Walk-in',
       ticket_number: ticket.ticket_number,
     });
+    sendPushToStaffList(req.salon_id, qcStaffIds, {
+      title: 'Checked Out',
+      body: (ticket.client_name || 'Walk-in') + ' — checked out',
+      tag: 'ticket-closed-' + ticket.id,
+    }).catch(function() {});
     res.status(201).json({ ticket: formatTicket(ticket) });
   } catch (err) {
     console.error('[Quick-Close] FAILED:', err.message, err.stack);
