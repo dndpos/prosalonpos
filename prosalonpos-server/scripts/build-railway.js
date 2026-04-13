@@ -61,6 +61,25 @@ if (existsSync(join(publicDir, 'index.html'))) {
   process.exit(1);
 }
 
+// ── Step 4: Sync tech/index.html asset references ──
+import { readFileSync, writeFileSync } from 'fs';
+var techIndex = join(publicDir, 'tech', 'index.html');
+if (existsSync(techIndex)) {
+  console.log('[build] Step 4: Syncing tech/index.html asset hashes...');
+  var mainHtml = readFileSync(join(publicDir, 'index.html'), 'utf8');
+  var jsMatch = mainHtml.match(/\/assets\/(index-[^"]+\.js)/);
+  var cssMatch = mainHtml.match(/\/assets\/(index-[^"]+\.css)/);
+  if (jsMatch && cssMatch) {
+    var techHtml = readFileSync(techIndex, 'utf8');
+    techHtml = techHtml.replace(/\/assets\/index-[^"]*\.js/, '/assets/' + jsMatch[1]);
+    techHtml = techHtml.replace(/\/assets\/index-[^"]*\.css/, '/assets/' + cssMatch[1]);
+    writeFileSync(techIndex, techHtml);
+    console.log('[build] ✅ tech/index.html synced: ' + jsMatch[1] + ', ' + cssMatch[1]);
+  }
+} else {
+  console.log('[build] Step 4: No tech/index.html found, skipping sync');
+}
+
 console.log('');
 console.log('╔══════════════════════════════════════════╗');
 console.log('║   ✅ BUILD COMPLETE — Ready to start     ║');
