@@ -135,6 +135,8 @@ function formatTicket(t, pkgRedemptions) {
     tipCents: t.tip_cents || 0,
     surcharge_cents: t.surcharge_cents,
     surchargeCents: t.surcharge_cents || 0,
+    dual_pricing_cents: t.dual_pricing_cents,
+    dualPricingCents: t.dual_pricing_cents || 0,
     deposit_cents: t.deposit_cents,
     depositCents: t.deposit_cents || 0,
     pkg_redeemed_cents: t.pkg_redeemed_cents,

@@ -128,7 +128,7 @@ router.put('/tickets/:id', async function(req, res, next) {
     var updateData = {};
     // Simple fields that can be updated on an open ticket
     var fields = ['client_id', 'client_name', 'appointment_id', 'subtotal_cents',
-      'tax_cents', 'discount_cents', 'tip_cents', 'surcharge_cents', 'deposit_cents',
+      'tax_cents', 'discount_cents', 'tip_cents', 'surcharge_cents', 'dual_pricing_cents', 'deposit_cents',
       'total_cents', 'cashier_id', 'cashier_name', 'edited_by_id', 'edited_by_name'];
     fields.forEach(function(f) {
       if (data[f] !== undefined) updateData[f] = data[f];
@@ -216,6 +216,7 @@ router.post('/tickets/:id/close', async function(req, res, next) {
       discount_cents: data.discount_cents != null ? data.discount_cents : existing.discount_cents,
       tip_cents: data.tip_cents != null ? data.tip_cents : existing.tip_cents,
       surcharge_cents: data.surcharge_cents != null ? data.surcharge_cents : existing.surcharge_cents,
+      dual_pricing_cents: data.dual_pricing_cents != null ? data.dual_pricing_cents : existing.dual_pricing_cents,
       deposit_cents: data.deposit_cents != null ? data.deposit_cents : existing.deposit_cents,
       total_cents: data.total_cents != null ? data.total_cents : existing.total_cents,
       payment_method: data.payment_method != null ? data.payment_method : existing.payment_method,
@@ -455,6 +456,7 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       discount_cents: data.discount_cents || 0,
       tip_cents: data.tip_cents || 0,
       surcharge_cents: data.surcharge_cents || 0,
+      dual_pricing_cents: data.dual_pricing_cents || 0,
       deposit_cents: data.deposit_cents || 0,
       total_cents: data.total_cents || 0,
       payment_method: data.payment_method || null,
