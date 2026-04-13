@@ -304,7 +304,47 @@ router.put('/service-line/:id', async function(req, res, next) {
       });
     }
 
-    emit(req, 'appointment:updated');
+    // Build emit data with old + new staff for tech phone notifications
+    var oldStaffId = existing.staff_id;
+    var newStaffId = sl.staff_id;
+    var staffChanged = data.staff_id !== undefined && oldStaffId !== newStaffId;
+
+    // Get client name from parent appointment
+    var parentAppt = await prisma.appointment.findFirst({
+      where: { id: existing.appointment_id },
+      select: { client_name: true, requested: true }
+    });
+    var clientName = (parentAppt && parentAppt.client_name) || 'Walk-in';
+
+    // Collect all staff_ids that need to know about this update
+    var notifyStaffIds = [newStaffId];
+    if (staffChanged && oldStaffId) notifyStaffIds.push(oldStaffId);
+    notifyStaffIds = notifyStaffIds.filter(function(id, idx, arr) { return id && arr.indexOf(id) === idx; });
+
+    var emitData = {
+      staff_ids: notifyStaffIds,
+      client_name: clientName,
+      requested: (parentAppt && parentAppt.requested) || false,
+    };
+    if (staffChanged) emitData.reassigned = true;
+    if (data.status) emitData.status = data.status;
+
+    emit(req, 'appointment:updated', emitData);
+
+    // Push notification for reassignment
+    if (staffChanged) {
+      sendPushToStaffList(req.salon_id, [newStaffId], {
+        title: 'Appointment Assigned',
+        body: clientName + ' moved to you',
+        tag: 'reassign-' + existing.appointment_id,
+      }).catch(function(){});
+      sendPushToStaffList(req.salon_id, [oldStaffId], {
+        title: 'Appointment Moved',
+        body: clientName + ' reassigned to another tech',
+        tag: 'reassign-' + existing.appointment_id,
+      }).catch(function(){});
+    }
+
     res.json({ serviceLine: sl });
   } catch (err) { next(err); }
 });
