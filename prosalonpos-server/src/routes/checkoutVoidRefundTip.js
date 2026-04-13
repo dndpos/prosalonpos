@@ -251,9 +251,9 @@ router.put('/tickets/:id/tip', async function(req, res, next) {
 
     // Recalculate total if tip changed
     if (data.tip_cents != null) {
-      // total = subtotal + tax + tip + surcharge + dual_pricing - discount - deposit
+      // total = subtotal + tax + tip + surcharge - discount - deposit
       updateData.total_cents = existing.subtotal_cents + existing.tax_cents +
-        data.tip_cents + existing.surcharge_cents + (existing.dual_pricing_cents || 0) -
+        data.tip_cents + existing.surcharge_cents -
         existing.discount_cents - existing.deposit_cents;
     }
 

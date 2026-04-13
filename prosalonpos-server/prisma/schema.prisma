@@ -343,7 +343,6 @@ model Ticket {
   discount_cents    Int      @default(0)
   tip_cents         Int      @default(0)
   surcharge_cents   Int      @default(0)
-  dual_pricing_cents Int     @default(0)       // dual pricing markup (baked into item prices for CC)
   deposit_cents     Int      @default(0)       // deposit applied from booking
   pkg_redeemed_cents Int     @default(0)       // package redemption deduction total
   total_cents       Int      @default(0)
