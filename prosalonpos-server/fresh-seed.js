@@ -38,10 +38,10 @@ async function main() {
       salon_id: salon.id,
       settings: {
         salon_name: 'Pro Salon POS',
-        tax_rate_percentage: 7.5,
+        tax_rate_percentage: 0,
         tip_presets_array: [18, 20, 25],
         booking_increment_minutes: 15,
-        rotation_mode: 'round_robin',
+        rotation_mode: 'first_available',
       }
     }
   });

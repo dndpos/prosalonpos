@@ -300,10 +300,10 @@ router.post('/salons', async function(req, res, next) {
             salon_email: d.email || '',
             salon_address_line1: d.address1 || d.address || '',
             salon_address_line2: d.address2 || '',
-            tax_rate_percentage: 7.5,
+            tax_rate_percentage: 0,
             tip_presets_array: [18, 20, 25],
             booking_increment_minutes: 15,
-            rotation_mode: 'round_robin',
+            rotation_mode: 'first_available',
             opening_time: '09:00',
             closing_time: '19:00',
             clearance_required: {
