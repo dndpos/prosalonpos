@@ -130,6 +130,7 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
           discount_cents: closeData.discount_cents || 0,
           tip_cents: closeData.tip_cents || 0,
           surcharge_cents: closeData.surcharge_cents || 0,
+          dual_pricing_cents: closeData.dual_pricing_cents || 0,
           deposit_cents: closeData.deposit_cents != null ? closeData.deposit_cents : totalDeposit,
           pkg_redeemed_cents: closeData.pkg_redeemed_cents || 0,
           total_cents: closeData.total_cents || 0,
