@@ -8,14 +8,40 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="SalonPOS" />
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="/tech-manifest.json" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/apple-touch-icon.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/assets/index-Dvyhz_Sv.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BN8yV6Bs.css">
+    <script>
+      window.onerror = function(msg, src, line, col, err) {
+        var root = document.getElementById('root');
+        if (root) root.style.display='none';
+        var d = document.getElementById('crash');
+        if (d) {
+          d.style.display='block';
+          document.getElementById('crash-msg').textContent = msg + '\n\nFile: ' + src + '\nLine: ' + line + ', Col: ' + col;
+          document.getElementById('crash-stack').textContent = err ? err.stack : 'No stack';
+        } else {
+          document.body.innerHTML = '<div style="background:#0F172A;color:#EF4444;padding:40px;font-family:monospace;height:100vh;overflow:auto"><h2>Startup Error</h2><pre style="color:#FCA5A5;white-space:pre-wrap;font-size:16px">' + msg + '\n\nFile: ' + src + '\nLine: ' + line + ', Col: ' + col + '</pre><pre style="color:#64748B;white-space:pre-wrap;font-size:12px;margin-top:16px">' + (err ? err.stack : 'No stack') + '</pre><button onclick="location.reload()" style="margin-top:20px;padding:10px 24px;background:#2563EB;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Reload</button></div>';
+        }
+      };
+      window.addEventListener('unhandledrejection', function(e) {
+        var root = document.getElementById('root');
+        if (root) root.style.display='none';
+        var d = document.getElementById('crash');
+        if (d) {
+          d.style.display='block';
+          document.getElementById('crash-msg').textContent = 'Unhandled: ' + (e.reason ? (e.reason.message || e.reason) : 'Unknown');
+          document.getElementById('crash-stack').textContent = e.reason ? (e.reason.stack || '') : '';
+        } else {
+          document.body.innerHTML = '<div style="background:#0F172A;color:#EF4444;padding:40px;font-family:monospace;height:100vh;overflow:auto"><h2>Startup Error</h2><pre style="color:#FCA5A5;white-space:pre-wrap;font-size:16px">Unhandled: ' + (e.reason ? (e.reason.message || e.reason) : 'Unknown') + '</pre><pre style="color:#64748B;white-space:pre-wrap;font-size:12px;margin-top:16px">' + (e.reason ? (e.reason.stack || '') : '') + '</pre><button onclick="location.reload()" style="margin-top:20px;padding:10px 24px;background:#2563EB;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Reload</button></div>';
+        }
+      });
+    </script>
+    <script type="module" crossorigin src="/assets/index-kvNgTz8Q.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-bG0yDyX9.css">
   </head>
   <body>
     <div id="root"></div>
@@ -26,28 +52,12 @@
       <button onclick="location.reload()" style="margin-top:20px;padding:10px 24px;background:#2563EB;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Reload</button>
     </div>
     <script>
-      window.onerror = function(msg, src, line, col, err) {
-        document.getElementById('root').style.display='none';
-        var d = document.getElementById('crash');
-        d.style.display='block';
-        document.getElementById('crash-msg').textContent = msg + '\n\nFile: ' + src + '\nLine: ' + line + ', Col: ' + col;
-        document.getElementById('crash-stack').textContent = err ? err.stack : 'No stack';
-      };
-      window.addEventListener('unhandledrejection', function(e) {
-        document.getElementById('root').style.display='none';
-        var d = document.getElementById('crash');
-        d.style.display='block';
-        document.getElementById('crash-msg').textContent = 'Unhandled: ' + (e.reason ? (e.reason.message || e.reason) : 'Unknown');
-        document.getElementById('crash-stack').textContent = e.reason ? (e.reason.stack || '') : '';
-      });
-      // Suppress native right-click menu only in kiosk mode (chrome --kiosk flag removes window.outerWidth gap)
       if (window.navigator.standalone || window.outerWidth === window.screen.width) {
         document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
       }
     </script>
-    <!-- Build: C32-clean | Service worker removed — PWA offline deferred to Phase 4 -->
+    <!-- Build: C43-debug | Error handler in head for Safari crash visibility -->
     <script>
-      // Clean up any previously registered service workers (prevents stale cache)
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function(regs) {
           regs.forEach(function(reg) { reg.unregister(); });
