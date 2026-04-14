@@ -241,15 +241,15 @@ io.on('connection', function(socket) {
     // No staff_id-based cleanup — same person CAN be logged into multiple stations.
     // Stale sessions are cleaned by the 2-min heartbeat sweep and disconnect handler.
     prisma.activeSession.create({
-      data: { salon_id: salonId, socket_id: socket.id, staff_id: staffId }
+      data: { salon_id: salonId, socket_id: socket.id, staff_id: staffId, station_label: (typeof data === 'object' && data ? (data.station_label || data.station_id || null) : null) }
     }).then(function() {
-      console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id + (staffId ? ' staff:' + staffId : ''));
+      console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id + (staffId ? ' staff:' + staffId : '') + (data.station_label ? ' label:' + data.station_label : ''));
     }).catch(function(err) {
       if (err.code === 'P2002') {
-        // Same socket reconnected — just update heartbeat
+        // Same socket reconnected — just update heartbeat + label
         prisma.activeSession.update({
           where: { socket_id: socket.id },
-          data: { last_heartbeat: new Date(), staff_id: staffId }
+          data: { last_heartbeat: new Date(), staff_id: staffId, station_label: (typeof data === 'object' && data ? (data.station_label || data.station_id || null) : null) }
         }).catch(function() {});
       } else {
         console.error('[Station] Failed to register session:', err.message);
