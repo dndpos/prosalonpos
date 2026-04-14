@@ -7,6 +7,7 @@ import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
 import { emit } from '../utils/emit.js';
 import { sendPushToStaffList } from '../utils/pushService.js';
+import { triggerReceipt } from '../utils/autoMessaging.js';
 import { toDb, fromDb, dayBounds, getEasternOffset, formatTicket } from './checkoutHelpers.js';
 var router = Router();
 
@@ -285,6 +286,16 @@ router.post('/tickets/:id/close', async function(req, res, next) {
       body: (ticket.client_name || 'Walk-in') + ' — checked out',
       tag: 'ticket-closed-' + ticket.id,
     }).catch(function() {});
+    // Automated SMS: receipt delivery (non-blocking)
+    // Only fires if client chose text/email receipt and msg_receipt_enabled is on
+    if (existing.client_id && data.send_receipt_sms) {
+      var svcNames = (ticket.items || []).map(function(it) { return it.service_name || it.name || ''; }).filter(Boolean).join(', ');
+      var totalDollars = '$' + ((ticket.total_cents || 0) / 100).toFixed(2);
+      var techName = (ticket.items || []).map(function(it) { return it.tech_name || ''; }).filter(Boolean)[0] || '';
+      triggerReceipt(req.salon_id, existing.client_id, {
+        services: svcNames, total: totalDollars, technician: techName,
+      }).catch(function() {});
+    }
     res.json({ ticket: formatTicket(ticket) });
   } catch (err) {
     console.error('[Close] FAILED:', err.message);
@@ -542,6 +553,15 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       body: (ticket.client_name || 'Walk-in') + ' — checked out',
       tag: 'ticket-closed-' + ticket.id,
     }).catch(function() {});
+    // Automated SMS: receipt delivery (non-blocking)
+    if (data.client_id && data.send_receipt_sms) {
+      var qcSvcNames = (ticket.items || []).map(function(it) { return it.name || ''; }).filter(Boolean).join(', ');
+      var qcTotal = '$' + ((ticket.total_cents || 0) / 100).toFixed(2);
+      var qcTech = (ticket.items || []).map(function(it) { return it.tech_name || ''; }).filter(Boolean)[0] || '';
+      triggerReceipt(req.salon_id, data.client_id, {
+        services: qcSvcNames, total: qcTotal, technician: qcTech,
+      }).catch(function() {});
+    }
     res.status(201).json({ ticket: formatTicket(ticket) });
   } catch (err) {
     console.error('[Quick-Close] FAILED:', err.message, err.stack);

@@ -25,6 +25,7 @@ import { setIO } from './utils/emit.js';
 import startupLicenseCheck from './utils/license.js';
 import prisma from './config/database.js';
 import { bootstrapSalon } from './utils/salonBootstrap.js';
+import { startReminderScheduler } from './utils/reminderScheduler.js';
 
 // Routes
 import authRoutes from './routes/auth.js';
@@ -338,6 +339,9 @@ setInterval(function() {
     console.error('[Station] Stale cleanup failed:', err.message);
   });
 }, 2 * 60 * 1000); // every 2 minutes
+
+// ── Reminder scheduler — sends appointment reminders at configured times ──
+startReminderScheduler();
 
 // ════════════════════════════════════════════
 // START SERVER

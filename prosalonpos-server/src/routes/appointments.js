@@ -16,6 +16,7 @@ import { Router } from 'express';
 import prisma from '../config/database.js';
 import { emit } from '../utils/emit.js';
 import { sendPushToStaffList } from '../utils/pushService.js';
+import { triggerBookingConfirm, triggerCancelConfirm, triggerNoShow, triggerWaitlist } from '../utils/autoMessaging.js';
 
 var router = Router();
 
@@ -179,6 +180,8 @@ router.post('/', async function(req, res, next) {
       body: (appt.client_name || 'Walk-in') + ' booked',
       tag: 'appt-created-' + appt.id,
     }).catch(function() {});
+    // Automated SMS: booking confirmation (non-blocking)
+    triggerBookingConfirm(req.salon_id, appt, appt.service_lines).catch(function() {});
     res.status(201).json({ appointment: appt });
   } catch (err) { next(err); }
 });
@@ -260,6 +263,14 @@ router.put('/:id', async function(req, res, next) {
           body: (appt.client_name || 'Walk-in') + pushStatuses[data.status],
           tag: 'appt-' + appt.id + '-' + data.status,
         }).catch(function() {});
+      }
+      // Automated SMS: no-show notification (non-blocking)
+      if (data.status === 'no_show') {
+        triggerNoShow(req.salon_id, appt).catch(function() {});
+      }
+      // Automated SMS: waitlist → pending transition (non-blocking)
+      if (data.status === 'pending' && existing.status === 'waitlisted') {
+        triggerWaitlist(req.salon_id, appt).catch(function() {});
       }
     }
     res.json({ appointment: appt });
@@ -410,7 +421,7 @@ router.delete('/:id', async function(req, res, next) {
   try {
     var existing = await prisma.appointment.findFirst({
       where: { id: req.params.id, salon_id: req.salon_id },
-      include: { service_lines: { select: { staff_id: true } } }
+      include: { service_lines: { select: { staff_id: true, service_name: true, starts_at: true, staff_name: true } } }
     });
     if (!existing) return res.status(404).json({ error: 'Appointment not found' });
 
@@ -437,6 +448,8 @@ router.delete('/:id', async function(req, res, next) {
       body: (existing.client_name || 'Walk-in') + ' — cancelled',
       tag: 'appt-del-' + existing.id,
     }).catch(function() {});
+    // Automated SMS: cancellation confirmation (non-blocking)
+    triggerCancelConfirm(req.salon_id, existing).catch(function() {});
     res.json({ appointment: appt });
   } catch (err) { next(err); }
 });
