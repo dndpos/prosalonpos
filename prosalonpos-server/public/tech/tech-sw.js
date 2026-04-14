@@ -61,6 +61,11 @@ self.addEventListener('notificationclick', function(event) {
   );
 });
 
+// ── Install — skip waiting so new SW activates immediately ──
+self.addEventListener('install', function(event) {
+  self.skipWaiting();
+});
+
 // ── Activate — immediately take control ──
 self.addEventListener('activate', function(event) {
   event.waitUntil(self.clients.claim());
