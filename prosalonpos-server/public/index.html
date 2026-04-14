@@ -40,8 +40,8 @@
         }
       });
     </script>
-    <script type="module" crossorigin src="/assets/index-D7W5NKcK.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BlPQxqtn.css">
+    <script type="module" crossorigin src="/assets/index-C_vxm-ro.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-0KuCkKqe.css">
   </head>
   <body>
     <div id="root"></div>
@@ -59,10 +59,14 @@
     </script>
     <!-- Build: C43-debug | Error handler moved to head for Safari crash visibility -->
     <script>
-      // Clean up any previously registered service workers (prevents stale cache)
+      // Clean up stale service workers BUT keep tech-sw.js (needed for push notifications on tech phones)
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function(regs) {
-          regs.forEach(function(reg) { reg.unregister(); });
+          regs.forEach(function(reg) {
+            // Keep the tech phone push notification service worker
+            if (reg.active && reg.active.scriptURL && reg.active.scriptURL.indexOf('tech-sw.js') !== -1) return;
+            reg.unregister();
+          });
         });
       }
     </script>

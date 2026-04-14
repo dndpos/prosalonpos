@@ -88,9 +88,9 @@ function generateIconSvg(salonName) {
 <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
 </defs>
 <rect width="192" height="192" rx="38" fill="url(#bg)"/>
-<text x="96" y="96" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="${fs}" font-weight="bold" fill="#ffffff">${esc(initials)}</text>
+<text x="96" y="88" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans,sans-serif" font-size="${fs}" font-weight="bold" fill="#ffffff">${esc(initials)}</text>
 <rect x="${pillX}" y="148" width="${pillW}" height="28" rx="14" fill="#1e40af"/>
-<text x="96" y="167" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="${labelSize}" font-weight="bold" fill="#dbeafe" letter-spacing="0.5">${esc(label)}</text>
+<text x="96" y="162" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans,sans-serif" font-size="${labelSize}" font-weight="bold" fill="#dbeafe" letter-spacing="0.5">${esc(label)}</text>
 </svg>`;
 }
 
@@ -119,8 +119,8 @@ function generateManifest(salonName, salonCode) {
     background_color: '#0B1220',
     theme_color: '#1E40AF',
     icons: [
-      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }
+      { src: '/tech-icon/' + salonCode + '.png', sizes: '192x192', type: 'image/png' },
+      { src: '/tech-icon/' + salonCode + '.png', sizes: '512x512', type: 'image/png' }
     ]
   }, null, 2);
 }
@@ -138,7 +138,8 @@ function generateTechHtml(salonName, salonCode) {
   html = html.replace(/content="SalonTech"/, 'content="' + esc(salonName) + '"');
   html = html.replace(/content="SalonPOS"/, 'content="' + esc(salonName) + '"');
   html = html.replace(/<title>[^<]*<\/title>/, '<title>' + esc(salonName) + '</title>');
-  html = html.replace(/href="\/icons\/icon-192\.png"/g, 'href="/icons/apple-touch-icon.png"');
+  // Point apple-touch-icon to dynamic salon-branded icon
+  html = html.replace(/href="\/icons\/icon-192\.png"/g, 'href="/tech-icon/' + salonCode + '.png"');
   // Inject iOS cache-busting meta tags right after <head> to prevent PWA stale cache
   var cacheMeta = '\n    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">'
     + '\n    <meta http-equiv="Pragma" content="no-cache">'
@@ -165,12 +166,12 @@ export default function registerTechPortalRoutes(app) {
     var png = await getIconPng(salon.name, salon.code);
     if (png) {
       res.set('Content-Type', 'image/png');
-      res.set('Cache-Control', 'public, max-age=86400');
+      res.set('Cache-Control', 'public, max-age=3600');
       res.send(png);
     } else {
       var svg = generateIconSvg(salon.name);
       res.set('Content-Type', 'image/svg+xml');
-      res.set('Cache-Control', 'public, max-age=86400');
+      res.set('Cache-Control', 'public, max-age=3600');
       res.send(svg);
     }
   });
