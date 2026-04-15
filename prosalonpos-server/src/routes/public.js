@@ -12,6 +12,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import prisma from '../config/database.js';
 import { getIO } from '../utils/emit.js';
+import { utcToSalonLocal, salonLocalToUtc } from '../utils/salonTime.js';
 
 var router = Router();
 
@@ -150,10 +151,11 @@ router.get('/salon/:salonCode/booking-data', async function(req, res, next) {
     var filteredCategories = categories.filter(function(cat) { return usedCatIds[cat.id]; });
 
     // Format today's appointments for client-side availability
+    // PROTECTED C62: convert starts_at to salon-local for frontend
     var todayServiceLines = todayAppts.map(function(sl) {
       return {
         staff_id: sl.staff_id,
-        starts_at: sl.starts_at.toISOString(),
+        starts_at: utcToSalonLocal(sl.starts_at),
         dur: sl.duration_minutes,
         requested: sl.appointment ? sl.appointment.requested : false,
       };
@@ -277,10 +279,11 @@ router.get('/salon/:salonCode/availability/:date', async function(req, res, next
       },
     });
 
+    // PROTECTED C62: convert starts_at to salon-local for frontend
     var result = serviceLines.map(function(sl) {
       return {
         staff_id: sl.staff_id,
-        starts_at: sl.starts_at.toISOString(),
+        starts_at: utcToSalonLocal(sl.starts_at),
         dur: sl.duration_minutes,
         requested: sl.appointment ? sl.appointment.requested : false,
       };

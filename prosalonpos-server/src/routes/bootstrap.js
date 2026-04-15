@@ -16,6 +16,7 @@
 import { Router } from 'express';
 import prisma from '../config/database.js';
 import { pinSha256 } from '../config/auth.js';
+import { utcToSalonLocal } from '../utils/salonTime.js';
 
 var router = Router();
 
@@ -253,8 +254,10 @@ router.get('/', async function(req, res, next) {
       services: services,
       categories: categories,
       settings: settings,
+      // PROTECTED C62: convert starts_at to salon-local (no timezone) for frontend
       serviceLines: serviceLines.map(function(sl) {
         var obj = Object.assign({}, sl);
+        obj.starts_at = utcToSalonLocal(sl.starts_at);
         if (sl.appointment) {
           obj.bookingId = sl.appointment.booking_group_id || null;
           obj.client_id = sl.appointment.client_id || null;
