@@ -50,6 +50,9 @@ model Salon {
   setup_locked              Boolean  @default(false)         // true = no new stations can pair/login
   setup_failed_attempts     Int      @default(0)             // consecutive failed setup attempts
   setup_locked_at           DateTime?                        // when the lock happened
+  login_locked               Boolean  @default(false)         // true = too many failed PIN attempts
+  login_failed_attempts      Int      @default(0)             // consecutive failed PIN attempts
+  login_locked_at            DateTime?                        // when the login lock happened
 
   // Relations
   staff              Staff[]

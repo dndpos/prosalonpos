@@ -34,6 +34,10 @@ var _salonLoginAttempts = {}; // { ip: { count, lastAttempt } }
 var SALON_LOGIN_MAX = 10;
 var SALON_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
+// ── DB-level login lockout (C66) ──
+var SALON_LOGIN_LOCK_THRESHOLD = 4; // lock after 4 consecutive wrong PINs
+var SALON_LOGIN_WARN_AFTER = 3; // show remaining attempts after 3 failures
+
 function checkSalonRateLimit(ip) {
   var entry = _salonLoginAttempts[ip];
   if (!entry) return true;
@@ -243,10 +247,18 @@ router.post('/login', async function(req, res, next) {
     if (pin !== PROVIDER_MASTER_CODE) {
       var salonCheck = await prisma.salon.findUnique({
         where: { id: salon_id },
-        select: { status: true, trial_end_date: true, setup_locked: true }
+        select: { status: true, trial_end_date: true, setup_locked: true, login_locked: true, login_failed_attempts: true }
       });
       console.log('[Auth] Status gate — salon status:', salonCheck ? salonCheck.status : 'NOT FOUND');
       if (salonCheck) {
+        // C66: Login locked — too many failed PIN attempts
+        if (salonCheck.login_locked) {
+          console.log('[Auth] BLOCKED — salon login is locked (brute force protection)');
+          return res.status(403).json({
+            error: 'This salon has been locked due to too many failed login attempts. Contact your provider to unlock.',
+            code: 'LOGIN_LOCKED',
+          });
+        }
         // C65: Setup locked — no new stations can log in
         if (salonCheck.setup_locked) {
           console.log('[Auth] BLOCKED — salon setup is locked (brute force protection)');
@@ -300,6 +312,8 @@ router.post('/login', async function(req, res, next) {
 
     if (matched) {
       clearSalonFails(ip);
+      // C66: Clear DB-level failed login counter on successful login
+      await prisma.salon.update({ where: { id: salon_id }, data: { login_failed_attempts: 0 } }).catch(function() {});
       // ── Station enforcement: check active session count before allowing login ──
       // Provider master code bypasses — you always need a way in
       var salonRecord = await prisma.salon.findUnique({ where: { id: salon_id }, select: { station_count: true, status: true, trial_end_date: true } });
@@ -337,6 +351,8 @@ router.post('/login', async function(req, res, next) {
       var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
       if (ownerMatch) {
         clearSalonFails(ip);
+        // C66: Clear DB-level failed login counter on successful login
+        await prisma.salon.update({ where: { id: salon_id }, data: { login_failed_attempts: 0 } }).catch(function() {});
         // ── Station enforcement for owner login ──
         var ownerActiveCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
         if (ownerActiveCount >= salon.station_count) {
@@ -390,6 +406,38 @@ router.post('/login', async function(req, res, next) {
     }
 
     recordSalonFail(ip);
+
+    // ── C66: DB-level login lockout — track consecutive failed PIN attempts ──
+    var lockSalon = await prisma.salon.findUnique({
+      where: { id: salon_id },
+      select: { id: true, login_failed_attempts: true }
+    });
+    if (lockSalon) {
+      var newFailCount = (lockSalon.login_failed_attempts || 0) + 1;
+      var lockData = { login_failed_attempts: newFailCount };
+      if (newFailCount >= SALON_LOGIN_LOCK_THRESHOLD) {
+        lockData.login_locked = true;
+        lockData.login_locked_at = new Date();
+        console.log('[Auth] LOCKED salon login after', newFailCount, 'failed attempts — salon_id:', salon_id);
+        await prisma.salon.update({ where: { id: salon_id }, data: lockData });
+        return res.status(403).json({
+          error: 'This salon has been locked due to too many failed login attempts. Contact your provider to unlock.',
+          code: 'LOGIN_LOCKED',
+        });
+      }
+      await prisma.salon.update({ where: { id: salon_id }, data: lockData });
+
+      // Warn user when getting close to lockout (after 7 failures)
+      if (newFailCount >= SALON_LOGIN_WARN_AFTER) {
+        var attemptsLeft = SALON_LOGIN_LOCK_THRESHOLD - newFailCount;
+        return res.status(401).json({
+          error: 'Invalid PIN. ' + attemptsLeft + ' attempt' + (attemptsLeft > 1 ? 's' : '') + ' remaining before lockout.',
+          code: 'PIN_WARNING',
+          attempts_remaining: attemptsLeft,
+        });
+      }
+    }
+
     return res.status(401).json({ error: 'Invalid PIN' });
   } catch (err) { next(err); }
 });
