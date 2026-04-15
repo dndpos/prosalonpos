@@ -17,7 +17,6 @@ import prisma from '../config/database.js';
 import { emit } from '../utils/emit.js';
 import { sendPushToStaffList } from '../utils/pushService.js';
 import { triggerBookingConfirm, triggerCancelConfirm, triggerNoShow, triggerWaitlist } from '../utils/autoMessaging.js';
-import { utcToSalonLocal, salonLocalToUtc } from '../utils/salonTime.js';
 
 var router = Router();
 
@@ -75,10 +74,8 @@ router.get('/service-lines', async function(req, res, next) {
     });
 
     // Flatten parent appointment fields onto each service line for calendar compatibility
-    // PROTECTED C62: convert UTC starts_at to salon-local (no timezone) for frontend
     var flat = lines.map(function(sl) {
       var obj = Object.assign({}, sl);
-      obj.starts_at = utcToSalonLocal(sl.starts_at);
       if (sl.appointment) {
         obj.bookingId = sl.appointment.booking_group_id || null;
         obj.client_id = sl.appointment.client_id || null;
@@ -114,11 +111,6 @@ router.get('/', async function(req, res, next) {
       take: 200
     });
 
-    // PROTECTED C62: convert starts_at to salon-local for frontend
-    appts.forEach(function(a) {
-      (a.service_lines || []).forEach(function(sl) { sl.starts_at = utcToSalonLocal(sl.starts_at); });
-    });
-
     res.json({ appointments: appts });
   } catch (err) { next(err); }
 });
@@ -131,11 +123,6 @@ router.get('/client/:clientId', async function(req, res, next) {
       include: { service_lines: true },
       orderBy: { created_at: 'desc' },
       take: 50
-    });
-
-    // PROTECTED C62: convert starts_at to salon-local for frontend
-    appts.forEach(function(a) {
-      (a.service_lines || []).forEach(function(sl) { sl.starts_at = utcToSalonLocal(sl.starts_at); });
     });
 
     res.json({ appointments: appts });
@@ -165,7 +152,7 @@ router.post('/', async function(req, res, next) {
             return {
               service_catalog_id: sl.service_catalog_id || null,
               staff_id: sl.staff_id,
-              starts_at: salonLocalToUtc(sl.starts_at),
+              starts_at: new Date(sl.starts_at),
               duration_minutes: sl.duration_minutes,
               calendar_color: sl.calendar_color || '#3B82F6',
               status: sl.status || data.status || 'pending',
@@ -195,8 +182,6 @@ router.post('/', async function(req, res, next) {
     }).catch(function() {});
     // Automated SMS: booking confirmation (non-blocking)
     triggerBookingConfirm(req.salon_id, appt, appt.service_lines).catch(function() {});
-    // PROTECTED C62: convert starts_at to salon-local for frontend
-    (appt.service_lines || []).forEach(function(sl) { sl.starts_at = utcToSalonLocal(sl.starts_at); });
     res.status(201).json({ appointment: appt });
   } catch (err) { next(err); }
 });
@@ -288,8 +273,6 @@ router.put('/:id', async function(req, res, next) {
         triggerWaitlist(req.salon_id, appt).catch(function() {});
       }
     }
-    // PROTECTED C62: convert starts_at to salon-local for frontend
-    (appt.service_lines || []).forEach(function(sl) { sl.starts_at = utcToSalonLocal(sl.starts_at); });
     res.json({ appointment: appt });
   } catch (err) { next(err); }
 });
@@ -313,7 +296,7 @@ router.put('/service-line/:id', async function(req, res, next) {
 
     fields.forEach(function(f) {
       if (data[f] !== undefined) {
-        updateData[f] = f === 'starts_at' ? salonLocalToUtc(data[f]) : data[f];
+        updateData[f] = f === 'starts_at' ? new Date(data[f]) : data[f];
       }
     });
 
@@ -429,9 +412,11 @@ router.put('/:id/service-lines', async function(req, res, next) {
     });
 
     emit(req, 'appointment:updated');
-    // PROTECTED C62: convert starts_at to salon-local for frontend
-    (appt.service_lines || []).forEach(function(sl) { sl.starts_at = utcToSalonLocal(sl.starts_at); });
     res.json({ appointment: appt });
+  } catch (err) { next(err); }
+});
+
+// ── DELETE /:id — Soft cancel (never hard delete) ──
 router.delete('/:id', async function(req, res, next) {
   try {
     var existing = await prisma.appointment.findFirst({
