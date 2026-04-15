@@ -29,34 +29,46 @@ function needsRehash(hash) {
   return rounds > 6;
 }
 
-// ── Per-IP rate limiting for salon login (C64) ──
-var _salonLoginAttempts = {}; // { ip: { count, lastAttempt } }
-var SALON_LOGIN_MAX = 10;
-var SALON_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+// ── Unified per-IP rate limiting for ALL auth endpoints (C66) ──
+// 5 wrong attempts from any IP → blocked for 30 minutes (auto-unlocks)
+// Covers: login, verify-setup, tech-login — any auth failure counts
+var _ipAttempts = {}; // { ip: { count, firstAttempt } }
+var IP_MAX_ATTEMPTS = 5;
+var IP_BLOCK_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+
+function checkIpBlocked(ip) {
+  var entry = _ipAttempts[ip];
+  if (!entry) return false; // not blocked
+  // Window expired — auto-unlock
+  if (Date.now() - entry.firstAttempt > IP_BLOCK_WINDOW_MS) {
+    delete _ipAttempts[ip];
+    return false;
+  }
+  return entry.count >= IP_MAX_ATTEMPTS; // blocked if 5+ failures
+}
+
+function getIpAttemptsRemaining(ip) {
+  var entry = _ipAttempts[ip];
+  if (!entry) return IP_MAX_ATTEMPTS;
+  if (Date.now() - entry.firstAttempt > IP_BLOCK_WINDOW_MS) {
+    delete _ipAttempts[ip];
+    return IP_MAX_ATTEMPTS;
+  }
+  return Math.max(0, IP_MAX_ATTEMPTS - entry.count);
+}
+
+function recordIpFail(ip) {
+  if (!_ipAttempts[ip]) _ipAttempts[ip] = { count: 0, firstAttempt: Date.now() };
+  _ipAttempts[ip].count++;
+}
+
+function clearIpFails(ip) {
+  delete _ipAttempts[ip];
+}
 
 // ── DB-level login lockout (C66) ──
 var SALON_LOGIN_LOCK_THRESHOLD = 4; // lock after 4 consecutive wrong PINs
 var SALON_LOGIN_WARN_AFTER = 3; // show remaining attempts after 3 failures
-
-function checkSalonRateLimit(ip) {
-  var entry = _salonLoginAttempts[ip];
-  if (!entry) return true;
-  if (Date.now() - entry.lastAttempt > SALON_LOGIN_WINDOW_MS) {
-    delete _salonLoginAttempts[ip];
-    return true;
-  }
-  return entry.count < SALON_LOGIN_MAX;
-}
-
-function recordSalonFail(ip) {
-  if (!_salonLoginAttempts[ip]) _salonLoginAttempts[ip] = { count: 0, lastAttempt: 0 };
-  _salonLoginAttempts[ip].count++;
-  _salonLoginAttempts[ip].lastAttempt = Date.now();
-}
-
-function clearSalonFails(ip) {
-  delete _salonLoginAttempts[ip];
-}
 
 var router = Router();
 
@@ -91,9 +103,15 @@ router.get('/salon/:code', async function(req, res, next) {
 // Existing logged-in stations keep working, but no NEW stations can pair or log in.
 router.post('/verify-setup', async function(req, res, next) {
   try {
+    var ip = req.ip || req.connection.remoteAddress || 'unknown';
     var { email, salon_code } = req.body;
     if (!email || !salon_code) {
       return res.status(400).json({ error: 'Email and salon code are required' });
+    }
+
+    // C66: Unified IP block check
+    if (checkIpBlocked(ip)) {
+      return res.status(429).json({ error: 'Too many failed attempts. This device is temporarily blocked. Try again in 30 minutes.' });
     }
 
     var code = salon_code.trim().toUpperCase();
@@ -104,6 +122,7 @@ router.post('/verify-setup', async function(req, res, next) {
     });
 
     if (!salon) {
+      recordIpFail(ip);
       return res.status(404).json({ error: 'Salon not found. Check the code and try again.' });
     }
 
@@ -119,6 +138,7 @@ router.post('/verify-setup', async function(req, res, next) {
     var salonEmail = (salon.owner_email || '').trim().toLowerCase();
     if (!salonEmail || salonEmail !== emailLower) {
       // Wrong email — increment failed attempts
+      recordIpFail(ip);
       var newAttempts = (salon.setup_failed_attempts || 0) + 1;
       var shouldLock = newAttempts >= 5;
 
@@ -237,9 +257,9 @@ router.post('/login', async function(req, res, next) {
       return res.status(400).json({ error: 'salon_id and pin are required' });
     }
 
-    // Per-IP rate limit check (C64)
-    if (!checkSalonRateLimit(ip)) {
-      return res.status(429).json({ error: 'Too many login attempts. Try again in 15 minutes.' });
+    // C66: Unified IP block check — 5 wrong attempts from any auth endpoint → 30 min block
+    if (checkIpBlocked(ip)) {
+      return res.status(429).json({ error: 'Too many failed attempts. This device is temporarily blocked. Try again in 30 minutes.' });
     }
 
     // ── Salon status + trial expiration check ──
@@ -311,7 +331,7 @@ router.post('/login', async function(req, res, next) {
     }
 
     if (matched) {
-      clearSalonFails(ip);
+      clearIpFails(ip);
       // C66: Clear DB-level failed login counter on successful login
       await prisma.salon.update({ where: { id: salon_id }, data: { login_failed_attempts: 0 } }).catch(function() {});
       // ── Station enforcement: check active session count before allowing login ──
@@ -350,7 +370,7 @@ router.post('/login', async function(req, res, next) {
     if (salon && salon.owner_pin_hash) {
       var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
       if (ownerMatch) {
-        clearSalonFails(ip);
+        clearIpFails(ip);
         // C66: Clear DB-level failed login counter on successful login
         await prisma.salon.update({ where: { id: salon_id }, data: { login_failed_attempts: 0 } }).catch(function() {});
         // ── Station enforcement for owner login ──
@@ -405,7 +425,7 @@ router.post('/login', async function(req, res, next) {
       });
     }
 
-    recordSalonFail(ip);
+    recordIpFail(ip);
 
     // ── C66: DB-level login lockout — track consecutive failed PIN attempts ──
     var lockSalon = await prisma.salon.findUnique({
@@ -568,38 +588,16 @@ router.put('/owner-pin', async function(req, res, next) {
 
 // ════════════════════════════════════════════
 // TECH PHONE LOGIN — display name + PIN → JWT
-// Rate limited: 5 failed attempts per IP = 15 min lockout
+// C66: Uses unified IP blocker (5 attempts / 30 min)
 // ════════════════════════════════════════════
-var _techLoginAttempts = {}; // { ip: { count, lastAttempt } }
-var TECH_LOGIN_MAX = 5;
-var TECH_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-
-function checkTechRateLimit(ip) {
-  var entry = _techLoginAttempts[ip];
-  if (!entry) return true;
-  if (Date.now() - entry.lastAttempt > TECH_LOGIN_WINDOW_MS) {
-    delete _techLoginAttempts[ip];
-    return true;
-  }
-  return entry.count < TECH_LOGIN_MAX;
-}
-
-function recordTechFail(ip) {
-  if (!_techLoginAttempts[ip]) _techLoginAttempts[ip] = { count: 0, lastAttempt: 0 };
-  _techLoginAttempts[ip].count++;
-  _techLoginAttempts[ip].lastAttempt = Date.now();
-}
-
-function clearTechFails(ip) {
-  delete _techLoginAttempts[ip];
-}
 
 router.post('/tech-login', async function(req, res, next) {
   try {
     var ip = req.ip || req.connection.remoteAddress || 'unknown';
 
-    if (!checkTechRateLimit(ip)) {
-      return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+    // C66: Unified IP block check
+    if (checkIpBlocked(ip)) {
+      return res.status(429).json({ error: 'Too many failed attempts. This device is temporarily blocked. Try again in 30 minutes.' });
     }
 
     var { name, pin, salon_code } = req.body;
@@ -626,7 +624,7 @@ router.post('/tech-login', async function(req, res, next) {
     });
 
     if (matches.length === 0) {
-      recordTechFail(ip);
+      recordIpFail(ip);
       return res.status(401).json({ error: 'Name not found. Use the name your salon has on file.' });
     }
 
@@ -638,9 +636,12 @@ router.post('/tech-login', async function(req, res, next) {
     }
 
     if (!staff) {
-      recordTechFail(ip);
-      var remaining = TECH_LOGIN_MAX - ((_techLoginAttempts[ip] || {}).count || 0);
-      return res.status(401).json({ error: 'Incorrect PIN. ' + (remaining > 0 ? remaining + ' attempts remaining.' : 'Account locked for 15 minutes.') });
+      recordIpFail(ip);
+      var remaining = getIpAttemptsRemaining(ip);
+      if (remaining <= 0) {
+        return res.status(429).json({ error: 'Too many failed attempts. This device is temporarily blocked. Try again in 30 minutes.' });
+      }
+      return res.status(401).json({ error: 'Incorrect PIN. ' + remaining + ' attempt' + (remaining > 1 ? 's' : '') + ' remaining.' });
     }
 
     // Check salon status
@@ -660,7 +661,7 @@ router.post('/tech-login', async function(req, res, next) {
     }
 
     // Success — clear rate limit and create JWT
-    clearTechFails(ip);
+    clearIpFails(ip);
 
     var tokenPayload = {
       staff_id: staff.id,
