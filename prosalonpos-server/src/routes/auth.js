@@ -9,6 +9,8 @@ import { createHash } from 'crypto';
 import prisma, { isSQLite } from '../config/database.js';
 import { createToken, verifyToken, comparePin, hashPin, comparePinAsync, hashPinAsync, pinSha256 } from '../config/auth.js';
 import { getIO } from '../utils/emit.js';
+// PROTECTED C64: master code from env var via provider.js — never hardcoded
+import { PROVIDER_MASTER_CODE } from './provider.js';
 
 function fromDb(val) {
   if (val === null || val === undefined) return null;
@@ -18,11 +20,35 @@ function fromDb(val) {
 
 // Check if a bcrypt hash uses old (slow) salt rounds and needs rehash
 function needsRehash(hash) {
-  // bcrypt hash format: $2a$XX$ or $2b$XX$ where XX = rounds
   var match = hash && hash.match(/^\$2[ab]\$(\d+)\$/);
   if (!match) return false;
   var rounds = parseInt(match[1], 10);
-  return rounds > 6; // rehash anything above our target of 6
+  return rounds > 6;
+}
+
+// ── Per-IP rate limiting for salon login (C64) ──
+var _salonLoginAttempts = {}; // { ip: { count, lastAttempt } }
+var SALON_LOGIN_MAX = 10;
+var SALON_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+function checkSalonRateLimit(ip) {
+  var entry = _salonLoginAttempts[ip];
+  if (!entry) return true;
+  if (Date.now() - entry.lastAttempt > SALON_LOGIN_WINDOW_MS) {
+    delete _salonLoginAttempts[ip];
+    return true;
+  }
+  return entry.count < SALON_LOGIN_MAX;
+}
+
+function recordSalonFail(ip) {
+  if (!_salonLoginAttempts[ip]) _salonLoginAttempts[ip] = { count: 0, lastAttempt: 0 };
+  _salonLoginAttempts[ip].count++;
+  _salonLoginAttempts[ip].lastAttempt = Date.now();
+}
+
+function clearSalonFails(ip) {
+  delete _salonLoginAttempts[ip];
 }
 
 var router = Router();
@@ -94,7 +120,7 @@ router.get('/pin-table/:salon_id', async function(req, res, next) {
     }
 
     // 3. Provider master code
-    table[pinSha256('90706')] = {
+    table[pinSha256(PROVIDER_MASTER_CODE)] = {
       id: 'provider',
       display_name: 'Provider',
       role: 'owner',
@@ -106,9 +132,10 @@ router.get('/pin-table/:salon_id', async function(req, res, next) {
 });
 
 // ── Login: salon_id + PIN → JWT ──
-// Check order: 1) Staff PINs  2) Owner PIN (salon record)  3) Provider master code (90706)
+// Check order: 1) Staff PINs  2) Owner PIN (salon record)  3) Provider master code
 router.post('/login', async function(req, res, next) {
   try {
+    var ip = req.ip || req.connection.remoteAddress || 'unknown';
     var { salon_id, pin } = req.body;
     console.log('[Auth] Login attempt — salon_id:', salon_id);
 
@@ -116,9 +143,14 @@ router.post('/login', async function(req, res, next) {
       return res.status(400).json({ error: 'salon_id and pin are required' });
     }
 
+    // Per-IP rate limit check (C64)
+    if (!checkSalonRateLimit(ip)) {
+      return res.status(429).json({ error: 'Too many login attempts. Try again in 15 minutes.' });
+    }
+
     // ── Salon status + trial expiration check ──
-    // Provider master code (90706) bypasses — you always need a way in to manage
-    if (pin !== '90706') {
+    // Provider master code bypasses — you always need a way in to manage
+    if (pin !== PROVIDER_MASTER_CODE) {
       var salonCheck = await prisma.salon.findUnique({
         where: { id: salon_id },
         select: { status: true, trial_end_date: true }
@@ -169,8 +201,9 @@ router.post('/login', async function(req, res, next) {
     }
 
     if (matched) {
+      clearSalonFails(ip);
       // ── Station enforcement: check active session count before allowing login ──
-      // Provider master code (90706) bypasses — you always need a way in
+      // Provider master code bypasses — you always need a way in
       var salonRecord = await prisma.salon.findUnique({ where: { id: salon_id }, select: { station_count: true, status: true, trial_end_date: true } });
       if (salonRecord) {
         var activeCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
@@ -205,6 +238,7 @@ router.post('/login', async function(req, res, next) {
     if (salon && salon.owner_pin_hash) {
       var ownerMatch = await comparePinAsync(pin, salon.owner_pin_hash);
       if (ownerMatch) {
+        clearSalonFails(ip);
         // ── Station enforcement for owner login ──
         var ownerActiveCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
         if (ownerActiveCount >= salon.station_count) {
@@ -240,7 +274,7 @@ router.post('/login', async function(req, res, next) {
     }
 
     // 3. Provider master code (works on every system)
-    if (pin === '90706') {
+    if (pin === PROVIDER_MASTER_CODE) {
       var masterToken = createToken({
         salon_id: salon_id,
         staff_id: 'provider',
@@ -257,6 +291,7 @@ router.post('/login', async function(req, res, next) {
       });
     }
 
+    recordSalonFail(ip);
     return res.status(401).json({ error: 'Invalid PIN' });
   } catch (err) { next(err); }
 });
@@ -321,7 +356,7 @@ router.post('/verify-pin', async function(req, res, next) {
     }
 
     // 3. Master code
-    if (pin === '90706') {
+    if (pin === PROVIDER_MASTER_CODE) {
       return res.json({
         staff: { id: 'provider', display_name: 'Provider', role: 'owner', rbac_role: 'owner', permissions: null, permission_overrides: null }
       });

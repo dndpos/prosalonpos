@@ -7,6 +7,8 @@ import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
 import { hashPin, comparePin, comparePinAsync, hashPinAsync, pinSha256 } from '../config/auth.js';
 import { emit } from '../utils/emit.js';
+// PROTECTED C64: master code from env var via provider.js
+import { PROVIDER_MASTER_CODE } from './provider.js';
 
 // SQLite stores JSON fields as strings — stringify objects before writing
 var JSON_FIELDS = ['category_commission_rates', 'permission_overrides', 'permissions', 'schedule'];
@@ -419,7 +421,7 @@ router.post('/verify-any-pin', async function(req, res, next) {
     }
 
     // 4. Provider master code
-    if (pin === '90706') {
+    if (pin === PROVIDER_MASTER_CODE) {
       return res.json({
         valid: true,
         staff: {

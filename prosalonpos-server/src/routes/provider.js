@@ -1,7 +1,11 @@
 /**
  * ProSalonPOS — Provider Admin Routes
- * ISO-level management: salons, agents, billing, audit, notes.
+ * ISO-level management: salons, notes, audit.
  * Auth: /auth/login is public. All other endpoints require provider JWT.
+ *
+ * C64: Removed agent CRUD and billing CRUD (unused).
+ * C64: Added per-IP rate limiting to provider login (5 attempts / 15 min).
+ * C64: Provider master code now reads from PROVIDER_MASTER_CODE env var.
  */
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
@@ -21,22 +25,58 @@ function fromDb(val) {
   return val;
 }
 
+// ── Provider master code — env var or default ──
+// PROTECTED C64: master code from env var, never hardcoded in production
+var PROVIDER_MASTER_CODE = process.env.PROVIDER_MASTER_CODE || '90706';
+
 var router = Router();
 
 // ════════════════════════════════════════════
 // AUTH (public — no middleware)
+// Rate limited: 5 failed attempts per IP = 15 min lockout
 // ════════════════════════════════════════════
 
-// ── POST /auth/login — Provider owner or agent PIN login ──
+var _providerLoginAttempts = {}; // { ip: { count, lastAttempt } }
+var PROVIDER_LOGIN_MAX = 5;
+var PROVIDER_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+function checkProviderRateLimit(ip) {
+  var entry = _providerLoginAttempts[ip];
+  if (!entry) return true;
+  if (Date.now() - entry.lastAttempt > PROVIDER_LOGIN_WINDOW_MS) {
+    delete _providerLoginAttempts[ip];
+    return true;
+  }
+  return entry.count < PROVIDER_LOGIN_MAX;
+}
+
+function recordProviderFail(ip) {
+  if (!_providerLoginAttempts[ip]) _providerLoginAttempts[ip] = { count: 0, lastAttempt: 0 };
+  _providerLoginAttempts[ip].count++;
+  _providerLoginAttempts[ip].lastAttempt = Date.now();
+}
+
+function clearProviderFails(ip) {
+  delete _providerLoginAttempts[ip];
+}
+
+// ── POST /auth/login — Provider owner PIN login ──
 router.post('/auth/login', async function(req, res, next) {
   try {
+    var ip = req.ip || req.connection.remoteAddress || 'unknown';
+
+    if (!checkProviderRateLimit(ip)) {
+      return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+    }
+
     var pin = req.body.pin;
     if (!pin) return res.status(400).json({ error: 'PIN is required' });
 
-    // Try provider owner first
+    // Try provider owner
     var owners = await prisma.providerOwner.findMany();
     for (var i = 0; i < owners.length; i++) {
       if (comparePin(pin, owners[i].pin_hash)) {
+        clearProviderFails(ip);
         var token = createToken({
           provider_id: owners[i].id,
           provider_role: 'owner',
@@ -53,30 +93,12 @@ router.post('/auth/login', async function(req, res, next) {
       }
     }
 
-    // Try agents
-    var agents = await prisma.providerAgent.findMany({
-      where: { active: true }
+    // No match
+    recordProviderFail(ip);
+    var remaining = PROVIDER_LOGIN_MAX - ((_providerLoginAttempts[ip] || {}).count || 0);
+    return res.status(401).json({
+      error: 'Invalid PIN.' + (remaining > 0 ? ' ' + remaining + ' attempts remaining.' : ' Account locked for 15 minutes.')
     });
-    for (var j = 0; j < agents.length; j++) {
-      if (comparePin(pin, agents[j].pin_hash)) {
-        var agentToken = createToken({
-          provider_id: agents[j].id,
-          provider_role: agents[j].role,
-        });
-        return res.json({
-          token: agentToken,
-          user: {
-            id: agents[j].id,
-            name: agents[j].name,
-            email: agents[j].email,
-            role: agents[j].role,
-            visibility: agents[j].visibility,
-          }
-        });
-      }
-    }
-
-    return res.status(401).json({ error: 'Invalid PIN' });
   } catch (err) { next(err); }
 });
 
@@ -110,31 +132,15 @@ function formatProviderSalon(s) {
     monthly_software_fee_cents: s.monthly_software_fee_cents,
     signup_date: s.signup_date,
     trial_end_date: s.trial_end_date,
-    assigned_agent_id: s.assigned_agent_id,
     features_enabled: fromDb(s.features_enabled),
     created_at: s.created_at,
   };
 }
 
-// ── GET /salons — List salons (filtered by agent visibility) ──
+// ── GET /salons — List salons ──
 router.get('/salons', async function(req, res, next) {
   try {
-    var where = {};
-
-    // If agent with "assigned" visibility, only show their salons
-    if (req.provider_role !== 'owner') {
-      var agent = await prisma.providerAgent.findUnique({
-        where: { id: req.provider_id },
-        include: { assigned_salons: { select: { id: true } } }
-      });
-      if (agent && agent.visibility === 'assigned') {
-        var salonIds = agent.assigned_salons.map(function(s) { return s.id; });
-        where.id = { in: salonIds };
-      }
-    }
-
     var salons = await prisma.salon.findMany({
-      where: where,
       orderBy: { name: 'asc' }
     });
 
@@ -210,14 +216,10 @@ router.delete('/salons/:id/sessions/:sessionId', async function(req, res, next) 
   } catch (err) { next(err); }
 });
 
-// ── POST /salons — Create a new salon (owner + sales agents) ──
+// ── POST /salons — Create a new salon ──
 // Creates: Salon + SalonSettings + owner Staff record (full onboarding)
 router.post('/salons', async function(req, res, next) {
   try {
-    if (req.provider_role === 'support') {
-      return res.status(403).json({ error: 'Support agents cannot create salons' });
-    }
-
     var d = req.body;
 
     // Generate license key
@@ -238,7 +240,6 @@ router.post('/salons', async function(req, res, next) {
     // Check salon code uniqueness
     var existing = await prisma.salon.findUnique({ where: { salon_code: salonCode } });
     if (existing) {
-      // Regenerate once if collision
       salonCode = '';
       for (var ci2 = 0; ci2 < 6; ci2++) salonCode += 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)];
     }
@@ -263,7 +264,6 @@ router.post('/salons', async function(req, res, next) {
 
     // Use a transaction to create Salon + SalonSettings + owner Staff atomically
     var result = await prisma.$transaction(async function(tx) {
-      // 1. Create the Salon
       var salon = await tx.salon.create({
         data: {
           name: d.name || 'New Salon',
@@ -282,7 +282,6 @@ router.post('/salons', async function(req, res, next) {
           monthly_software_fee_cents: d.monthly_software_fee_cents || feeMap[tier] || 7900,
           signup_date: new Date(),
           trial_end_date: d.status === 'trial' ? new Date(Date.now() + 30 * 86400000) : null,
-          assigned_agent_id: d.assigned_agent_id || (req.provider_role !== 'owner' ? req.provider_id : null),
           features_enabled: toDb(features),
           owner_pin_hash: ownerPinHash,
           owner_pin_sha256: ownerPinSha,
@@ -290,7 +289,6 @@ router.post('/salons', async function(req, res, next) {
         }
       });
 
-      // 2. Create default SalonSettings
       await tx.salonSettings.create({
         data: {
           salon_id: salon.id,
@@ -307,35 +305,23 @@ router.post('/salons', async function(req, res, next) {
             opening_time: '09:00',
             closing_time: '19:00',
             clearance_required: {
-              void_ticket: true,
-              process_refunds: true,
-              view_tickets: true,
-              salon_settings: true,
-              staff_management: true,
-              service_catalog: true,
-              payroll: true,
-              bill_pay: true,
-              reports: true,
-              inventory: true,
-              online_booking_settings: true,
-              packages_management: true,
-              delete_cancel_appointments: true,
-              delete_clients: true,
-              gift_card_management: true,
-              loyalty_membership: true,
-              edit_timesheets: true,
-              view_timesheet_reports: true,
+              void_ticket: true, process_refunds: true, view_tickets: true,
+              salon_settings: true, staff_management: true, service_catalog: true,
+              payroll: true, bill_pay: true, reports: true, inventory: true,
+              online_booking_settings: true, packages_management: true,
+              delete_cancel_appointments: true, delete_clients: true,
+              gift_card_management: true, loyalty_membership: true,
+              edit_timesheets: true, view_timesheet_reports: true,
             },
           }
         }
       });
 
-      // 3. Create owner Staff record (so the salon owner can log in)
       var ownerDisplayName = d.owner_name || 'Owner';
       await tx.staff.create({
         data: {
           salon_id: salon.id,
-          display_name: ownerDisplayName.split(' ')[0], // First name only for display
+          display_name: ownerDisplayName.split(' ')[0],
           role: 'owner',
           rbac_role: 'owner',
           pin_hash: ownerPinHash,
@@ -349,12 +335,10 @@ router.post('/salons', async function(req, res, next) {
       return salon;
     });
 
-    // Audit
     await addAudit(req, 'salon_created', 'Created salon account: ' + result.name + ' (code: ' + salonCode + ')', result.id);
 
-    // Return salon data + the generated owner PIN for display
     var formatted = formatProviderSalon(result);
-    formatted.owner_pin = ownerPin; // Only returned at creation time
+    formatted.owner_pin = ownerPin;
     res.status(201).json({ salon: formatted });
   } catch (err) { next(err); }
 });
@@ -371,17 +355,11 @@ router.put('/salons/:id', async function(req, res, next) {
       'owner_name', 'owner_phone', 'owner_email',
       'status', 'plan_tier', 'station_count', 'salon_code',
       'processing_rate', 'monthly_software_fee_cents',
-      'trial_end_date', 'assigned_agent_id', 'features_enabled'];
+      'trial_end_date', 'features_enabled'];
 
     fields.forEach(function(f) {
       if (d[f] !== undefined) updateData[f] = f === 'features_enabled' ? toDb(d[f]) : d[f];
     });
-
-    // Only owner can change processing rate and monthly fee
-    if (req.provider_role !== 'owner') {
-      delete updateData.processing_rate;
-      delete updateData.monthly_software_fee_cents;
-    }
 
     updateData.version = { increment: 1 };
 
@@ -392,14 +370,12 @@ router.put('/salons/:id', async function(req, res, next) {
 
     await addAudit(req, 'salon_updated', 'Updated salon details: ' + salon.name, salon.id);
 
-    // If status changed to suspended, force-logout all active sessions for this salon
     if (updateData.status === 'suspended') {
       var io = getIO();
       if (io) {
         io.to('salon:' + salon.id).emit('force-logout', { reason: 'This salon account has been suspended.' });
         console.log('[Provider] Force-logout broadcast sent to salon:', salon.name);
       }
-      // Clear all active sessions for this salon
       await prisma.activeSession.deleteMany({ where: { salon_id: salon.id } }).catch(function() {});
     }
 
@@ -423,7 +399,6 @@ router.put('/salons/:id/features', async function(req, res, next) {
       data: { features_enabled: toDb(features), version: { increment: 1 } }
     });
 
-    // Log which features changed
     var oldFeats = fromDb(existing.features_enabled) || [];
     var added = features.filter(function(f) { return oldFeats.indexOf(f) < 0; });
     var removed = oldFeats.filter(function(f) { return features.indexOf(f) < 0; });
@@ -456,7 +431,6 @@ router.put('/salons/:id/status', async function(req, res, next) {
 });
 
 // ── DELETE /salons/:id — Permanently delete a salon and all related data ──
-// Owner only. Cascade deletes all records for this salon.
 router.delete('/salons/:id', requireOwner, async function(req, res, next) {
   try {
     var existing = await prisma.salon.findUnique({ where: { id: req.params.id } });
@@ -465,70 +439,50 @@ router.delete('/salons/:id', requireOwner, async function(req, res, next) {
     var salonId = existing.id;
     var salonName = existing.name;
 
-    // Cascade delete using raw SQL for reliability.
-    // Prisma deleteMany doesn't support nested relation filters, and not all
-    // child tables have onDelete:Cascade. Raw SQL with subqueries is bulletproof.
     await prisma.$transaction(async function(tx) {
       var s = salonId;
-      // Package system (no cascade on redemptions)
       await tx.$executeRawUnsafe('DELETE FROM "PackageRedemption" WHERE client_package_id IN (SELECT id FROM "ClientPackage" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "ClientPackageItem" WHERE client_package_id IN (SELECT id FROM "ClientPackage" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "ClientPackage" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "ServicePackageItem" WHERE package_id IN (SELECT id FROM "ServicePackage" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "ServicePackage" WHERE salon_id = $1', s);
-      // Tickets
       await tx.$executeRawUnsafe('DELETE FROM "TicketItem" WHERE ticket_id IN (SELECT id FROM "Ticket" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "TicketPayment" WHERE ticket_id IN (SELECT id FROM "Ticket" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "Ticket" WHERE salon_id = $1', s);
-      // Appointments + service lines
       await tx.$executeRawUnsafe('DELETE FROM "ServiceLine" WHERE appointment_id IN (SELECT id FROM "Appointment" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "Appointment" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "BlockedTime" WHERE salon_id = $1', s);
-      // Gift cards
       await tx.$executeRawUnsafe('DELETE FROM "GiftCardTransaction" WHERE gift_card_id IN (SELECT id FROM "GiftCard" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "GiftCard" WHERE salon_id = $1', s);
-      // Loyalty
       await tx.$executeRawUnsafe('DELETE FROM "LoyaltyTransaction" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "LoyaltyAccount" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "LoyaltyReward" WHERE program_id IN (SELECT id FROM "LoyaltyProgram" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "LoyaltyTier" WHERE program_id IN (SELECT id FROM "LoyaltyProgram" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "LoyaltyProgram" WHERE salon_id = $1', s);
-      // Memberships
       await tx.$executeRawUnsafe('DELETE FROM "MembershipPerk" WHERE plan_id IN (SELECT id FROM "MembershipPlan" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "MembershipAccount" WHERE plan_id IN (SELECT id FROM "MembershipPlan" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "MembershipPlan" WHERE salon_id = $1', s);
-      // Commission
       await tx.$executeRawUnsafe('DELETE FROM "CommissionTier" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "CommissionRule" WHERE salon_id = $1', s);
-      // Timeclock
       await tx.$executeRawUnsafe('DELETE FROM "PunchAuditLog" WHERE punch_id IN (SELECT id FROM "ClockPunch" WHERE staff_id IN (SELECT id FROM "Staff" WHERE salon_id = $1))', s);
       await tx.$executeRawUnsafe('DELETE FROM "ClockPunch" WHERE staff_id IN (SELECT id FROM "Staff" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "StaffPresence" WHERE salon_id = $1', s);
-      // Messaging
       await tx.$executeRawUnsafe('DELETE FROM "MessageLogEntry" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "MessageTemplate" WHERE salon_id = $1', s);
-      // Services + junction tables
       await tx.$executeRawUnsafe('DELETE FROM "ServiceCatalogCategory" WHERE service_catalog_id IN (SELECT id FROM "ServiceCatalog" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "ServiceStaffAssignment" WHERE service_catalog_id IN (SELECT id FROM "ServiceCatalog" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "CategoryStaffAssignment" WHERE category_id IN (SELECT id FROM "ServiceCategory" WHERE salon_id = $1)', s);
       await tx.$executeRawUnsafe('DELETE FROM "ServiceCatalog" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "ServiceCategory" WHERE salon_id = $1', s);
-      // Products
       await tx.$executeRawUnsafe('DELETE FROM "Product" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "ProductCategory" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "Supplier" WHERE salon_id = $1', s);
-      // Clients
       await tx.$executeRawUnsafe('DELETE FROM "Client" WHERE salon_id = $1', s);
-      // Staff
       await tx.$executeRawUnsafe('DELETE FROM "Staff" WHERE salon_id = $1', s);
-      // Settings
       await tx.$executeRawUnsafe('DELETE FROM "SalonSettings" WHERE salon_id = $1', s);
-      // Active sessions
       await tx.$executeRawUnsafe('DELETE FROM "ActiveSession" WHERE salon_id = $1', s);
-      // Provider records
       await tx.$executeRawUnsafe('DELETE FROM "ProviderSalonNote" WHERE salon_id = $1', s);
       await tx.$executeRawUnsafe('DELETE FROM "ProviderBillingRecord" WHERE salon_id = $1', s);
-      // Finally: the salon
       await tx.$executeRawUnsafe('DELETE FROM "Salon" WHERE id = $1', s);
     }, { timeout: 30000 });
 
@@ -538,111 +492,9 @@ router.delete('/salons/:id', requireOwner, async function(req, res, next) {
 });
 
 // ════════════════════════════════════════════
-// AGENTS (owner only for create/update/delete)
-// ════════════════════════════════════════════
-
-// ── GET /agents — List all agents ──
-router.get('/agents', requireOwner, async function(req, res, next) {
-  try {
-    var agents = await prisma.providerAgent.findMany({
-      include: { assigned_salons: { select: { id: true, name: true } } },
-      orderBy: { name: 'asc' }
-    });
-    var safe = agents.map(function(a) {
-      var copy = Object.assign({}, a);
-      delete copy.pin_hash;
-      copy.assigned_salon_ids = a.assigned_salons.map(function(s) { return s.id; });
-      return copy;
-    });
-    res.json({ agents: safe });
-  } catch (err) { next(err); }
-});
-
-// ── GET /agents/:id — Single agent ──
-router.get('/agents/:id', requireOwner, async function(req, res, next) {
-  try {
-    var agent = await prisma.providerAgent.findUnique({
-      where: { id: req.params.id },
-      include: { assigned_salons: { select: { id: true, name: true } } }
-    });
-    if (!agent) return res.status(404).json({ error: 'Agent not found' });
-    delete agent.pin_hash;
-    agent.assigned_salon_ids = agent.assigned_salons.map(function(s) { return s.id; });
-    res.json({ agent: agent });
-  } catch (err) { next(err); }
-});
-
-// ── POST /agents — Create agent ──
-router.post('/agents', requireOwner, async function(req, res, next) {
-  try {
-    var d = req.body;
-    var agent = await prisma.providerAgent.create({
-      data: {
-        name: d.name || 'New Agent',
-        email: d.email || null,
-        pin_hash: hashPin(d.pin || String(Math.floor(1000 + Math.random() * 9000))),
-        role: d.role || 'support',
-        visibility: d.visibility || 'assigned',
-        active: d.active !== false,
-      }
-    });
-
-    await addAudit(req, 'agent_created', 'Created agent: ' + agent.name + ' (' + agent.role + ')', null);
-    delete agent.pin_hash;
-    res.status(201).json({ agent: agent });
-  } catch (err) { next(err); }
-});
-
-// ── PUT /agents/:id — Update agent ──
-router.put('/agents/:id', requireOwner, async function(req, res, next) {
-  try {
-    var existing = await prisma.providerAgent.findUnique({ where: { id: req.params.id } });
-    if (!existing) return res.status(404).json({ error: 'Agent not found' });
-
-    var d = req.body;
-    var updateData = {};
-    var fields = ['name', 'email', 'role', 'visibility', 'active'];
-    fields.forEach(function(f) {
-      if (d[f] !== undefined) updateData[f] = d[f];
-    });
-
-    if (d.pin) {
-      updateData.pin_hash = hashPin(d.pin);
-    }
-
-    var agent = await prisma.providerAgent.update({
-      where: { id: req.params.id },
-      data: updateData
-    });
-
-    await addAudit(req, 'agent_updated', 'Updated agent: ' + agent.name + ' (' + agent.role + ')', null);
-    delete agent.pin_hash;
-    res.json({ agent: agent });
-  } catch (err) { next(err); }
-});
-
-// ── DELETE /agents/:id — Deactivate agent ──
-router.delete('/agents/:id', requireOwner, async function(req, res, next) {
-  try {
-    var existing = await prisma.providerAgent.findUnique({ where: { id: req.params.id } });
-    if (!existing) return res.status(404).json({ error: 'Agent not found' });
-
-    var agent = await prisma.providerAgent.update({
-      where: { id: req.params.id },
-      data: { active: false }
-    });
-
-    await addAudit(req, 'agent_updated', 'Deactivated agent: ' + agent.name, null);
-    delete agent.pin_hash;
-    res.json({ agent: agent });
-  } catch (err) { next(err); }
-});
-
-// ════════════════════════════════════════════
 // SALON NOTES
 // ════════════════════════════════════════════
 
-// ── GET /salons/:id/notes — Notes for a salon ──
 router.get('/salons/:id/notes', async function(req, res, next) {
   try {
     var notes = await prisma.providerSalonNote.findMany({
@@ -653,21 +505,14 @@ router.get('/salons/:id/notes', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── POST /salons/:id/notes — Add a note ──
 router.post('/salons/:id/notes', async function(req, res, next) {
   try {
     var salon = await prisma.salon.findUnique({ where: { id: req.params.id } });
     if (!salon) return res.status(404).json({ error: 'Salon not found' });
 
-    // Look up the actor's name
     var actorName = 'Unknown';
-    if (req.provider_role === 'owner') {
-      var owner = await prisma.providerOwner.findUnique({ where: { id: req.provider_id } });
-      if (owner) actorName = owner.name;
-    } else {
-      var agent = await prisma.providerAgent.findUnique({ where: { id: req.provider_id } });
-      if (agent) actorName = agent.name;
-    }
+    var owner = await prisma.providerOwner.findUnique({ where: { id: req.provider_id } });
+    if (owner) actorName = owner.name;
 
     var note = await prisma.providerSalonNote.create({
       data: {
@@ -686,72 +531,13 @@ router.post('/salons/:id/notes', async function(req, res, next) {
 });
 
 // ════════════════════════════════════════════
-// BILLING (owner only)
-// ════════════════════════════════════════════
-
-// ── GET /billing — All billing records ──
-router.get('/billing', requireOwner, async function(req, res, next) {
-  try {
-    var where = {};
-    if (req.query.salon_id) where.salon_id = req.query.salon_id;
-    if (req.query.status) where.status = req.query.status;
-
-    var records = await prisma.providerBillingRecord.findMany({
-      where: where,
-      orderBy: { date: 'desc' },
-      include: { salon: { select: { id: true, name: true } } }
-    });
-    res.json({ records: records });
-  } catch (err) { next(err); }
-});
-
-// ── GET /billing/:salonId — Billing records for a specific salon ──
-router.get('/billing/:salonId', requireOwner, async function(req, res, next) {
-  try {
-    var records = await prisma.providerBillingRecord.findMany({
-      where: { salon_id: req.params.salonId },
-      orderBy: { date: 'desc' }
-    });
-    res.json({ records: records });
-  } catch (err) { next(err); }
-});
-
-// ── POST /billing — Create a billing record ──
-router.post('/billing', requireOwner, async function(req, res, next) {
-  try {
-    var d = req.body;
-    var record = await prisma.providerBillingRecord.create({
-      data: {
-        salon_id: d.salon_id,
-        amount_cents: d.amount_cents || 0,
-        date: d.date || new Date().toISOString().split('T')[0],
-        status: d.status || 'pending',
-        method: d.method || 'N/A',
-      }
-    });
-    res.status(201).json({ record: record });
-  } catch (err) { next(err); }
-});
-
-// ════════════════════════════════════════════
 // AUDIT LOG
 // ════════════════════════════════════════════
 
-// ── GET /audit — View audit log ──
-// Owner sees all, agents see their own entries
 router.get('/audit', async function(req, res, next) {
   try {
     var where = {};
-
-    // Agents only see their own entries
-    if (req.provider_role !== 'owner') {
-      where.actor_id = req.provider_id;
-    }
-
-    // Optional salon filter
-    if (req.query.salon_id) {
-      where.salon_id = req.query.salon_id;
-    }
+    if (req.query.salon_id) where.salon_id = req.query.salon_id;
 
     var entries = await prisma.providerAuditLog.findMany({
       where: where,
@@ -767,16 +553,10 @@ router.get('/audit', async function(req, res, next) {
 // ════════════════════════════════════════════
 
 async function addAudit(req, action, detail, salonId) {
-  // Look up actor name
   var actorName = 'Unknown';
   try {
-    if (req.provider_role === 'owner') {
-      var owner = await prisma.providerOwner.findUnique({ where: { id: req.provider_id } });
-      if (owner) actorName = owner.name;
-    } else {
-      var agent = await prisma.providerAgent.findUnique({ where: { id: req.provider_id } });
-      if (agent) actorName = agent.name;
-    }
+    var owner = await prisma.providerOwner.findUnique({ where: { id: req.provider_id } });
+    if (owner) actorName = owner.name;
   } catch (e) { /* ignore lookup failure */ }
 
   await prisma.providerAuditLog.create({
@@ -790,4 +570,5 @@ async function addAudit(req, action, detail, salonId) {
   });
 }
 
+export { PROVIDER_MASTER_CODE };
 export default router;

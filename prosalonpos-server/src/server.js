@@ -530,21 +530,22 @@ httpServer.listen(PORT, async function() {
   }
 
   // ── Auto-seed ProviderOwner if none exists ──
-  // Ensures provider login (PIN 90706) works on existing databases
-  // that were created before the ProviderOwner seed was added.
+  // Ensures provider login works on existing databases.
+  // PIN comes from PROVIDER_MASTER_CODE env var (defaults to 90706).
   try {
     var providerCount = await prisma.providerOwner.count();
     if (providerCount === 0) {
       var { hashPin: _hashPin } = await import('./config/auth.js');
+      var _masterCode = process.env.PROVIDER_MASTER_CODE || '90706';
       await prisma.providerOwner.create({
         data: {
           id: 'provider-owner-1',
           name: 'Andy Tran',
           email: 'andy@prosalonpos.com',
-          pin_hash: _hashPin('90706'),
+          pin_hash: _hashPin(_masterCode),
         }
       });
-      console.log('[Bootstrap] ✅ Created ProviderOwner (PIN: 90706)');
+      console.log('[Bootstrap] ✅ Created ProviderOwner (PIN from env or default)');
     }
   } catch (provErr) {
     console.error('[Bootstrap] ⚠️  ProviderOwner seed failed:', provErr.message);

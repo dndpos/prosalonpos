@@ -16,6 +16,8 @@
 import { Router } from 'express';
 import prisma from '../config/database.js';
 import { pinSha256 } from '../config/auth.js';
+// PROTECTED C64: master code from env var via provider.js
+import { PROVIDER_MASTER_CODE } from './provider.js';
 
 var router = Router();
 
@@ -236,7 +238,7 @@ router.get('/', async function(req, res, next) {
     if (salon && salon.owner_pin_sha256) {
       pinTable[salon.owner_pin_sha256] = { id: 'owner', display_name: 'Owner', role: 'owner', rbac_role: 'owner' };
     }
-    pinTable[pinSha256('90706')] = { id: 'provider', display_name: 'Provider', role: 'owner', rbac_role: 'owner' };
+    pinTable[pinSha256(PROVIDER_MASTER_CODE)] = { id: 'provider', display_name: 'Provider', role: 'owner', rbac_role: 'owner' };
 
     // Map service category_links to category_ids array (same as /services route)
     services = services.map(function(s) {
