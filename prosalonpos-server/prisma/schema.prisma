@@ -397,13 +397,19 @@ model TicketItem {
 }
 
 model TicketPayment {
-  id           String   @id @default(uuid())
-  ticket_id    String
-  method       String                            // cash | credit | giftcard | zelle
-  amount_cents Int
-  gc_id        String?
-  gc_code      String?
-  created_at   DateTime @default(now())
+  id               String   @id @default(uuid())
+  ticket_id        String
+  method           String                            // cash | credit | giftcard | zelle
+  amount_cents     Int
+  gc_id            String?
+  gc_code          String?
+  card_brand       String?                           // VISA | MASTERCARD | AMEX | DISCOVER | etc
+  last4            String?                           // last 4 digits of card
+  auth_code        String?                           // authorization code from processor
+  entry_method     String?                           // CHIP | TAP | SWIPE | MANUAL
+  processor_txn_id String?                           // terminal RefNum — used for void/refund
+  terminal_response Json?                            // full raw terminal response for audit
+  created_at       DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
 

@@ -192,6 +192,12 @@ router.post('/tickets/:id/pay', async function(req, res, next) {
         amount_cents: data.amount_cents || 0,
         gc_id: data.gc_id || null,
         gc_code: data.gc_code || null,
+        card_brand: data.card_brand || null,
+        last4: data.last4 || null,
+        auth_code: data.auth_code || null,
+        entry_method: data.entry_method || null,
+        processor_txn_id: data.processor_txn_id || null,
+        terminal_response: data.terminal_response || null,
       },
     });
     emit(req, 'ticket:payment');
@@ -467,6 +473,12 @@ router.post('/tickets/quick-close', async function(req, res, next) {
         amount_cents: p.amount_cents || 0,
         gc_id: p.gc_id || null,
         gc_code: p.gc_code || null,
+        card_brand: p.card_brand || null,
+        last4: p.last4 || null,
+        auth_code: p.auth_code || null,
+        entry_method: p.entry_method || null,
+        processor_txn_id: p.processor_txn_id || null,
+        terminal_response: p.terminal_response || null,
       };
     });
 

@@ -87,6 +87,12 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
         amount_cents: p.amount_cents || 0,
         gc_id: p.gc_id || null,
         gc_code: p.gc_code || null,
+        card_brand: p.card_brand || null,
+        last4: p.last4 || null,
+        auth_code: p.auth_code || null,
+        entry_method: p.entry_method || null,
+        processor_txn_id: p.processor_txn_id || null,
+        terminal_response: p.terminal_response || null,
       };
     });
 
