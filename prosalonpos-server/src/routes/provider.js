@@ -274,6 +274,7 @@ function formatProviderSalon(s) {
     signup_date: s.signup_date,
     trial_end_date: s.trial_end_date,
     features_enabled: fromDb(s.features_enabled),
+    setup_locked: s.setup_locked || false,
     created_at: s.created_at,
   };
 }
@@ -710,6 +711,84 @@ async function addAudit(req, action, detail, salonId) {
     }
   });
 }
+
+// ── POST /salons/:id/unlock-setup — Unlock a salon's setup lock (C65) ──
+router.post('/salons/:id/unlock-setup', requireProviderAuth, async function(req, res, next) {
+  try {
+    var salonId = req.params.id;
+    await prisma.salon.update({
+      where: { id: salonId },
+      data: {
+        setup_locked: false,
+        setup_failed_attempts: 0,
+        setup_locked_at: null
+      }
+    });
+
+    await logAudit(req.providerUser.id, 'unlock_setup', 'Unlocked salon setup', salonId);
+    console.log('[Provider] Setup unlocked for salon', salonId);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ── POST /salons/:id/force-logout-tech — Force clear a tech's phone session (C65) ──
+// Provider calls this when tech lost their device and can't sign out
+router.post('/salons/:id/force-logout-tech', requireProviderAuth, async function(req, res, next) {
+  try {
+    var salonId = req.params.id;
+    var { staff_id } = req.body;
+
+    if (staff_id) {
+      // Clear specific tech session
+      var deleted = await prisma.techSession.deleteMany({
+        where: { staff_id: staff_id, salon_id: salonId }
+      });
+      await logAudit(req.providerUser.id, 'force_logout_tech', 'Force cleared tech session for staff ' + staff_id, salonId);
+      console.log('[Provider] Force cleared tech session — staff:', staff_id, 'deleted:', deleted.count);
+    } else {
+      // Clear ALL tech sessions for this salon
+      var deletedAll = await prisma.techSession.deleteMany({
+        where: { salon_id: salonId }
+      });
+      await logAudit(req.providerUser.id, 'force_logout_all_techs', 'Force cleared all tech sessions (' + deletedAll.count + ')', salonId);
+      console.log('[Provider] Force cleared ALL tech sessions for salon', salonId, '— deleted:', deletedAll.count);
+    }
+
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ── GET /salons/:id/tech-sessions — List active tech sessions for a salon (C65) ──
+router.get('/salons/:id/tech-sessions', requireProviderAuth, async function(req, res, next) {
+  try {
+    var salonId = req.params.id;
+    var sessions = await prisma.techSession.findMany({
+      where: { salon_id: salonId },
+      orderBy: { created_at: 'desc' }
+    });
+
+    // Attach staff names
+    var staffIds = sessions.map(function(s) { return s.staff_id; });
+    var staffRecords = await prisma.staff.findMany({
+      where: { id: { in: staffIds } },
+      select: { id: true, display_name: true }
+    });
+    var staffMap = {};
+    staffRecords.forEach(function(s) { staffMap[s.id] = s.display_name; });
+
+    var result = sessions.map(function(s) {
+      return {
+        id: s.id,
+        staff_id: s.staff_id,
+        staff_name: staffMap[s.staff_id] || 'Unknown',
+        device_info: s.device_info,
+        created_at: s.created_at
+      };
+    });
+
+    res.json({ sessions: result });
+  } catch (err) { next(err); }
+});
 
 export { PROVIDER_MASTER_CODE };
 export default router;

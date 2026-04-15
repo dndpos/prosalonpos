@@ -46,6 +46,11 @@ model Salon {
   owner_pin_sha256          String?                          // SHA-256 of owner PIN for fast local lookup
   owner_pin_plain           String?                          // Plain text PIN for display in Salon Settings
 
+  // C65: Setup lockout — brute force protection on station pairing
+  setup_locked              Boolean  @default(false)         // true = no new stations can pair/login
+  setup_failed_attempts     Int      @default(0)             // consecutive failed setup attempts
+  setup_locked_at           DateTime?                        // when the lock happened
+
   // Relations
   staff              Staff[]
   service_categories ServiceCategory[]
@@ -996,6 +1001,18 @@ model ActiveSession {
   station_label   String?                      // e.g. "Station 1", "Tablet 3"
   last_heartbeat  DateTime @default(now())
   created_at      DateTime @default(now())
+
+  @@index([salon_id])
+}
+
+// C65: Tech phone single-device enforcement
+model TechSession {
+  id          String   @id @default(uuid())
+  staff_id    String   @unique               // one session per tech
+  salon_id    String
+  token_hash  String                          // SHA-256 of JWT for validation
+  device_info String?                         // user-agent snippet for display
+  created_at  DateTime @default(now())
 
   @@index([salon_id])
 }

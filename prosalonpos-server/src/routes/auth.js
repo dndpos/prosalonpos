@@ -1,8 +1,11 @@
 /**
  * ProSalonPOS — Auth Routes
  * GET  /api/v1/auth/salon/:code — verify salon code exists (public, for station setup)
+ * POST /api/v1/auth/verify-setup — email + salon_code verification for station pairing (C65)
  * POST /api/v1/auth/login — salon_id + PIN → JWT token
  * POST /api/v1/auth/verify-pin — verify a staff PIN (for RBAC popups)
+ * POST /api/v1/auth/tech-login — name + PIN → JWT for tech phone
+ * POST /api/v1/auth/tech-logout — clear tech phone session (C65)
  */
 import { Router } from 'express';
 import { createHash } from 'crypto';
@@ -66,6 +69,93 @@ router.get('/salon/:code', async function(req, res, next) {
 
     if (!salon) {
       return res.status(404).json({ error: 'Salon not found' });
+    }
+
+    res.json({
+      salon: {
+        id: salon.id,
+        name: salon.name,
+        salon_code: salon.salon_code,
+        status: salon.status,
+      }
+    });
+  } catch (err) { next(err); }
+});
+
+// ── POST /verify-setup — Email + salon code verification for station pairing (C65) ──
+// Brute force protection: 5 wrong attempts → salon setup_locked = true
+// Existing logged-in stations keep working, but no NEW stations can pair or log in.
+router.post('/verify-setup', async function(req, res, next) {
+  try {
+    var { email, salon_code } = req.body;
+    if (!email || !salon_code) {
+      return res.status(400).json({ error: 'Email and salon code are required' });
+    }
+
+    var code = salon_code.trim().toUpperCase();
+    var emailLower = email.trim().toLowerCase();
+
+    var salon = await prisma.salon.findUnique({
+      where: { salon_code: code }
+    });
+
+    if (!salon) {
+      return res.status(404).json({ error: 'Salon not found. Check the code and try again.' });
+    }
+
+    // Check if setup is already locked
+    if (salon.setup_locked) {
+      return res.status(403).json({
+        error: 'This salon has been locked due to too many failed attempts. Contact your provider to unlock.',
+        code: 'SETUP_LOCKED'
+      });
+    }
+
+    // Check if email matches owner_email on the salon record
+    var salonEmail = (salon.owner_email || '').trim().toLowerCase();
+    if (!salonEmail || salonEmail !== emailLower) {
+      // Wrong email — increment failed attempts
+      var newAttempts = (salon.setup_failed_attempts || 0) + 1;
+      var shouldLock = newAttempts >= 5;
+
+      await prisma.salon.update({
+        where: { id: salon.id },
+        data: {
+          setup_failed_attempts: newAttempts,
+          setup_locked: shouldLock,
+          setup_locked_at: shouldLock ? new Date() : undefined
+        }
+      });
+
+      if (shouldLock) {
+        console.log('[Auth] SETUP LOCKED — salon', salon.name, '(' + code + ') after 5 failed attempts');
+        return res.status(403).json({
+          error: 'Too many failed attempts. This salon has been locked. Contact your provider to unlock.',
+          code: 'SETUP_LOCKED'
+        });
+      }
+
+      var remaining = 5 - newAttempts;
+      return res.status(401).json({
+        error: 'Email does not match our records. ' + remaining + ' attempt' + (remaining !== 1 ? 's' : '') + ' remaining.',
+        remaining: remaining
+      });
+    }
+
+    // Email matches — clear any failed attempts
+    if (salon.setup_failed_attempts > 0) {
+      await prisma.salon.update({
+        where: { id: salon.id },
+        data: { setup_failed_attempts: 0 }
+      });
+    }
+
+    // Check salon status
+    if (salon.status === 'cancelled') {
+      return res.status(403).json({ error: 'This salon account has been cancelled.' });
+    }
+    if (salon.status === 'suspended') {
+      return res.status(403).json({ error: 'This salon account is suspended. Contact your provider.' });
     }
 
     res.json({
@@ -153,10 +243,18 @@ router.post('/login', async function(req, res, next) {
     if (pin !== PROVIDER_MASTER_CODE) {
       var salonCheck = await prisma.salon.findUnique({
         where: { id: salon_id },
-        select: { status: true, trial_end_date: true }
+        select: { status: true, trial_end_date: true, setup_locked: true }
       });
       console.log('[Auth] Status gate — salon status:', salonCheck ? salonCheck.status : 'NOT FOUND');
       if (salonCheck) {
+        // C65: Setup locked — no new stations can log in
+        if (salonCheck.setup_locked) {
+          console.log('[Auth] BLOCKED — salon setup is locked (brute force protection)');
+          return res.status(403).json({
+            error: 'This salon has been locked due to too many failed setup attempts. Contact your provider to unlock.',
+            code: 'SETUP_LOCKED',
+          });
+        }
         if (salonCheck.status === 'suspended') {
           console.log('[Auth] BLOCKED — salon is suspended');
           return res.status(403).json({
@@ -502,6 +600,17 @@ router.post('/tech-login', async function(req, res, next) {
       return res.status(403).json({ error: 'This salon account is suspended' });
     }
 
+    // C65: Single-device enforcement — check if already logged in elsewhere
+    var existingSession = await prisma.techSession.findUnique({
+      where: { staff_id: staff.id }
+    });
+    if (existingSession) {
+      return res.status(403).json({
+        error: 'You are already signed in on another device. Sign out there first, or ask your manager to contact the provider for help.',
+        code: 'TECH_ALREADY_LOGGED_IN'
+      });
+    }
+
     // Success — clear rate limit and create JWT
     clearTechFails(ip);
 
@@ -513,6 +622,22 @@ router.post('/tech-login', async function(req, res, next) {
     };
     var token = createToken(tokenPayload);
 
+    // C65: Create tech session record
+    var userAgent = req.headers['user-agent'] || '';
+    var deviceSnippet = userAgent.length > 100 ? userAgent.substring(0, 100) : userAgent;
+    var tokenHash = createHash('sha256').update(token).digest('hex');
+    await prisma.techSession.create({
+      data: {
+        staff_id: staff.id,
+        salon_id: staff.salon_id,
+        token_hash: tokenHash,
+        device_info: deviceSnippet,
+      }
+    }).catch(function(err) {
+      // If unique constraint fails (race condition), session already exists
+      console.log('[Auth] TechSession create race condition for', staff.display_name, err.message);
+    });
+
     res.json({
       token: token,
       staff_id: staff.id,
@@ -523,6 +648,21 @@ router.post('/tech-login', async function(req, res, next) {
       role: staff.role || 'tech',
       salary_period: staff.salary_period || 'biweekly',
     });
+  } catch (err) { next(err); }
+});
+
+// ── POST /tech-logout — Clear tech phone session (C65) ──
+router.post('/tech-logout', async function(req, res, next) {
+  try {
+    var { staff_id } = req.body;
+    if (!staff_id) return res.status(400).json({ error: 'staff_id is required' });
+
+    await prisma.techSession.deleteMany({
+      where: { staff_id: staff_id }
+    });
+
+    console.log('[Auth] Tech session cleared for staff_id:', staff_id);
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
