@@ -819,12 +819,17 @@ model MessageLogEntry {
 // ════════════════════════════════════════════
 
 model ProviderOwner {
-  id         String   @id @default(uuid())
-  name       String
-  email      String?
-  pin_hash   String                        // bcrypt hashed PIN
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  id                  String   @id @default(uuid())
+  name                String
+  email               String?
+  pin_hash            String                        // bcrypt hashed PIN
+  locked              Boolean  @default(false)       // C64: locked after 5 failed attempts
+  failed_attempts     Int      @default(0)           // C64: consecutive failed login count
+  locked_at           DateTime?                      // C64: when the lock happened
+  reset_code          String?                        // C64: 6-digit reset code (hashed)
+  reset_code_expires  DateTime?                      // C64: reset code expiry (15 min)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
 }
 
 model ProviderAgent {

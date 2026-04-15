@@ -1,13 +1,16 @@
 /**
  * ProSalonPOS — Provider Admin Routes
  * ISO-level management: salons, notes, audit.
- * Auth: /auth/login is public. All other endpoints require provider JWT.
+ * Auth: /auth/* routes are public. All other endpoints require provider JWT.
  *
  * C64: Removed agent CRUD and billing CRUD (unused).
- * C64: Added per-IP rate limiting to provider login (5 attempts / 15 min).
- * C64: Provider master code now reads from PROVIDER_MASTER_CODE env var.
+ * C64: Provider login requires email + PIN (two factors).
+ * C64: DB-level account lockout after 5 failed attempts.
+ * C64: PIN reset flow with 6-digit code (logged + emailable later).
+ * C64: Provider master code from PROVIDER_MASTER_CODE env var.
  */
 import { Router } from 'express';
+import { createHash, randomInt } from 'crypto';
 import prisma, { isSQLite } from '../config/database.js';
 import { createToken, hashPin, comparePin, pinSha256 } from '../config/auth.js';
 import providerAuth, { requireOwner } from '../middleware/providerAuth.js';
@@ -29,76 +32,214 @@ function fromDb(val) {
 // PROTECTED C64: master code from env var, never hardcoded in production
 var PROVIDER_MASTER_CODE = process.env.PROVIDER_MASTER_CODE || '90706';
 
+var PROVIDER_MAX_ATTEMPTS = 5;
+var RESET_CODE_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
+
+// Hash a reset code with SHA-256
+function hashResetCode(code) {
+  return createHash('sha256').update(String(code)).digest('hex');
+}
+
 var router = Router();
 
 // ════════════════════════════════════════════
 // AUTH (public — no middleware)
-// Rate limited: 5 failed attempts per IP = 15 min lockout
 // ════════════════════════════════════════════
 
-var _providerLoginAttempts = {}; // { ip: { count, lastAttempt } }
-var PROVIDER_LOGIN_MAX = 5;
-var PROVIDER_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+// Per-IP rate limiting
+var _providerIpAttempts = {};
+var PROVIDER_IP_MAX = 10;
+var PROVIDER_IP_WINDOW_MS = 15 * 60 * 1000;
 
-function checkProviderRateLimit(ip) {
-  var entry = _providerLoginAttempts[ip];
+function checkProviderIpLimit(ip) {
+  var entry = _providerIpAttempts[ip];
   if (!entry) return true;
-  if (Date.now() - entry.lastAttempt > PROVIDER_LOGIN_WINDOW_MS) {
-    delete _providerLoginAttempts[ip];
+  if (Date.now() - entry.lastAttempt > PROVIDER_IP_WINDOW_MS) {
+    delete _providerIpAttempts[ip];
     return true;
   }
-  return entry.count < PROVIDER_LOGIN_MAX;
+  return entry.count < PROVIDER_IP_MAX;
 }
 
-function recordProviderFail(ip) {
-  if (!_providerLoginAttempts[ip]) _providerLoginAttempts[ip] = { count: 0, lastAttempt: 0 };
-  _providerLoginAttempts[ip].count++;
-  _providerLoginAttempts[ip].lastAttempt = Date.now();
+function recordProviderIpFail(ip) {
+  if (!_providerIpAttempts[ip]) _providerIpAttempts[ip] = { count: 0, lastAttempt: 0 };
+  _providerIpAttempts[ip].count++;
+  _providerIpAttempts[ip].lastAttempt = Date.now();
 }
 
-function clearProviderFails(ip) {
-  delete _providerLoginAttempts[ip];
+function clearProviderIpFails(ip) {
+  delete _providerIpAttempts[ip];
 }
 
-// ── POST /auth/login — Provider owner PIN login ──
+// ── POST /auth/login — Provider login (email + PIN) ──
 router.post('/auth/login', async function(req, res, next) {
   try {
     var ip = req.ip || req.connection.remoteAddress || 'unknown';
 
-    if (!checkProviderRateLimit(ip)) {
-      return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+    if (!checkProviderIpLimit(ip)) {
+      return res.status(429).json({ error: 'Too many attempts from this location. Try again in 15 minutes.' });
     }
 
+    var email = (req.body.email || '').trim().toLowerCase();
     var pin = req.body.pin;
-    if (!pin) return res.status(400).json({ error: 'PIN is required' });
 
-    // Try provider owner
-    var owners = await prisma.providerOwner.findMany();
-    for (var i = 0; i < owners.length; i++) {
-      if (comparePin(pin, owners[i].pin_hash)) {
-        clearProviderFails(ip);
-        var token = createToken({
-          provider_id: owners[i].id,
-          provider_role: 'owner',
-        });
-        return res.json({
-          token: token,
-          user: {
-            id: owners[i].id,
-            name: owners[i].name,
-            email: owners[i].email,
-            role: 'owner',
-          }
+    if (!email || !pin) {
+      return res.status(400).json({ error: 'Email and PIN are required' });
+    }
+
+    // Find owner by email
+    var owner = await prisma.providerOwner.findFirst({
+      where: { email: email }
+    });
+
+    if (!owner) {
+      recordProviderIpFail(ip);
+      return res.status(401).json({ error: 'Invalid email or PIN' });
+    }
+
+    // Check if account is locked
+    if (owner.locked) {
+      return res.status(403).json({
+        error: 'Account is locked due to too many failed attempts. Use "Forgot PIN" to reset.',
+        code: 'ACCOUNT_LOCKED'
+      });
+    }
+
+    // Check PIN
+    if (!comparePin(pin, owner.pin_hash)) {
+      var newCount = (owner.failed_attempts || 0) + 1;
+      var nowLocked = newCount >= PROVIDER_MAX_ATTEMPTS;
+
+      await prisma.providerOwner.update({
+        where: { id: owner.id },
+        data: {
+          failed_attempts: newCount,
+          locked: nowLocked,
+          locked_at: nowLocked ? new Date() : owner.locked_at,
+        }
+      });
+
+      recordProviderIpFail(ip);
+      var remaining = PROVIDER_MAX_ATTEMPTS - newCount;
+
+      if (nowLocked) {
+        console.log('[Provider Auth] Account LOCKED — email:', email, '| failed attempts:', newCount);
+        return res.status(403).json({
+          error: 'Account locked after ' + PROVIDER_MAX_ATTEMPTS + ' failed attempts. Use "Forgot PIN" to reset.',
+          code: 'ACCOUNT_LOCKED'
         });
       }
+
+      return res.status(401).json({
+        error: 'Invalid email or PIN. ' + remaining + ' attempt' + (remaining !== 1 ? 's' : '') + ' remaining.'
+      });
     }
 
-    // No match
-    recordProviderFail(ip);
-    var remaining = PROVIDER_LOGIN_MAX - ((_providerLoginAttempts[ip] || {}).count || 0);
-    return res.status(401).json({
-      error: 'Invalid PIN.' + (remaining > 0 ? ' ' + remaining + ' attempts remaining.' : ' Account locked for 15 minutes.')
+    // Success — clear failed attempts
+    clearProviderIpFails(ip);
+    if (owner.failed_attempts > 0) {
+      await prisma.providerOwner.update({
+        where: { id: owner.id },
+        data: { failed_attempts: 0 }
+      });
+    }
+
+    var token = createToken({
+      provider_id: owner.id,
+      provider_role: 'owner',
     });
+
+    return res.json({
+      token: token,
+      user: {
+        id: owner.id,
+        name: owner.name,
+        email: owner.email,
+        role: 'owner',
+      }
+    });
+  } catch (err) { next(err); }
+});
+
+// ── POST /auth/forgot-pin — Request a PIN reset code ──
+router.post('/auth/forgot-pin', async function(req, res, next) {
+  try {
+    var email = (req.body.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    var owner = await prisma.providerOwner.findFirst({
+      where: { email: email }
+    });
+
+    // Always return success (don't reveal if email exists)
+    if (!owner) return res.json({ sent: true });
+
+    var code = String(randomInt(100000, 999999));
+    var codeHash = hashResetCode(code);
+
+    await prisma.providerOwner.update({
+      where: { id: owner.id },
+      data: {
+        reset_code: codeHash,
+        reset_code_expires: new Date(Date.now() + RESET_CODE_EXPIRY_MS),
+      }
+    });
+
+    // Log the code (visible in Railway logs)
+    console.log('═══════════════════════════════════════════');
+    console.log('[PROVIDER PIN RESET] Code for ' + email + ': ' + code);
+    console.log('[PROVIDER PIN RESET] Expires in 15 minutes.');
+    console.log('═══════════════════════════════════════════');
+
+    res.json({ sent: true });
+  } catch (err) { next(err); }
+});
+
+// ── POST /auth/reset-pin — Verify code and set new PIN ──
+router.post('/auth/reset-pin', async function(req, res, next) {
+  try {
+    var email = (req.body.email || '').trim().toLowerCase();
+    var code = String(req.body.code || '');
+    var newPin = String(req.body.new_pin || '');
+
+    if (!email || !code || !newPin) {
+      return res.status(400).json({ error: 'Email, code, and new PIN are required' });
+    }
+    if (newPin.length < 4) {
+      return res.status(400).json({ error: 'PIN must be at least 4 digits' });
+    }
+
+    var owner = await prisma.providerOwner.findFirst({
+      where: { email: email }
+    });
+
+    if (!owner || !owner.reset_code || !owner.reset_code_expires) {
+      return res.status(400).json({ error: 'No reset code found. Request a new one.' });
+    }
+
+    if (new Date() > new Date(owner.reset_code_expires)) {
+      return res.status(400).json({ error: 'Reset code has expired. Request a new one.' });
+    }
+
+    if (hashResetCode(code) !== owner.reset_code) {
+      return res.status(401).json({ error: 'Invalid reset code' });
+    }
+
+    // Set new PIN, unlock account, clear everything
+    await prisma.providerOwner.update({
+      where: { id: owner.id },
+      data: {
+        pin_hash: hashPin(newPin),
+        locked: false,
+        failed_attempts: 0,
+        locked_at: null,
+        reset_code: null,
+        reset_code_expires: null,
+      }
+    });
+
+    console.log('[Provider Auth] PIN reset successful for:', email);
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 
