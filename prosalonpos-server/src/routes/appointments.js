@@ -41,6 +41,17 @@ function dayBounds(dateStr) {
   return { start: start, end: end };
 }
 
+// PROTECTED C62: Convert UTC Date to timezone-naive salon-local string (no Z).
+// "2026-04-15T13:00:00.000Z" (UTC) → "2026-04-15T09:00:00" (Eastern, no Z).
+// Frontend new Date("...no Z...") parses as browser-local → always shows 9 AM.
+function toSalonLocal(d) {
+  if (!d) return d;
+  var fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  var p = {}; fmt.formatToParts(d).forEach(function(x) { p[x.type] = x.value; });
+  var hh = p.hour === '24' ? '00' : p.hour;
+  return p.year + '-' + p.month + '-' + p.day + 'T' + hh + ':' + p.minute + ':' + p.second;
+}
+
 function todayStr() {
   var now = new Date();
   var etOffset = getEasternOffset(now);
@@ -76,6 +87,7 @@ router.get('/service-lines', async function(req, res, next) {
     // Flatten parent appointment fields onto each service line for calendar compatibility
     var flat = lines.map(function(sl) {
       var obj = Object.assign({}, sl);
+      obj.starts_at = toSalonLocal(sl.starts_at); // C62: timezone-naive for frontend
       if (sl.appointment) {
         obj.bookingId = sl.appointment.booking_group_id || null;
         obj.client_id = sl.appointment.client_id || null;

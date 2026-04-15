@@ -44,6 +44,15 @@ function dayBounds(dateStr) {
   return { start: start, end: end };
 }
 
+// PROTECTED C62: same helper as appointments.js — UTC → salon-local no-Z string
+function toSalonLocal(d) {
+  if (!d) return d;
+  var fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  var p = {}; fmt.formatToParts(d).forEach(function(x) { p[x.type] = x.value; });
+  var hh = p.hour === '24' ? '00' : p.hour;
+  return p.year + '-' + p.month + '-' + p.day + 'T' + hh + ':' + p.minute + ':' + p.second;
+}
+
 // ── GET / — Full bootstrap payload ──
 router.get('/', async function(req, res, next) {
   try {
@@ -255,6 +264,7 @@ router.get('/', async function(req, res, next) {
       settings: settings,
       serviceLines: serviceLines.map(function(sl) {
         var obj = Object.assign({}, sl);
+        obj.starts_at = toSalonLocal(sl.starts_at); // C62: timezone-naive for frontend
         if (sl.appointment) {
           obj.bookingId = sl.appointment.booking_group_id || null;
           obj.client_id = sl.appointment.client_id || null;
