@@ -14,12 +14,12 @@ var router = Router();
 // ── ROUTES ──
 
 // ── GET /tickets — List tickets for a date or date range ──
+// Always includes ALL open tickets regardless of date so prior-day holds never vanish.
 router.get('/tickets', async function(req, res, next) {
   try {
     var where = { salon_id: req.salon_id };
     if (req.query.start && req.query.end) {
       // Date range query — for reports, payroll, etc.
-      // Use dayBounds for each date to get correct Eastern time boundaries
       var rangeBoundsStart = dayBounds(req.query.start);
       var rangeBoundsEnd = dayBounds(req.query.end);
       where.created_at = { gte: rangeBoundsStart.start, lte: rangeBoundsEnd.end };
@@ -33,6 +33,23 @@ router.get('/tickets', async function(req, res, next) {
       include: { items: true, payments: true },
       orderBy: { ticket_number: 'asc' },
     });
+
+    // Also fetch ALL open tickets from ANY date — so prior-day holds always show up
+    var openFromOtherDays = await prisma.ticket.findMany({
+      where: { salon_id: req.salon_id, status: 'open' },
+      include: { items: true, payments: true },
+      orderBy: { ticket_number: 'asc' },
+    });
+    // Merge without duplicates (today's open tickets are already in the list)
+    var existingIds = {};
+    tickets.forEach(function(t) { existingIds[t.id] = true; });
+    openFromOtherDays.forEach(function(t) {
+      if (!existingIds[t.id]) {
+        tickets.push(t);
+        existingIds[t.id] = true;
+      }
+    });
+
     console.log('[GET /tickets] query:', req.query, '| found:', tickets.length, '| statuses:', tickets.map(function(t){return t.status;}).join(','));
     // Look up package redemptions for tickets with pkg_redeemed_cents > 0
     var ticketIds = tickets.filter(function(t){ return (t.pkg_redeemed_cents || 0) > 0; }).map(function(t){ return t.id; });
