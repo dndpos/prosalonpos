@@ -449,4 +449,108 @@ router.post('/presence', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ═══════════════════════════════════════════════
+// MIDNIGHT AUTO-CLOCKOUT
+// Called by server.js scheduler. For each salon, finds staff still clocked in
+// (last punch = 'in') and creates an automatic 'out' punch at 11:59:59 PM.
+// Also sets all StaffPresence records to 'out'.
+// ═══════════════════════════════════════════════
+
+async function midnightAutoClockout(io) {
+  try {
+    // Get all salons
+    var salons = await prisma.salon.findMany({ select: { id: true } });
+
+    for (var si = 0; si < salons.length; si++) {
+      var salonId = salons[si].id;
+
+      // Get all staff for this salon
+      var staff = await prisma.staff.findMany({
+        where: { salon_id: salonId },
+        select: { id: true, display_name: true },
+      });
+      if (staff.length === 0) continue;
+
+      var staffIds = staff.map(function(s) { return s.id; });
+      var staffMap = {};
+      staff.forEach(function(s) { staffMap[s.id] = s.display_name; });
+
+      // Find last punch for each staff member today or earlier (any date — we want their current status)
+      var clockedOutCount = 0;
+      for (var i = 0; i < staffIds.length; i++) {
+        var staffId = staffIds[i];
+        var lastPunch = await prisma.clockPunch.findFirst({
+          where: { staff_id: staffId },
+          orderBy: { timestamp: 'desc' },
+        });
+
+        if (lastPunch && lastPunch.type === 'in') {
+          // This person is still clocked in — auto clock them out at 11:59:59 PM Eastern
+          // Railway runs UTC, so we need to compute 23:59:59 Eastern as a UTC Date
+          var now = new Date();
+          var etParts = {};
+          new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/New_York',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour12: false,
+          }).formatToParts(now).forEach(function(p) { etParts[p.type] = p.value; });
+          // We're firing at 00:00 Eastern of the NEW day, so 11:59:59 PM is yesterday
+          var yest = new Date(now.getTime() - 60000); // 1 minute ago = still yesterday in ET
+          var yParts = {};
+          new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/New_York',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour12: false,
+          }).formatToParts(yest).forEach(function(p) { yParts[p.type] = p.value; });
+          // Build 23:59:59 on yesterday's Eastern date, then convert to UTC
+          var localStr = yParts.year + '-' + yParts.month + '-' + yParts.day + 'T23:59:59';
+          // Determine EDT vs EST offset for that date
+          var probe = new Date(localStr + 'Z');
+          var tzStr = probe.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+          var offsetMin = tzStr.indexOf('EDT') >= 0 ? 240 : 300;
+          var midnight = new Date(probe.getTime() + offsetMin * 60000);
+
+          var punch = await prisma.clockPunch.create({
+            data: {
+              staff_id: staffId,
+              type: 'out',
+              timestamp: midnight,
+              manual: true,
+            }
+          });
+
+          await writeAuditLog({
+            punch_id: punch.id,
+            staff_id: staffId,
+            action: 'created',
+            new_value: { type: 'out', timestamp: midnight.toISOString(), manual: true, reason: 'midnight auto-clockout' },
+            changed_by: null,
+            changed_by_name: 'System (midnight auto-clockout)',
+          });
+
+          clockedOutCount++;
+        }
+      }
+
+      // Set all presence records to 'out' for this salon
+      await prisma.staffPresence.updateMany({
+        where: { salon_id: salonId, status: 'in' },
+        data: { status: 'out', timestamp: new Date() },
+      });
+
+      if (clockedOutCount > 0) {
+        console.log('[Midnight] Auto-clocked out ' + clockedOutCount + ' staff for salon ' + salonId);
+        // Notify connected stations
+        if (io) {
+          io.to('salon:' + salonId).emit('timeclock:punch');
+          io.to('salon:' + salonId).emit('timeclock:presence');
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Midnight] Auto-clockout failed:', err.message);
+  }
+}
+
+export { midnightAutoClockout };
 export default router;

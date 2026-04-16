@@ -44,7 +44,7 @@ import loyaltyRoutes from './routes/loyalty.js';
 import membershipRoutes from './routes/memberships.js';
 import inventoryRoutes from './routes/inventory.js';
 import commissionRoutes from './routes/commission.js';
-import timeclockRoutes from './routes/timeclock.js';
+import timeclockRoutes, { midnightAutoClockout } from './routes/timeclock.js';
 import messagingRoutes from './routes/messaging.js';
 import payrollRoutes from './routes/payroll.js';
 import reportsRoutes from './routes/reports.js';
@@ -339,6 +339,30 @@ setInterval(function() {
     console.error('[Station] Stale cleanup failed:', err.message);
   });
 }, 2 * 60 * 1000); // every 2 minutes
+
+// ── Midnight auto-clockout — checks every minute, fires once at midnight Eastern ──
+// Railway runs in UTC. We use Intl to check Eastern time so it fires at real midnight.
+// Clocks out all staff still clocked in, sets presence to 'out'.
+var _midnightRanToday = null;
+setInterval(function() {
+  // Get current hour/minute in Eastern time
+  var now = new Date();
+  var etParts = {};
+  new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(now).forEach(function(p) { etParts[p.type] = p.value; });
+  var h = parseInt(etParts.hour === '24' ? '0' : etParts.hour);
+  var m = parseInt(etParts.minute);
+  var dateKey = etParts.year + '-' + etParts.month + '-' + etParts.day;
+  // Fire at 00:00 Eastern, but only once per calendar day
+  if (h === 0 && m === 0 && _midnightRanToday !== dateKey) {
+    _midnightRanToday = dateKey;
+    console.log('[Midnight] Running auto-clockout (Eastern midnight)...');
+    midnightAutoClockout(io);
+  }
+}, 60 * 1000); // check every minute
 
 // ── Reminder scheduler — sends appointment reminders at configured times ──
 startReminderScheduler();
