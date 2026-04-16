@@ -202,6 +202,7 @@ function formatTicket(t, pkgRedemptions) {
         id: p.id,
         ticket_id: p.ticket_id,
         method: p.method,
+        sub_method: p.sub_method || null,
         amount_cents: p.amount_cents,
         gc_id: p.gc_id,
         gc_code: p.gc_code,

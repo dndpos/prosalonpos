@@ -206,6 +206,7 @@ router.post('/tickets/:id/pay', async function(req, res, next) {
       data: {
         ticket_id: req.params.id,
         method: data.method || 'cash',
+        sub_method: data.sub_method || null,
         amount_cents: data.amount_cents || 0,
         gc_id: data.gc_id || null,
         gc_code: data.gc_code || null,
@@ -487,6 +488,7 @@ router.post('/tickets/quick-close', async function(req, res, next) {
     var paymentsCreate = (data.payments || []).map(function(p) {
       return {
         method: p.method || 'credit',
+        sub_method: p.sub_method || null,
         amount_cents: p.amount_cents || 0,
         gc_id: p.gc_id || null,
         gc_code: p.gc_code || null,

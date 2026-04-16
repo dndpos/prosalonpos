@@ -408,6 +408,7 @@ model TicketPayment {
   id               String   @id @default(uuid())
   ticket_id        String
   method           String                            // cash | credit | giftcard | zelle
+  sub_method       String?                           // zelle | venmo (only for method='zelle')
   amount_cents     Int
   gc_id            String?
   gc_code          String?

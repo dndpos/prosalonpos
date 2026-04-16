@@ -565,11 +565,21 @@ httpServer.listen(PORT, async function() {
         data: {
           id: 'provider-owner-1',
           name: 'Andy Tran',
-          email: 'andy@prosalonpos.com',
+          email: 'phatalextran@gmail.com',
           pin_hash: _hashPin(_masterCode),
         }
       });
       console.log('[Bootstrap] ✅ Created ProviderOwner (PIN from env or default)');
+    } else {
+      // C68: One-time migration — update provider email from old to new
+      var _oldOwner = await prisma.providerOwner.findUnique({ where: { email: 'andy@prosalonpos.com' } });
+      if (_oldOwner) {
+        await prisma.providerOwner.update({
+          where: { id: _oldOwner.id },
+          data: { email: 'phatalextran@gmail.com' }
+        });
+        console.log('[Bootstrap] ✅ Migrated ProviderOwner email to phatalextran@gmail.com');
+      }
     }
   } catch (provErr) {
     console.error('[Bootstrap] ⚠️  ProviderOwner seed failed:', provErr.message);
