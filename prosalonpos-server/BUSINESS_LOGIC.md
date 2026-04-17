@@ -2,6 +2,51 @@
 
 **Last updated:** Session C89 (April 17, 2026)
 
+*New entries: C90 — ▲▼ row-height zoom buttons added to station calendar top nav.*
+
+---
+
+## CHANGES IN C90 — Row Height Zoom Buttons (1 file)
+
+### What Andy asked for:
+Two buttons (▲ / ▼) on the station calendar screen to compress or expand the time grid rows — so the user can choose how many hours are visible at once without it being hardcoded.
+
+### Implementation:
+
+**File changed:** `src/modules/appointments/CalendarDayView.jsx` (725 → 738 lines)
+
+1. **Import alias:** `ROW_H` imported as `DEFAULT_ROW_H` from calendarHelpers (the file-level constant stays at 20 and is used as the initial default only).
+
+2. **State:** `rowH` useState, initialised from `localStorage` key `prosalonpos_row_h`, clamped 12–40, default 20.
+
+3. **Alias:** `var ROW_H = rowH` declared in component body — all existing downstream references (grid height, time labels, AppointmentBlocks, useCalendarDrag ctx, useCalendarHandlers ctx, drag/resize calculations) pick up the live value automatically. Zero changes to any other file.
+
+4. **Buttons:** ▲ ▼ with current value between them, placed in the top nav right side after the column −/+ group, separated by a divider. Same styling as column buttons. ▲ dims and disables at min (12). ▼ dims and disables at max (40). Step = 4px per press.
+
+5. **Persist:** `saveRowH(n)` clamps, calls setRowH, writes to localStorage. Zoom survives day navigation and page reloads — same pattern as visibleCols (C76).
+
+### Zoom range:
+| rowH | Hours visible (9AM–7PM, no scroll) | 30-min block height |
+|------|--------------------------------------|---------------------|
+| 12 | ~14 hrs (all fit easily) | 44px (floor) |
+| 20 | ~9 hrs (default C89) | 44px (floor) |
+| 28 | ~6 hrs | 56px |
+| 36 | ~5 hrs | 72px |
+| 40 | ~4 hrs | 80px |
+
+### What was NOT changed in C90:
+- Zero server, zero DB, zero money-path
+- Zero changes to useCalendarDrag.js, useCalendarHandlers.js, AppointmentBlocks.jsx, StaticGridLines, TabletCalendarView.jsx
+- calendarHelpers.js ROW_H=20 stays — it is now the default only, not the live value on station
+- All C89/C88/C87 protections intact
+
+### Build hashes (C90):
+- JS: `index-DOPdQa8j.js`
+- CSS: `index-Dl-D5agJ.css`
+- Logo: `prosalon-logo-C6XNqxUq.png` (unchanged)
+
+---
+
 *New entries: C89 — logo repositioned on tablet (left of View Tickets), Samsung native keyboard suppressed in VirtualKeyboard, 30-min grid buffer removed, ROW_H reduced for more hours on screen.*
 
 ---

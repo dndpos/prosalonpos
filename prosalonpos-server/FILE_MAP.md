@@ -37,6 +37,27 @@
 
 ---
 
+## CHANGED FILES (C90)
+
+### Station changes (1 file)
+
+| File | Lines Before | Lines After | What Changed |
+|------|-------------|-------------|--------------|
+| `src/modules/appointments/CalendarDayView.jsx` | 725 | 738 | Added rowH state (default 20, min 12, max 40, step 4) persisted to localStorage. ROW_H import aliased as DEFAULT_ROW_H; var ROW_H = rowH declared in component body so all existing grid code uses live value. ▲ {rowH} ▼ buttons added to top nav right side after column +/- group. saveRowH() wrapper clamps and persists. Zero changes to any other file. |
+
+### Server changes (C90)
+**None.**
+
+### Build assets (C90)
+- JS: `index-DOPdQa8j.js`
+- CSS: `index-Dl-D5agJ.css`
+- Logo: `prosalon-logo-C6XNqxUq.png` (unchanged)
+
+### Database changes (C90)
+**None.**
+
+---
+
 ## CHANGED FILES (C89)
 
 | File | Change | What |

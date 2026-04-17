@@ -25,6 +25,7 @@
 17. Verify `T_ROW_H=26` in TabletCalendarView.jsx (P037)
 18. Verify `buffer_minutes:0` in calendarBridge.js default AND proxy getter (P037)
 19. Verify `kbCaptured` / `origInputMode` logic exists in VirtualKeyboard.jsx focusin handler (P038)
+20. Verify `rowH` state + `saveRowH` + `var ROW_H = rowH` exist in CalendarDayView.jsx (C90)
 
 ---
 
@@ -34,6 +35,22 @@
 - `src/modules/tablet/TabletCalendarView.jsx` — **~796 lines** after C89. Very close to cap — split before next addition.
 - `src/modules/appointments/CalendarDayView.jsx` — **714 lines**. Comfortable.
 - `src/components/ui/VirtualKeyboard.jsx` — **~238 lines**. Fine.
+
+---
+
+## C90 Session Notes
+
+### Row height zoom buttons
+`CalendarDayView.jsx` — `ROW_H` import aliased as `DEFAULT_ROW_H`. `rowH` useState added (default 20, min 12, max 40, step 4, localStorage key `prosalonpos_row_h`). `var ROW_H = rowH` declared in component body so all existing grid code picks up the live value. ▲/▼ buttons added to top nav right side, same style as column +/- buttons.
+
+No new PROTECTED markers needed — this is pure additive state. The existing `useCalendarDrag` ctx already accepted `ROW_H` as a param (P034 machinery unchanged). The calendarHelpers.js `ROW_H=20` export is now the DEFAULT only.
+
+### Build hashes (C90)
+- JS: `index-DOPdQa8j.js`
+- CSS: `index-Dl-D5agJ.css`
+- Logo: `prosalon-logo-C6XNqxUq.png` (unchanged)
+
+**P011 updated C90:** Both HTML files reference `index-DOPdQa8j.js` / `index-Dl-D5agJ.css`.
 
 ---
 
@@ -89,6 +106,7 @@
 
 ### public/tech/index.html
 **P011** — Dedicated tech phone HTML.
+- **C90 hashes:** JS = `index-DOPdQa8j.js`, CSS = `index-Dl-D5agJ.css`, Logo = `prosalon-logo-C6XNqxUq.png`
 - **C89 hashes:** JS = `index-P2qGX24a.js`, CSS = `index-jaZ6qTgx.css`, Logo = `prosalon-logo-C6XNqxUq.png`.
 - No `public/tech/tech/` orphan.
 - Both HTMLs must reference same JS AND CSS hashes after each build.

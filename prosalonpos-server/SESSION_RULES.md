@@ -22,7 +22,13 @@ You are "Cindy," the sole engineer on ProSalonPOS. Andy is the owner — he has 
 
 ---
 
-## FILE SIZE NOTES
+## FILE SIZE NOTES (C90 actual measurements)
+
+- `src/modules/appointments/useCalendarDrag.js` — **795 lines**. Very close to 800 cap. Extract before adding anything.
+- `src/modules/tablet/TabletCalendarView.jsx` — **793 lines**. Watch carefully. Split before next significant addition.
+- `src/modules/appointments/CalendarDayView.jsx` — **738 lines** (C90). Getting closer. Check before next addition.
+- `src/components/ui/VirtualKeyboard.jsx` — **252 lines**. Fine.
+
 
 - `src/modules/appointments/useCalendarDrag.js` — **788 lines** after C87. Still close to the 800 cap. Next session that touches this file should extract the tablet-specific machinery (C83+C84+C85+C87) into a `useTabletHoldDrag` sub-hook.
 - `src/modules/tablet/TabletCalendarView.jsx` — **788 lines** after C88. Getting close to cap. Next significant addition should split.
@@ -66,6 +72,20 @@ Rule 22 (C87): NEVER remove the restore in `handleDragEnd`. Grid stuck at `overf
 Rule 23 (C87): NEVER change the auto-scroll interval's scroll writes (`gridRef.current.scrollTop += scrollDy` etc.) to use a method that bypasses the grid's scroll event (like `scrollTo({behavior:'instant'})` with different event semantics, or setting a transform on an inner div). The interval RELIES on firing `scroll` events so `syncScroll` updates the tech-name header. Change the interval's mechanism = break the header sync during drag-to-edge.
 
 Rule 24 (C87): NEVER re-introduce `scrollLockRef` or anything similar. The whole concept of "write scroll back after it happens" is wrong.
+
+### C90 LESSON — ROW_H as live state in CalendarDayView.
+
+When you need a layout constant to be user-adjustable at runtime, the pattern is:
+1. Import the file-level constant under an alias (e.g. `ROW_H as DEFAULT_ROW_H`).
+2. Create a `useState` initialised from `localStorage`, falling back to the default constant.
+3. Add a `saveXxx` wrapper that clamps, sets state, and persists to `localStorage`.
+4. Declare `var ROW_H = rowH` in the component body — all existing downstream references pick it up automatically with zero changes to `useCalendarDrag`, `useCalendarHandlers`, `AppointmentBlocks`, or `StaticGridLines`.
+
+This is safe because `useCalendarDrag` already accepted `ROW_H` as a ctx param (line 33: `ROW_H: _paramRowH`) and fell back to the imported constant — so passing the live value via the ctx object works without touching that file.
+
+Rule 30 (C90): NEVER hardcode ROW_H back as a constant in CalendarDayView. It is now a state variable. The exported `ROW_H=20` in calendarHelpers.js is kept as the DEFAULT only.
+Rule 31 (C90): NEVER set rowH min below 12 — at 12, a 30-min block = 2×12=24 < 44, so it already hits the Math.max(44,...) floor. Going lower wastes steps.
+Rule 32 (C90): NEVER set rowH max above 40 — at 40, one hour = 160px. Above that the grid becomes unwieldy.
 
 ### C89 LESSON — Samsung native keyboard suppression via inputMode=none.
 
@@ -185,6 +205,8 @@ Verify both `public/index.html` AND `public/tech/index.html` in the server zip r
 - `overflow: hidden` set on grid CONTAINER (gridContainerRef) during drag — C85 rule (only set on gridRef via C87)
 - `scrollTop = scrollTop` / `scrollLeft = scrollLeft` writes removed from `activatePendingHold` — C85 bug
 - C85 scroll-freeze writes moved outside `activatePendingHold` — C85 bug
+- **rowH state replaced with hardcoded ROW_H constant in CalendarDayView** — C90 regression: user zoom broken
+- **localStorage key `prosalonpos_row_h` removed or renamed** — C90 regression: zoom resets on every reload
 - **`scrollLockRef` re-introduced anywhere** — C87 rule: the whole "write scroll back" concept is wrong
 - **Write-back to `scrollTop`/`scrollLeft` inside window touchmove handler** — C87 bug: creates scroll-event ping-pong that jerks the tech-name header
 - **`originalOverflowRef` read or written outside `activatePendingHold`/`handleDragEnd`/unmount** — C87 rule violation
