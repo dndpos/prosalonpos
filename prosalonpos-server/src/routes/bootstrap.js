@@ -221,18 +221,24 @@ router.get('/', async function(req, res, next) {
       } catch (e) { featuresEnabled = null; }
     }
 
-    // Build PIN table for instant local PIN verification (same logic as /auth/pin-table/:salon_id)
+    // Build PIN + badge tables for instant local verification (same logic as /auth/pin-table/:salon_id)
+    // cc2: badgeTable added alongside pinTable — raw badge_id keys, same staff-entry shape.
     var pinTable = {};
+    var badgeTable = {};
     for (var pi = 0; pi < staff.length; pi++) {
+      var entry = {
+        id: staff[pi].id,
+        display_name: staff[pi].display_name,
+        role: staff[pi].role,
+        rbac_role: staff[pi].rbac_role,
+        permissions: staff[pi].permissions ? (typeof staff[pi].permissions === 'string' ? JSON.parse(staff[pi].permissions) : staff[pi].permissions) : null,
+        permission_overrides: staff[pi].permission_overrides ? (typeof staff[pi].permission_overrides === 'string' ? JSON.parse(staff[pi].permission_overrides) : staff[pi].permission_overrides) : null,
+      };
       if (staff[pi].pin_sha256) {
-        pinTable[staff[pi].pin_sha256] = {
-          id: staff[pi].id,
-          display_name: staff[pi].display_name,
-          role: staff[pi].role,
-          rbac_role: staff[pi].rbac_role,
-          permissions: staff[pi].permissions ? (typeof staff[pi].permissions === 'string' ? JSON.parse(staff[pi].permissions) : staff[pi].permissions) : null,
-          permission_overrides: staff[pi].permission_overrides ? (typeof staff[pi].permission_overrides === 'string' ? JSON.parse(staff[pi].permission_overrides) : staff[pi].permission_overrides) : null,
-        };
+        pinTable[staff[pi].pin_sha256] = entry;
+      }
+      if (staff[pi].badge_id) {
+        badgeTable[staff[pi].badge_id] = entry;
       }
     }
     if (salon && salon.owner_pin_sha256) {
@@ -291,6 +297,7 @@ router.get('/', async function(req, res, next) {
         return { id: m.id, client_id: m.client_id, status: m.status, plan_name: m.plan ? m.plan.name : null };
       }),
       pinTable: pinTable,
+      badgeTable: badgeTable,
       featuresEnabled: featuresEnabled,
       today: today,
     });

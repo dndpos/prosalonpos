@@ -193,36 +193,43 @@ router.post('/verify-setup', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── GET /pin-table/:salon_id — PIN lookup table for instant local verification ──
-// Public endpoint — station calls this once on boot to enable instant PIN checking.
-// Returns a map of SHA-256(pin) → staff info. The station hashes typed PINs locally
-// and looks them up in this map — zero network delay, exact match required.
+// ── GET /pin-table/:salon_id — PIN + badge lookup tables for instant local verification ──
+// Public endpoint — station calls this once on boot to enable instant PIN/badge checking.
+// Returns { pinTable, badgeTable }:
+//   pinTable:   SHA-256(pin) → staff info (hashed; station hashes typed PIN and looks up)
+//   badgeTable: raw badge_id → staff info (not secret; station does direct lookup on scan)
+// Zero network delay, exact match required. cc2 adds badgeTable; pinTable unchanged.
 router.get('/pin-table/:salon_id', async function(req, res, next) {
   try {
     var salon_id = req.params.salon_id;
     if (!salon_id) return res.status(400).json({ error: 'salon_id is required' });
 
     var table = {};
+    var badgeTable = {};
 
-    // 1. Staff PINs
+    // 1. Staff PINs + badges
     var staff = await prisma.staff.findMany({
       where: { salon_id: salon_id, active: true }
     });
 
     for (var i = 0; i < staff.length; i++) {
+      var entry = {
+        id: staff[i].id,
+        display_name: staff[i].display_name,
+        role: staff[i].role,
+        rbac_role: staff[i].rbac_role,
+        permissions: fromDb(staff[i].permissions),
+        permission_overrides: fromDb(staff[i].permission_overrides)
+      };
       if (staff[i].pin_sha256) {
-        table[staff[i].pin_sha256] = {
-          id: staff[i].id,
-          display_name: staff[i].display_name,
-          role: staff[i].role,
-          rbac_role: staff[i].rbac_role,
-          permissions: fromDb(staff[i].permissions),
-          permission_overrides: fromDb(staff[i].permission_overrides)
-        };
+        table[staff[i].pin_sha256] = entry;
+      }
+      if (staff[i].badge_id) {
+        badgeTable[staff[i].badge_id] = entry;
       }
     }
 
-    // 2. Owner PIN
+    // 2. Owner PIN (no badge — owner authenticates via PIN only)
     var salon = await prisma.salon.findUnique({ where: { id: salon_id } });
     if (salon && salon.owner_pin_sha256) {
       table[salon.owner_pin_sha256] = {
@@ -233,7 +240,7 @@ router.get('/pin-table/:salon_id', async function(req, res, next) {
       };
     }
 
-    // 3. Provider master code
+    // 3. Provider master code (no badge — provider authenticates via master code only)
     table[pinSha256(PROVIDER_MASTER_CODE)] = {
       id: 'provider',
       display_name: 'Provider',
@@ -241,7 +248,7 @@ router.get('/pin-table/:salon_id', async function(req, res, next) {
       rbac_role: 'owner'
     };
 
-    res.json({ pinTable: table });
+    res.json({ pinTable: table, badgeTable: badgeTable });
   } catch (err) { next(err); }
 });
 
