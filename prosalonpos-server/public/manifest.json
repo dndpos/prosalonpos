@@ -1,6 +1,6 @@
 {
   "name": "Pro Salon POS",
-  "short_name": "SalonPOS",
+  "short_name": "Pro Salon POS",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0F172A",
