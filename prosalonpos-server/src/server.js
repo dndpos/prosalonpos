@@ -139,6 +139,32 @@ app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
 app.use('/api/v1/public', publicRoutes); // Online booking portal — no auth
 
+// cc4.5: Serve tech avatars with immutable cache headers. No auth because:
+//   1. <img src="..."> can't send Authorization headers
+//   2. Photos are low-sensitivity (already visible to anyone who walks into
+//      the salon)
+// URLs are versioned via ?v=<photo_updated_at_ms> so a new upload changes the
+// URL → every device fetches the new one once, caches it for a year.
+app.get('/photos/staff/:id', async function(req, res) {
+  try {
+    var row = await prisma.staff.findUnique({
+      where: { id: req.params.id },
+      select: { photo_blob: true, photo_mime: true, photo_updated_at: true }
+    });
+    if (!row || !row.photo_blob) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(404).send('No photo');
+    }
+    res.set('Content-Type', row.photo_mime || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    if (row.photo_updated_at) res.set('Last-Modified', row.photo_updated_at.toUTCString());
+    res.end(row.photo_blob);
+  } catch (e) {
+    res.set('Cache-Control', 'no-store');
+    res.status(500).send('Photo fetch failed');
+  }
+});
+
 // ── Protected routes (JWT required) ──
 app.use('/api/v1/staff', authenticate, staffRoutes);
 app.use('/api/v1/services', authenticate, servicesRoutes);

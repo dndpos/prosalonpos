@@ -89,6 +89,9 @@ model Staff {
   display_name              String
   legal_name                String?
   photo_url                 String?
+  photo_blob                Bytes?                          // cc4.5: JPEG bytes stored in DB; NEVER include in staff list queries (pulls megabytes)
+  photo_mime                String?                         // 'image/jpeg'
+  photo_updated_at          DateTime?                       // cache-bust stamp appended to photo_url as ?v=<ts>
   role                      String   @default("technician") // technician | manager | owner
   rbac_role                 String   @default("tech")       // tech | manager | owner
   pin_hash                  String                          // bcrypt hashed PIN
