@@ -89,6 +89,9 @@ model Staff {
   display_name              String
   legal_name                String?
   photo_url                 String?
+  photo_blob                Bytes?                          // cc4.5: JPEG bytes stored in DB; NEVER include in staff list queries (pulls megabytes)
+  photo_mime                String?                         // 'image/jpeg'
+  photo_updated_at          DateTime?                       // cache-bust stamp appended to photo_url as ?v=<ts>
   role                      String   @default("technician") // technician | manager | owner
   rbac_role                 String   @default("tech")       // tech | manager | owner
   pin_hash                  String                          // bcrypt hashed PIN
@@ -830,7 +833,7 @@ model MessageLogEntry {
 model ProviderOwner {
   id                  String   @id @default(uuid())
   name                String
-  email               String?
+  email               String?  @unique              // cc4.6.1: required by provider.js findUnique({ where: { email } }). Used to be enforced by a stray DB constraint — cc4.5's prisma db push dropped it, which is what broke login.
   pin_hash            String                        // bcrypt hashed PIN
   locked              Boolean  @default(false)       // C64: locked after 5 failed attempts
   failed_attempts     Int      @default(0)           // C64: consecutive failed login count

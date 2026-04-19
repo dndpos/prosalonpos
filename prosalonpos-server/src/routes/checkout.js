@@ -65,67 +65,6 @@ router.get('/tickets', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── GET /tickets/lookup — Find a ticket by its printed barcode code (cc5, reworked cc5.2) ──
-// The receipt prints a 10-digit numeric code (from cc5.2 onward). Pre-cc5.2 receipts print
-// an 8-char hex code. This endpoint accepts both formats so old and new receipts both work:
-//   - numeric (8-10 digits): convert to 8-char hex suffix, endsWith match
-//   - hex (contains a-f): endsWith match directly
-//   - full UUID (36 chars with dashes): exact match
-// Scans ALL dates (no created_at filter) so refunds / lookups work weeks/months later.
-router.get('/tickets/lookup', async function(req, res, next) {
-  try {
-    var raw = (req.query.code || '').toString().trim();
-    if (!raw) return res.status(400).json({ error: 'code required' });
-
-    var norm = raw.toUpperCase().replace(/[^0-9A-F-]/g, '');
-    var isFullUuid = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(norm);
-    var isNumeric = /^[0-9]+$/.test(norm);
-    var isHex = !isNumeric && /^[0-9A-F]+$/.test(norm);
-
-    var where = { salon_id: req.salon_id };
-    var hexSuffix = '';
-
-    if (isFullUuid) {
-      where.id = norm.toLowerCase();
-    } else if (isNumeric) {
-      // cc5.2: numeric code is the UUID's last 32 bits as decimal (up to 10 digits).
-      var n = parseInt(norm, 10);
-      if (!isFinite(n) || n < 0 || n > 0xFFFFFFFF) {
-        return res.status(400).json({ error: 'code out of range' });
-      }
-      hexSuffix = n.toString(16).toLowerCase();
-      while (hexSuffix.length < 8) hexSuffix = '0' + hexSuffix;
-      where.id = { endsWith: hexSuffix };
-    } else if (isHex) {
-      if (norm.length < 4) return res.status(400).json({ error: 'code too short' });
-      hexSuffix = norm.toLowerCase();
-      where.id = { endsWith: hexSuffix };
-    } else {
-      return res.status(400).json({ error: 'bad code format' });
-    }
-
-    console.log('[GET /tickets/lookup] raw=' + raw + ' norm=' + norm + ' mode=' + (isFullUuid?'uuid':isNumeric?'numeric':'hex') + ' hexSuffix=' + hexSuffix);
-
-    var tickets = await prisma.ticket.findMany({
-      where: where,
-      include: { items: true, payments: true },
-      take: 5,
-    });
-
-    console.log('[GET /tickets/lookup] matched=' + tickets.length);
-
-    if (tickets.length === 0) return res.status(404).json({ error: 'not_found' });
-    if (tickets.length > 1) return res.status(409).json({ error: 'ambiguous', count: tickets.length });
-
-    var t = tickets[0];
-    var pkgRedemptions = [];
-    if ((t.pkg_redeemed_cents || 0) > 0) {
-      pkgRedemptions = await prisma.packageRedemption.findMany({ where: { ticket_id: t.id } });
-    }
-    res.json({ ticket: formatTicket(t, pkgRedemptions) });
-  } catch (err) { next(err); }
-});
-
 // ── GET /next-ticket-number — Get the next sequential ticket number for today ──
 router.get('/next-ticket-number', async function(req, res, next) {
   try {
@@ -562,12 +501,7 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       };
     });
 
-    // Build ticket data — pkg_redeemed_cents included if available.
-    // cc5.3: accept client-supplied `id` (UUID v4) so the receipt's barcode code
-    // matches the row we insert. Before cc5.3 the server always generated a fresh
-    // UUID via Prisma @default(uuid()), which meant the first checkout receipt's
-    // barcode encoded a temporary `tkt-<millis>` id that didn't exist in the DB —
-    // reprints from Ticket View matched, the original print didn't.
+    // Build ticket data — pkg_redeemed_cents included if available
     var ticketData = {
       salon_id: req.salon_id,
       ticket_number: ticketNumber,
@@ -598,12 +532,6 @@ router.post('/tickets/quick-close', async function(req, res, next) {
     // Add pkg_redeemed_cents only if provided (resilient if migration not applied)
     if (data.pkg_redeemed_cents != null) {
       ticketData.pkg_redeemed_cents = data.pkg_redeemed_cents;
-    }
-
-    // cc5.3: accept client-supplied UUID if it looks valid — used by checkout so
-    // the receipt's barcode code matches the DB row on the very first print.
-    if (data.id && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(data.id)) {
-      ticketData.id = data.id.toLowerCase();
     }
 
     var ticket;
