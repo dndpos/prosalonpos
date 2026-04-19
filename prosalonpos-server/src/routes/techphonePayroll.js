@@ -70,13 +70,21 @@ router.get('/my-payroll-data', async function(req, res, next) {
       orderBy: { timestamp: 'asc' },
     });
 
-    // Service catalog — needed for product_cost_cents lookup during commission calc.
-    var services = await prisma.serviceCatalog.findMany({
+    // Service catalog — needed for product_cost_cents lookup during commission
+    // calc AND the Sales tab's net-per-item display. Mirror routes/services.js
+    // GET / — `category_ids` is a derived array from the join table, NOT a
+    // direct column. An invalid `select` here makes the whole endpoint throw
+    // (that was the cc5.12.0 bug that left product cost lookup empty and let
+    // the Sales tab fall back to showing gross).
+    var servicesRaw = await prisma.serviceCatalog.findMany({
       where: { salon_id: salonId },
-      select: {
-        id: true, name: true, price_cents: true, product_cost_cents: true,
-        category_ids: true, duration_minutes: true,
-      },
+      include: { category_links: true },
+    });
+    var services = servicesRaw.map(function(s) {
+      var obj = Object.assign({}, s);
+      obj.category_ids = (s.category_links || []).map(function(l) { return l.category_id; });
+      delete obj.category_links;
+      return obj;
     });
 
     // Salon settings — pay_frequency, commission toggles, discount rules, etc.
