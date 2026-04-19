@@ -112,6 +112,19 @@ function formatTicket(t, pkgRedemptions) {
   var refundedItemIds = {};
   refunds.forEach(function(r) { (r.items || []).forEach(function(ri) { refundedItemIds[ri.itemId] = true; }); });
 
+  // cc6: per-item package-redemption amount. Greedy-match redemption records
+  // to items by service_id so the receipt can render "Pkg Redeemed -$X" as a
+  // sub-line under the specific service it covered (not as a totals-block line).
+  // Covered cents = item.price_cents - upgrade_difference_cents (full service
+  // price when no upgrade; base-service price when customer upgraded).
+  var _pkgByService = {};
+  (pkgRedemptions || []).forEach(function(r) {
+    var k = r.service_redeemed_id || '';
+    if (!k) return;
+    if (!_pkgByService[k]) _pkgByService[k] = [];
+    _pkgByService[k].push(r);
+  });
+
   return {
     id: t.id,
     ticket_number: t.ticket_number,
@@ -181,6 +194,14 @@ function formatTicket(t, pkgRedemptions) {
     updated_at: t.updated_at,
     version: t.version,
     items: (t.items || []).map(function(item) {
+      // cc6: attach per-item package-redeem cents (see _pkgByService above).
+      var pkgRedeemCents = 0;
+      var sid = item.service_id;
+      if (sid && _pkgByService[sid] && _pkgByService[sid].length > 0) {
+        var red = _pkgByService[sid].shift();
+        var upgrade = red && red.upgrade_difference_cents ? red.upgrade_difference_cents : 0;
+        pkgRedeemCents = Math.max(0, (item.price_cents || 0) - upgrade);
+      }
       return {
         id: item.id,
         type: item.type,
@@ -195,6 +216,8 @@ function formatTicket(t, pkgRedemptions) {
         product_id: item.product_id,
         client_id: item.client_id,
         color: item.color,
+        pkg_redeem_cents: pkgRedeemCents,
+        pkgRedeemCents: pkgRedeemCents,
       };
     }),
     payments: (t.payments || []).map(function(p) {
