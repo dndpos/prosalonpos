@@ -44,6 +44,37 @@ function stripHeavyFields(s) {
   return s;
 }
 
+// cc5.8: Authoritatively wipe pay fields that don't match the active pay_type
+// so the three tabs (commission / hourly / salary) can never coexist in the
+// DB. Mutates `data` in place. Called by POST (create) and PUT (update) so
+// both the "new staff" and "edit staff" paths produce the same clean shape.
+// `commission_bonus_enabled` is the legit sub-option inside hourly/salary —
+// when that flag is true, commission_pct is preserved. When it's false,
+// commission_pct is wiped along with the other cross-tab fields.
+function enforcePayTypeExclusivity(data) {
+  if (!data || typeof data.pay_type !== 'string') return;
+  var t = data.pay_type;
+  if (t === 'commission') {
+    data.hourly_rate_cents = null;
+    data.salary_amount_cents = null;
+    data.salary_period = null;
+    data.commission_bonus_enabled = false;
+  } else if (t === 'hourly') {
+    data.salary_amount_cents = null;
+    data.salary_period = null;
+    data.daily_guarantee_cents = 0;
+    if (!data.commission_bonus_enabled) {
+      data.commission_pct = 0;
+    }
+  } else if (t === 'salary') {
+    data.hourly_rate_cents = null;
+    data.daily_guarantee_cents = 0;
+    if (!data.commission_bonus_enabled) {
+      data.commission_pct = 0;
+    }
+  }
+}
+
 // ── GET / — List all staff for this salon ──
 router.get('/', async function(req, res, next) {
   try {
@@ -102,6 +133,7 @@ router.get('/:id', async function(req, res, next) {
 router.post('/', async function(req, res, next) {
   try {
     var data = req.body;
+    enforcePayTypeExclusivity(data); // cc5.8 — see helper above
 
     // Owner role staff uses salon owner PIN — no separate PIN needed
     if (data.role === 'owner') {
@@ -242,6 +274,7 @@ router.post('/', async function(req, res, next) {
 router.put('/:id', async function(req, res, next) {
   try {
     var data = req.body;
+    enforcePayTypeExclusivity(data); // cc5.8 — see helper above
     var updateData = {};
 
     // Only include fields that were sent
