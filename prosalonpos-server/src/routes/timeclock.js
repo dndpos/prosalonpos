@@ -104,6 +104,13 @@ router.get('/punches', async function(req, res, next) {
 
 // ── POST /punch — Clock in or out ──
 // Body: { staff_id, type: 'in'|'out' }
+// cc5.6: Before recording a new 'in', close any stranded 'in' from a PRIOR
+// calendar day that has no matching 'out'. This prevents payroll math from
+// breaking when a tech forgets to clock out and starts a new shift the next
+// day. Synthetic 'out' is placed at the prior day's last-activity timestamp
+// (or 23:59:59 of that day if no activity signal available). Only touches
+// punches from strictly earlier calendar days — same-day in-progress shifts
+// are left alone so overnight or cross-midnight shifts under ~24h still work.
 router.post('/punch', async function(req, res, next) {
   try {
     var d = req.body;
@@ -117,11 +124,55 @@ router.post('/punch', async function(req, res, next) {
       return res.status(400).json({ error: 'Type must be "in" or "out"' });
     }
 
+    var now = new Date();
+
+    // Auto-close stranded prior-day 'in' punches before recording a new 'in'.
+    // Best-effort: a failure here must NEVER block the caller's clock-in. Any
+    // DB hiccup during cleanup is logged but swallowed so the primary create
+    // still runs.
+    if (d.type === 'in') {
+      try {
+        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        var recent = await prisma.clockPunch.findMany({
+          where: {
+            staff_id: d.staff_id,
+            timestamp: { lt: todayStart },
+          },
+          orderBy: { timestamp: 'desc' },
+          take: 1,
+        });
+        if (recent.length > 0 && recent[0].type === 'in') {
+          var strandedIn = recent[0];
+          // Place synthetic 'out' at 23:59:59 of the stranded 'in' day.
+          var strandedDay = new Date(strandedIn.timestamp);
+          var strandedEod = new Date(strandedDay.getFullYear(), strandedDay.getMonth(), strandedDay.getDate(), 23, 59, 59, 0);
+          var synthetic = await prisma.clockPunch.create({
+            data: {
+              staff_id: d.staff_id,
+              type: 'out',
+              timestamp: strandedEod,
+              manual: true,
+            }
+          });
+          await writeAuditLog({
+            punch_id: synthetic.id,
+            staff_id: d.staff_id,
+            action: 'auto_close_stranded',
+            new_value: { type: 'out', timestamp: strandedEod.toISOString(), closes_punch_id: strandedIn.id },
+            changed_by: null,
+            changed_by_name: 'System (auto-close stranded in)',
+          });
+        }
+      } catch (autoCloseErr) {
+        console.warn('[timeclock POST /punch] auto-close stranded-in failed (non-fatal):', autoCloseErr.message);
+      }
+    }
+
     var punch = await prisma.clockPunch.create({
       data: {
         staff_id: d.staff_id,
         type: d.type,
-        timestamp: new Date(),
+        timestamp: now,
         manual: false,
       }
     });
