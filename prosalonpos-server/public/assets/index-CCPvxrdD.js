@@ -212,7 +212,8 @@ Check server terminal for details.`),null}},mergeTickets:async function(r,o){var
 `),n.editedByName&&e.push("Edited by: "+n.editedByName+`
 `),n.closedByName&&e.push("Closed by: "+n.closedByName+`
 `),e.push(Dt.ALIGN_LEFT));var y=n.ticketDbId||n.txnId||"",m=y.replace(/-/g,"").slice(-8).toUpperCase();if(m&&m.length===8){var v="{B"+m;e.push(Dt.ALIGN_CENTER),e.push(`
-`),e.push(Io+"hP"),e.push(Io+"w"),e.push(Io+"H"),e.push(Io+"f\0"),e.push(Io+"kI"+String.fromCharCode(v.length)+v),e.push(`
+`),e.push(Io+"hP"),e.push(Io+"w"),e.push(Io+"H\0"),e.push(Io+"f\0"),e.push(Io+"kI"+String.fromCharCode(v.length)+v),e.push(`
+`),e.push(m+`
 `),e.push(Dt.ALIGN_LEFT)}return e.push(`
 `),e.push(Dt.FEED),e.push(Dt.CUT),e.join("")}function Q4(n){n=n||{};var e=[],t=n.W||Ep;e.push(Dt.INIT),e.push(Dt.ALIGN_CENTER),e.push(Dt.DOUBLE_ON),e.push(`TECH SLIP
 `),e.push(Dt.DOUBLE_OFF),e.push(Vi(t)+`
