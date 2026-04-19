@@ -562,7 +562,12 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       };
     });
 
-    // Build ticket data — pkg_redeemed_cents included if available
+    // Build ticket data — pkg_redeemed_cents included if available.
+    // cc5.3: accept client-supplied `id` (UUID v4) so the receipt's barcode code
+    // matches the row we insert. Before cc5.3 the server always generated a fresh
+    // UUID via Prisma @default(uuid()), which meant the first checkout receipt's
+    // barcode encoded a temporary `tkt-<millis>` id that didn't exist in the DB —
+    // reprints from Ticket View matched, the original print didn't.
     var ticketData = {
       salon_id: req.salon_id,
       ticket_number: ticketNumber,
@@ -593,6 +598,12 @@ router.post('/tickets/quick-close', async function(req, res, next) {
     // Add pkg_redeemed_cents only if provided (resilient if migration not applied)
     if (data.pkg_redeemed_cents != null) {
       ticketData.pkg_redeemed_cents = data.pkg_redeemed_cents;
+    }
+
+    // cc5.3: accept client-supplied UUID if it looks valid — used by checkout so
+    // the receipt's barcode code matches the DB row on the very first print.
+    if (data.id && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(data.id)) {
+      ticketData.id = data.id.toLowerCase();
     }
 
     var ticket;
