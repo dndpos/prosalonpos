@@ -65,6 +65,32 @@ router.get('/tickets', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── GET /tickets/by-short-id/:shortId — Barcode scan lookup (cc5) ──
+// The receipt barcode encodes the last 8 hex chars of the ticket UUID
+// (stripped of dashes, uppercase). Because UUIDs split 8-4-4-4-12, those
+// last 8 hex chars are exactly the last 8 chars of the raw UUID string,
+// so we can match with Prisma's `endsWith` — no raw SQL, works on
+// Postgres and SQLite identically. Lowercases the shortId because stored
+// UUIDs are lowercase (`@default(uuid())`).
+router.get('/tickets/by-short-id/:shortId', async function(req, res, next) {
+  try {
+    var shortId = (req.params.shortId || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{8}$/.test(shortId)) {
+      return res.status(400).json({ error: 'shortId must be 8 hex chars' });
+    }
+    var ticket = await prisma.ticket.findFirst({
+      where: { salon_id: req.salon_id, id: { endsWith: shortId } },
+      include: { items: true, payments: true },
+    });
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    var pkgRedemptions = [];
+    if ((ticket.pkg_redeemed_cents || 0) > 0) {
+      pkgRedemptions = await prisma.packageRedemption.findMany({ where: { ticket_id: ticket.id } });
+    }
+    res.json({ ticket: formatTicket(ticket, pkgRedemptions) });
+  } catch (err) { next(err); }
+});
+
 // ── GET /next-ticket-number — Get the next sequential ticket number for today ──
 router.get('/next-ticket-number', async function(req, res, next) {
   try {
@@ -532,6 +558,15 @@ router.post('/tickets/quick-close', async function(req, res, next) {
     // Add pkg_redeemed_cents only if provided (resilient if migration not applied)
     if (data.pkg_redeemed_cents != null) {
       ticketData.pkg_redeemed_cents = data.pkg_redeemed_cents;
+    }
+
+    // cc5.1: Accept client-supplied UUID so the receipt barcode printed at
+    // checkout (before the server responds) matches the UUID the server
+    // actually persists. Validated as a real UUID string — anything else
+    // falls through to Prisma's @default(uuid()) generator.
+    var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (typeof data.id === 'string' && UUID_RE.test(data.id)) {
+      ticketData.id = data.id.toLowerCase();
     }
 
     var ticket;
