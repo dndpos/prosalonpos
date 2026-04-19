@@ -65,37 +65,54 @@ router.get('/tickets', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── GET /tickets/lookup — Find a ticket by its printed barcode code (cc5) ──
-// The printed receipt's Code128 barcode encodes the last 8 hex chars of the ticket UUID (uppercase).
-// This endpoint scans ALL dates (no created_at filter) so refunds / lookups work weeks/months later.
-// Returns exactly one ticket, or 404 if zero/multiple matches.
+// ── GET /tickets/lookup — Find a ticket by its printed barcode code (cc5, reworked cc5.2) ──
+// The receipt prints a 10-digit numeric code (from cc5.2 onward). Pre-cc5.2 receipts print
+// an 8-char hex code. This endpoint accepts both formats so old and new receipts both work:
+//   - numeric (8-10 digits): convert to 8-char hex suffix, endsWith match
+//   - hex (contains a-f): endsWith match directly
+//   - full UUID (36 chars with dashes): exact match
+// Scans ALL dates (no created_at filter) so refunds / lookups work weeks/months later.
 router.get('/tickets/lookup', async function(req, res, next) {
   try {
     var raw = (req.query.code || '').toString().trim();
     if (!raw) return res.status(400).json({ error: 'code required' });
 
-    // Normalize: uppercase, strip non-hex. Accept either the 8-char short code
-    // (we'll endsWith-match on ticket.id) or a full UUID (exact match on id).
     var norm = raw.toUpperCase().replace(/[^0-9A-F-]/g, '');
     var isFullUuid = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(norm);
+    var isNumeric = /^[0-9]+$/.test(norm);
+    var isHex = !isNumeric && /^[0-9A-F]+$/.test(norm);
 
     var where = { salon_id: req.salon_id };
+    var hexSuffix = '';
+
     if (isFullUuid) {
       where.id = norm.toLowerCase();
+    } else if (isNumeric) {
+      // cc5.2: numeric code is the UUID's last 32 bits as decimal (up to 10 digits).
+      var n = parseInt(norm, 10);
+      if (!isFinite(n) || n < 0 || n > 0xFFFFFFFF) {
+        return res.status(400).json({ error: 'code out of range' });
+      }
+      hexSuffix = n.toString(16).toLowerCase();
+      while (hexSuffix.length < 8) hexSuffix = '0' + hexSuffix;
+      where.id = { endsWith: hexSuffix };
+    } else if (isHex) {
+      if (norm.length < 4) return res.status(400).json({ error: 'code too short' });
+      hexSuffix = norm.toLowerCase();
+      where.id = { endsWith: hexSuffix };
     } else {
-      var hex = norm.replace(/-/g, '');
-      if (hex.length < 4) return res.status(400).json({ error: 'code too short' });
-      // Match tickets whose UUID ends with this hex sequence.
-      // UUIDs are stored lowercased with dashes; the last 8 hex chars are the tail of the UUID
-      // (no dashes in the final group of 12, so endsWith on the lowercased hex works).
-      where.id = { endsWith: hex.toLowerCase() };
+      return res.status(400).json({ error: 'bad code format' });
     }
+
+    console.log('[GET /tickets/lookup] raw=' + raw + ' norm=' + norm + ' mode=' + (isFullUuid?'uuid':isNumeric?'numeric':'hex') + ' hexSuffix=' + hexSuffix);
 
     var tickets = await prisma.ticket.findMany({
       where: where,
       include: { items: true, payments: true },
       take: 5,
     });
+
+    console.log('[GET /tickets/lookup] matched=' + tickets.length);
 
     if (tickets.length === 0) return res.status(404).json({ error: 'not_found' });
     if (tickets.length > 1) return res.status(409).json({ error: 'ambiguous', count: tickets.length });
