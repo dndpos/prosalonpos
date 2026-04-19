@@ -20,7 +20,11 @@ import providerSalonRoutes from './providerSalons.js';
 // PROTECTED C64: master code from env var, never hardcoded in production
 var PROVIDER_MASTER_CODE = process.env.PROVIDER_MASTER_CODE || '90706';
 
-var PROVIDER_MAX_ATTEMPTS = 5;
+// cc4.8: Provider admin is the master control panel — hardened to the tightest
+// reasonable limits. 3 wrong PINs on the account = permanent lock (must use
+// "Forgot PIN" email reset). Paired with the per-IP limit below, a brute-force
+// attacker gets at most 3 attempts per IP in any 30-min window.
+var PROVIDER_MAX_ATTEMPTS = 3;
 var RESET_CODE_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
 
 // Hash a reset code with SHA-256
@@ -35,9 +39,12 @@ var router = Router();
 // ════════════════════════════════════════════
 
 // Per-IP rate limiting
+// cc4.8: Tightened to 3 attempts per 30-min window. Matches the per-account
+// threshold so an attacker can't exhaust the account lockout from one IP
+// without also tripping the IP block.
 var _providerIpAttempts = {};
-var PROVIDER_IP_MAX = 10;
-var PROVIDER_IP_WINDOW_MS = 15 * 60 * 1000;
+var PROVIDER_IP_MAX = 3;
+var PROVIDER_IP_WINDOW_MS = 30 * 60 * 1000;
 
 function checkProviderIpLimit(ip) {
   var entry = _providerIpAttempts[ip];
@@ -71,7 +78,7 @@ router.post('/auth/login', async function(req, res, next) {
 
     // Per-IP rate limit
     if (!checkProviderIpLimit(ip)) {
-      return res.status(429).json({ error: 'Too many login attempts from this IP. Try again in 15 minutes.' });
+      return res.status(429).json({ error: 'Too many login attempts from this IP. Try again in 30 minutes.' });
     }
 
     var normalEmail = email.trim().toLowerCase();
