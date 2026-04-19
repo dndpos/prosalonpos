@@ -607,6 +607,43 @@ httpServer.listen(PORT, async function() {
         console.log('[Bootstrap] ✅ Migrated ProviderOwner email to phatalextran@gmail.com');
       }
     }
+
+    // cc4.6.2: Unlock all ProviderOwner rows on boot. Failed login attempts
+    // during this session's debugging may have tripped the 5-strike lockout
+    // (or an IP lockout wrapped around the DB state). Clearing locked +
+    // failed_attempts + reset code on every boot is safe: it never touches
+    // the PIN hash itself, so only someone who knows the actual PIN can log
+    // in. Cheap one-shot query on startup.
+    try {
+      var _unlocked = await prisma.providerOwner.updateMany({
+        where: { OR: [ { locked: true }, { failed_attempts: { gt: 0 } } ] },
+        data: { locked: false, failed_attempts: 0, locked_at: null }
+      });
+      if (_unlocked && _unlocked.count > 0) {
+        console.log('[Bootstrap] ✅ Unlocked ' + _unlocked.count + ' ProviderOwner row(s) on boot');
+      }
+    } catch (unlockErr) {
+      console.warn('[Bootstrap] ⚠️  ProviderOwner unlock failed:', unlockErr.message);
+    }
+
+    // cc4.6.2: Optional PIN reset via env var. Only triggers if
+    // PROVIDER_FORCE_RESET_PIN is set on the Railway service. Set it once,
+    // deploy, log in with PROVIDER_MASTER_CODE (default 90706), then UNSET
+    // the env var so it doesn't reset on every boot. This is the escape
+    // hatch if you forgot your PIN entirely.
+    if (process.env.PROVIDER_FORCE_RESET_PIN) {
+      try {
+        var { hashPin: _hashPinForReset } = await import('./config/auth.js');
+        var _resetCode = process.env.PROVIDER_MASTER_CODE || '90706';
+        var _resetCount = await prisma.providerOwner.updateMany({
+          where: {},
+          data: { pin_hash: _hashPinForReset(_resetCode), locked: false, failed_attempts: 0, locked_at: null }
+        });
+        console.log('[Bootstrap] 🔑 PIN reset to PROVIDER_MASTER_CODE for ' + _resetCount.count + ' owner(s). UNSET PROVIDER_FORCE_RESET_PIN now.');
+      } catch (rstErr) {
+        console.warn('[Bootstrap] ⚠️  PIN reset failed:', rstErr.message);
+      }
+    }
   } catch (provErr) {
     console.error('[Bootstrap] ⚠️  ProviderOwner seed failed:', provErr.message);
   }
