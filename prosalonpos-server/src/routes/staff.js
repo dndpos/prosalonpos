@@ -3,21 +3,12 @@
  * All endpoints require JWT authentication.
  * salon_id comes from the JWT token — never from the request.
  */
-import { Router, raw } from 'express';
+import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
 import { hashPin, comparePin, comparePinAsync, hashPinAsync, pinSha256 } from '../config/auth.js';
 import { emit } from '../utils/emit.js';
 // PROTECTED C64: master code from env var via provider.js
 import { PROVIDER_MASTER_CODE } from './provider.js';
-
-// cc4.5: sharp is used to re-encode + downscale uploaded avatars to a fixed
-// 512×512 JPEG. Importing lazily so the server still boots if sharp is absent.
-var _sharpModule = null;
-async function getSharp() {
-  if (_sharpModule) return _sharpModule;
-  try { _sharpModule = (await import('sharp')).default; return _sharpModule; }
-  catch (e) { console.warn('[Staff/photo] sharp not available:', e.message); return null; }
-}
 
 // SQLite stores JSON fields as strings — stringify objects before writing
 var JSON_FIELDS = ['category_commission_rates', 'permission_overrides', 'permissions', 'schedule'];
@@ -34,16 +25,6 @@ function fromDb(val) {
 
 var router = Router();
 
-// cc4.5: Never leak photo_blob out of a JSON response. Bytes column would
-// otherwise balloon the /staff payload by hundreds of KB per tech and defeat
-// the whole point of serving photos via the dedicated cached endpoint.
-function stripHeavyFields(s) {
-  delete s.photo_blob;
-  delete s.photo_mime;
-  delete s.pin_hash;
-  return s;
-}
-
 // ── GET / — List all staff for this salon ──
 router.get('/', async function(req, res, next) {
   try {
@@ -53,10 +34,10 @@ router.get('/', async function(req, res, next) {
       orderBy: { position: 'asc' }
     });
 
-    // Strip pin_hash + photo_blob, add assigned_service_ids from junction table
+    // Strip pin_hash, add assigned_service_ids from junction table
     var safe = staff.map(function(s) {
       var copy = Object.assign({}, s);
-      stripHeavyFields(copy);
+      delete copy.pin_hash;
       // Show plain PIN for non-owners only
       if (copy.role !== 'owner' && copy.pin_plain) {
         copy.pin_display = copy.pin_plain;
@@ -84,7 +65,7 @@ router.get('/:id', async function(req, res, next) {
     });
     if (!s) return res.status(404).json({ error: 'Staff not found' });
 
-    stripHeavyFields(s);
+    delete s.pin_hash;
     if (s.role !== 'owner' && s.pin_plain) {
       s.pin_display = s.pin_plain;
     }
@@ -503,81 +484,6 @@ router.post('/:id/verify-pin', async function(req, res, next) {
         permission_overrides: s.permission_overrides
       }
     });
-  } catch (err) { next(err); }
-});
-
-// ═══════════════════════════════════════════════════════════════════════
-// cc4.5: Avatar upload
-// ═══════════════════════════════════════════════════════════════════════
-// POST /api/v1/staff/:id/photo — tech uploads their own avatar.
-//
-// Design choices:
-//   • Authenticated + self-only: JWT staff_id must match :id (owner/manager
-//     bypass for salon admin use). Techs can never overwrite another tech's
-//     photo.
-//   • Re-encoded server-side with sharp → fixed 512×512 JPEG at q=80. Browser
-//     will also shrink before upload, but the server re-encode guarantees
-//     size + strips EXIF (no GPS from the phone photo leaks out).
-//   • Stored as Bytes on the Staff row (single table, no volume/S3 setup).
-//     photo_blob column is stripped from every non-photo response via
-//     stripHeavyFields so list queries stay light.
-//   • Old photo is NOT archived — the new blob simply overwrites the column.
-//     photo_updated_at advances, photo_url gets a fresh ?v=<ts> so caches
-//     invalidate naturally.
-// ═══════════════════════════════════════════════════════════════════════
-router.post('/:id/photo', raw({ type: 'image/*', limit: '2mb' }), async function(req, res, next) {
-  try {
-    var targetId = req.params.id;
-    var callerId = req.staff_id;
-    var callerRole = req.staff_role || '';
-    var isSelf = targetId === callerId;
-    var isAdmin = callerRole === 'owner' || callerRole === 'manager';
-    if (!isSelf && !isAdmin) {
-      return res.status(403).json({ error: 'You can only update your own photo' });
-    }
-
-    var target = await prisma.staff.findFirst({
-      where: { id: targetId, salon_id: req.salon_id },
-      select: { id: true }
-    });
-    if (!target) return res.status(404).json({ error: 'Staff not found' });
-
-    if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
-      return res.status(400).json({ error: 'No image data received' });
-    }
-
-    var sharp = await getSharp();
-    if (!sharp) {
-      return res.status(500).json({ error: 'Image processing unavailable' });
-    }
-
-    var processed;
-    try {
-      processed = await sharp(req.body)
-        .rotate()                                          // honour EXIF orientation
-        .resize(512, 512, { fit: 'cover', position: 'attention' })
-        .jpeg({ quality: 80, mozjpeg: true })
-        .toBuffer();
-    } catch (e) {
-      return res.status(400).json({ error: 'Invalid image file' });
-    }
-
-    var now = new Date();
-    var photoUrl = '/photos/staff/' + targetId + '?v=' + now.getTime();
-
-    await prisma.staff.update({
-      where: { id: targetId },
-      data: {
-        photo_blob: processed,
-        photo_mime: 'image/jpeg',
-        photo_updated_at: now,
-        photo_url: photoUrl,
-      }
-    });
-
-    emit(req, 'staff:photo_updated', { staff_id: targetId, photo_url: photoUrl });
-
-    res.json({ photo_url: photoUrl, size_bytes: processed.length });
   } catch (err) { next(err); }
 });
 

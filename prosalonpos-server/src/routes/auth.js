@@ -703,7 +703,6 @@ router.post('/tech-login', async function(req, res, next) {
       commission_rate: staff.commission_pct || 0,
       role: staff.role || 'tech',
       salary_period: staff.salary_period || 'biweekly',
-      photo_url: staff.photo_url || null,  // cc4.5: so the avatar shows on reopen
     });
   } catch (err) { next(err); }
 });

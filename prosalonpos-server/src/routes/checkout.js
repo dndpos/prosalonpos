@@ -65,6 +65,50 @@ router.get('/tickets', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── GET /tickets/lookup — Find a ticket by its printed barcode code (cc5) ──
+// The printed receipt's Code128 barcode encodes the last 8 hex chars of the ticket UUID (uppercase).
+// This endpoint scans ALL dates (no created_at filter) so refunds / lookups work weeks/months later.
+// Returns exactly one ticket, or 404 if zero/multiple matches.
+router.get('/tickets/lookup', async function(req, res, next) {
+  try {
+    var raw = (req.query.code || '').toString().trim();
+    if (!raw) return res.status(400).json({ error: 'code required' });
+
+    // Normalize: uppercase, strip non-hex. Accept either the 8-char short code
+    // (we'll endsWith-match on ticket.id) or a full UUID (exact match on id).
+    var norm = raw.toUpperCase().replace(/[^0-9A-F-]/g, '');
+    var isFullUuid = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(norm);
+
+    var where = { salon_id: req.salon_id };
+    if (isFullUuid) {
+      where.id = norm.toLowerCase();
+    } else {
+      var hex = norm.replace(/-/g, '');
+      if (hex.length < 4) return res.status(400).json({ error: 'code too short' });
+      // Match tickets whose UUID ends with this hex sequence.
+      // UUIDs are stored lowercased with dashes; the last 8 hex chars are the tail of the UUID
+      // (no dashes in the final group of 12, so endsWith on the lowercased hex works).
+      where.id = { endsWith: hex.toLowerCase() };
+    }
+
+    var tickets = await prisma.ticket.findMany({
+      where: where,
+      include: { items: true, payments: true },
+      take: 5,
+    });
+
+    if (tickets.length === 0) return res.status(404).json({ error: 'not_found' });
+    if (tickets.length > 1) return res.status(409).json({ error: 'ambiguous', count: tickets.length });
+
+    var t = tickets[0];
+    var pkgRedemptions = [];
+    if ((t.pkg_redeemed_cents || 0) > 0) {
+      pkgRedemptions = await prisma.packageRedemption.findMany({ where: { ticket_id: t.id } });
+    }
+    res.json({ ticket: formatTicket(t, pkgRedemptions) });
+  } catch (err) { next(err); }
+});
+
 // ── GET /next-ticket-number — Get the next sequential ticket number for today ──
 router.get('/next-ticket-number', async function(req, res, next) {
   try {

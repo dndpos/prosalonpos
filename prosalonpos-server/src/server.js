@@ -139,32 +139,6 @@ app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/license', licenseRoutes);
 app.use('/api/v1/public', publicRoutes); // Online booking portal — no auth
 
-// cc4.5: Serve tech avatars with immutable cache headers. No auth because:
-//   1. <img src="..."> can't send Authorization headers
-//   2. Photos are low-sensitivity (already visible to anyone who walks into
-//      the salon)
-// URLs are versioned via ?v=<photo_updated_at_ms> so a new upload changes the
-// URL → every device fetches the new one once, caches it for a year.
-app.get('/photos/staff/:id', async function(req, res) {
-  try {
-    var row = await prisma.staff.findUnique({
-      where: { id: req.params.id },
-      select: { photo_blob: true, photo_mime: true, photo_updated_at: true }
-    });
-    if (!row || !row.photo_blob) {
-      res.set('Cache-Control', 'no-store');
-      return res.status(404).send('No photo');
-    }
-    res.set('Content-Type', row.photo_mime || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=31536000, immutable');
-    if (row.photo_updated_at) res.set('Last-Modified', row.photo_updated_at.toUTCString());
-    res.end(row.photo_blob);
-  } catch (e) {
-    res.set('Cache-Control', 'no-store');
-    res.status(500).send('Photo fetch failed');
-  }
-});
-
 // ── Protected routes (JWT required) ──
 app.use('/api/v1/staff', authenticate, staffRoutes);
 app.use('/api/v1/services', authenticate, servicesRoutes);
@@ -605,43 +579,6 @@ httpServer.listen(PORT, async function() {
           data: { email: 'phatalextran@gmail.com' }
         });
         console.log('[Bootstrap] ✅ Migrated ProviderOwner email to phatalextran@gmail.com');
-      }
-    }
-
-    // cc4.6.2: Unlock all ProviderOwner rows on boot. Failed login attempts
-    // during this session's debugging may have tripped the 5-strike lockout
-    // (or an IP lockout wrapped around the DB state). Clearing locked +
-    // failed_attempts + reset code on every boot is safe: it never touches
-    // the PIN hash itself, so only someone who knows the actual PIN can log
-    // in. Cheap one-shot query on startup.
-    try {
-      var _unlocked = await prisma.providerOwner.updateMany({
-        where: { OR: [ { locked: true }, { failed_attempts: { gt: 0 } } ] },
-        data: { locked: false, failed_attempts: 0, locked_at: null }
-      });
-      if (_unlocked && _unlocked.count > 0) {
-        console.log('[Bootstrap] ✅ Unlocked ' + _unlocked.count + ' ProviderOwner row(s) on boot');
-      }
-    } catch (unlockErr) {
-      console.warn('[Bootstrap] ⚠️  ProviderOwner unlock failed:', unlockErr.message);
-    }
-
-    // cc4.6.2: Optional PIN reset via env var. Only triggers if
-    // PROVIDER_FORCE_RESET_PIN is set on the Railway service. Set it once,
-    // deploy, log in with PROVIDER_MASTER_CODE (default 90706), then UNSET
-    // the env var so it doesn't reset on every boot. This is the escape
-    // hatch if you forgot your PIN entirely.
-    if (process.env.PROVIDER_FORCE_RESET_PIN) {
-      try {
-        var { hashPin: _hashPinForReset } = await import('./config/auth.js');
-        var _resetCode = process.env.PROVIDER_MASTER_CODE || '90706';
-        var _resetCount = await prisma.providerOwner.updateMany({
-          where: {},
-          data: { pin_hash: _hashPinForReset(_resetCode), locked: false, failed_attempts: 0, locked_at: null }
-        });
-        console.log('[Bootstrap] 🔑 PIN reset to PROVIDER_MASTER_CODE for ' + _resetCount.count + ' owner(s). UNSET PROVIDER_FORCE_RESET_PIN now.');
-      } catch (rstErr) {
-        console.warn('[Bootstrap] ⚠️  PIN reset failed:', rstErr.message);
       }
     }
   } catch (provErr) {
