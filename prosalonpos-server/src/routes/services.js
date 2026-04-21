@@ -270,4 +270,38 @@ router.post('/dedup', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── POST /cleanup-empty — Hard-delete services with empty/whitespace-only names ──
+router.post('/cleanup-empty', async function(req, res, next) {
+  try {
+    var all = await prisma.serviceCatalog.findMany({
+      where: { salon_id: req.salon_id },
+      select: { id: true, name: true }
+    });
+    var emptyIds = all.filter(function(s) { return !(s.name || '').trim(); }).map(function(s) { return s.id; });
+    if (emptyIds.length === 0) return res.json({ deleted: 0 });
+    await prisma.serviceCatalogCategory.deleteMany({ where: { service_catalog_id: { in: emptyIds } } });
+    await prisma.serviceCatalog.deleteMany({ where: { id: { in: emptyIds } } });
+    emit(req, 'service:deleted');
+    res.json({ deleted: emptyIds.length });
+  } catch (err) { next(err); }
+});
+
+// ── POST /cleanup-orphans — Soft-deactivate services with no category links ──
+router.post('/cleanup-orphans', async function(req, res, next) {
+  try {
+    var services = await prisma.serviceCatalog.findMany({
+      where: { salon_id: req.salon_id, active: true },
+      include: { category_links: true }
+    });
+    var orphanIds = services.filter(function(s) { return s.category_links.length === 0; }).map(function(s) { return s.id; });
+    if (orphanIds.length === 0) return res.json({ deactivated: 0 });
+    await prisma.serviceCatalog.updateMany({
+      where: { id: { in: orphanIds } },
+      data: { active: false }
+    });
+    emit(req, 'service:updated');
+    res.json({ deactivated: orphanIds.length });
+  } catch (err) { next(err); }
+});
+
 export default router;
