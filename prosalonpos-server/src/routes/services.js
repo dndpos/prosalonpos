@@ -60,7 +60,10 @@ router.put('/categories/:id', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── DELETE /categories/:id — Hard delete category + orphaned services ──
+// ── DELETE /categories/:id — Soft delete category + orphaned services ──
+// cc8: never hard-delete. Hard delete wiped commission rules (ServiceStaffAssignment
+// cascade) and nulled appointment service links, causing past tickets to miscalculate
+// commissions. Soft-delete hides from UI while preserving all historical lookups.
 router.delete('/categories/:id', async function(req, res, next) {
   try {
     var existing = await prisma.serviceCategory.findFirst({
@@ -68,14 +71,13 @@ router.delete('/categories/:id', async function(req, res, next) {
     });
     if (!existing) return res.status(404).json({ error: 'Category not found' });
 
-    // Find services that ONLY belong to this category (will become orphaned)
+    // Find services whose only category is this one (would be orphaned in UI)
     var linksInCat = await prisma.serviceCatalogCategory.findMany({
       where: { category_id: req.params.id },
       select: { service_catalog_id: true }
     });
     var svcIds = linksInCat.map(function(l) { return l.service_catalog_id; });
 
-    // For each service, check if it has links to OTHER categories
     var orphanedIds = [];
     if (svcIds.length > 0) {
       var otherLinks = await prisma.serviceCatalogCategory.findMany({
@@ -90,15 +92,18 @@ router.delete('/categories/:id', async function(req, res, next) {
       orphanedIds = svcIds.filter(function(id) { return !hasOtherCat[id]; });
     }
 
-    // Delete category (cascade removes junction links + category_staff)
-    await prisma.serviceCategory.delete({
-      where: { id: req.params.id }
+    // Soft-delete category — keeps junction rows + category_staff + past lookups intact
+    await prisma.serviceCategory.update({
+      where: { id: req.params.id },
+      data: { active: false, version: { increment: 1 } }
     });
 
-    // Delete orphaned services (no remaining category links)
+    // Soft-delete services whose only category was this one — hides from UI, but
+    // preserves the row so past tickets / commissions still resolve correctly.
     if (orphanedIds.length > 0) {
-      await prisma.serviceCatalog.deleteMany({
-        where: { id: { in: orphanedIds } }
+      await prisma.serviceCatalog.updateMany({
+        where: { id: { in: orphanedIds } },
+        data: { active: false }
       });
     }
 
