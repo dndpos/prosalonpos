@@ -248,6 +248,65 @@ router.post('/', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── POST /:id/assign-walkin — Add service_lines to a walk-in appointment when a tech is assigned (cc11.3) ──
+// Walk-in appointments are created at check-in time with `walk_in:true, status:'checked_in'`
+// and NO service_lines (tech isn't picked yet — client is on the waitlist). When the
+// salon owner pulls them off the waitlist and assigns a tech, the front-end calls
+// this route to (a) create the service_lines under the existing appointment and
+// (b) flip the appointment status to 'in_progress'. Using the SAME appointment id
+// keeps the check-in slip's barcode valid throughout the visit — scans resolve to
+// this appointment (or its linkedTicket, via cc11.2) regardless of timing.
+router.post('/:id/assign-walkin', async function(req, res, next) {
+  try {
+    var existing = await prisma.appointment.findFirst({
+      where: { id: req.params.id, salon_id: req.salon_id },
+      include: { service_lines: true },
+    });
+    if (!existing) return res.status(404).json({ error: 'Appointment not found' });
+    if (!existing.walk_in) return res.status(400).json({ error: 'Not a walk-in appointment' });
+    var data = req.body || {};
+    var lines = data.service_lines || [];
+    if (lines.length === 0) return res.status(400).json({ error: 'At least one service_line is required' });
+    // Remove any pre-existing service_lines under this appointment first (defensive —
+    // expected to be empty for walk-ins but an idempotent re-call shouldn't duplicate).
+    if (existing.service_lines && existing.service_lines.length > 0) {
+      await prisma.serviceLine.deleteMany({ where: { appointment_id: req.params.id } });
+    }
+    // Create the new service_lines tied to the existing appointment.
+    await prisma.serviceLine.createMany({
+      data: lines.map(function(sl, i) {
+        return {
+          appointment_id: req.params.id,
+          service_catalog_id: sl.service_catalog_id || null,
+          staff_id: sl.staff_id,
+          starts_at: new Date(sl.starts_at),
+          duration_minutes: sl.duration_minutes || 30,
+          calendar_color: sl.calendar_color || '#3B82F6',
+          status: 'in_progress',
+          client_name: sl.client_name || existing.client_name || null,
+          service_name: sl.service_name,
+          price_cents: sl.price_cents || 0,
+          position: i,
+        };
+      }),
+    });
+    // Flip appointment status + bump version.
+    var appt = await prisma.appointment.update({
+      where: { id: req.params.id },
+      data: { status: 'in_progress', version: { increment: 1 } },
+      include: { service_lines: { orderBy: { position: 'asc' } } },
+    });
+    // Broadcast so other stations pick up the new service_lines.
+    var assignStaffIds = (appt.service_lines || []).map(function(sl) { return sl.staff_id; }).filter(Boolean);
+    emit(req, 'appointment:updated', {
+      staff_ids: assignStaffIds,
+      client_name: appt.client_name || 'Walk-in',
+      status: 'in_progress',
+    });
+    res.json({ appointment: appt });
+  } catch (err) { next(err); }
+});
+
 // ── PUT /:id — Update appointment (status cascades to all service lines) ──
 router.put('/:id', async function(req, res, next) {
   try {
