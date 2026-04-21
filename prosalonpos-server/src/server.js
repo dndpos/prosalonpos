@@ -304,6 +304,17 @@ io.on('connection', function(socket) {
     }
   });
 
+  // cc11: Check-in slip relay. When any device in the salon checks a client
+  // in, it emits this event; every OTHER station in the salon receives it and
+  // decides locally whether to print based on its own print_checkin_tickets
+  // flag. Sender is excluded so the originating device doesn't print twice
+  // (it already prints locally in useCalendarHandlers.handleCheckInSave).
+  socket.on('checkin:print', function(data) {
+    if (socket.salonId) {
+      socket.to('salon:' + socket.salonId).emit('checkin:print', data);
+    }
+  });
+
   // ── WebRTC Screen Sharing Signaling ──
   // Provider Admin initiates, salon station accepts and shares screen
   socket.on('screen-share-request', function(data) {

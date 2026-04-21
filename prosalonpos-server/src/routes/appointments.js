@@ -17,6 +17,12 @@ import prisma from '../config/database.js';
 import { emit } from '../utils/emit.js';
 import { sendPushToStaffList } from '../utils/pushService.js';
 import { triggerBookingConfirm, triggerCancelConfirm, triggerNoShow, triggerWaitlist } from '../utils/autoMessaging.js';
+// cc11.2: formatTicket shapes a raw Prisma ticket into the client-expected
+// format (same mapping the /checkout/tickets/by-short-id route uses).
+// We need it because the by-short-id appointment route now also returns
+// the linked open ticket — and the client's handleScanReopen expects the
+// shaped form, not the raw Prisma record.
+import { formatTicket } from './checkoutHelpers.js';
 
 var router = Router();
 
@@ -124,6 +130,50 @@ router.get('/', async function(req, res, next) {
     });
 
     res.json({ appointments: appts });
+  } catch (err) { next(err); }
+});
+
+// ── GET /by-short-id/:shortId — Barcode scan lookup (cc11, linkedTicket added cc11.2) ──
+// The check-in slip barcode encodes the last 8 hex chars of the appointment
+// UUID (stripped of dashes, uppercase). Same pattern as the ticket receipt's
+// `GET /checkout/tickets/by-short-id/:shortId` (P059 / cc5). Lowercases the
+// shortId because stored UUIDs are lowercase (`@default(uuid())`).
+//
+// cc11.2: Also looks up any currently-open ticket linked to this appointment
+// and returns it as `linkedTicket`. Reason — after check-in, the tech works,
+// cashier may open checkout and make adjustments (add retail, change prices,
+// add tips) and put the ticket on hold. The slip's barcode still points at
+// the appointment, but the LIVE data is on the held ticket. Client prefers
+// `linkedTicket` over `appointment` so scanning the original slip brings up
+// the adjusted ticket, not stale appointment data.
+router.get('/by-short-id/:shortId', async function(req, res, next) {
+  try {
+    var shortId = (req.params.shortId || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{8}$/.test(shortId)) {
+      return res.status(400).json({ error: 'shortId must be 8 hex chars' });
+    }
+    var appt = await prisma.appointment.findFirst({
+      where: { salon_id: req.salon_id, id: { endsWith: shortId } },
+      include: { service_lines: { orderBy: { position: 'asc' } } },
+    });
+    if (!appt) return res.status(404).json({ error: 'Appointment not found' });
+    // cc11.2: check for a currently-open (held) ticket tied to this appointment.
+    // Ticket.status values: open | paid | voided | refunded | merged.
+    // Only `open` means "held, ready to resume at checkout." The others are
+    // terminal and shouldn't override the appointment's live service lines.
+    var linkedTicket = await prisma.ticket.findFirst({
+      where: { salon_id: req.salon_id, appointment_id: appt.id, status: 'open' },
+      include: { items: true, payments: true },
+      orderBy: { created_at: 'desc' },
+    });
+    var pkgRedemptions = [];
+    if (linkedTicket && (linkedTicket.pkg_redeemed_cents || 0) > 0) {
+      pkgRedemptions = await prisma.packageRedemption.findMany({ where: { ticket_id: linkedTicket.id } });
+    }
+    res.json({
+      appointment: appt,
+      linkedTicket: linkedTicket ? formatTicket(linkedTicket, pkgRedemptions) : null,
+    });
   } catch (err) { next(err); }
 });
 
