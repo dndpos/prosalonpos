@@ -223,6 +223,24 @@ if (existsSync(staticPath)) {
   // Must be registered BEFORE the SPA wildcard fallback
   registerTechPortalRoutes(app);
 
+  // cc12: SMS opt-in / consent page — served so Twilio A2P/toll-free verification
+  // can reach a real page at a clean URL. Must be registered BEFORE the SPA
+  // wildcard fallback, otherwise the fallback serves index.html for any path
+  // without a file extension.
+  app.get('/sms-opt-in', function(req, res) {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(join(staticPath, 'sms-opt-in.html'));
+  });
+
+  // cc12.1: Public "About ProSalonPOS" business page — serves as the Website URL
+  // submitted to Twilio. Distinct from the SMS opt-in page so reviewers see two
+  // real pages. Same reason as /sms-opt-in: must be registered BEFORE the SPA
+  // wildcard fallback.
+  app.get('/about', function(req, res) {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(join(staticPath, 'about.html'));
+  });
+
   // SPA fallback — any non-API route serves index.html with no-cache headers
   app.get('*', function(req, res) {
     if (!req.path.startsWith('/api/')) {
