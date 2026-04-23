@@ -23,6 +23,8 @@ import { triggerBookingConfirm, triggerCancelConfirm, triggerNoShow, triggerWait
 // the linked open ticket — and the client's handleScanReopen expects the
 // shaped form, not the raw Prisma record.
 import { formatTicket } from './checkoutHelpers.js';
+// cc15: barcode audit log — slip_printed on create, scanned on by-short-id.
+import { logSlipEvent, SLIP_EVENT_TYPES, reqContext, shortIdFromUuid } from '../utils/slipLog.js';
 
 var router = Router();
 
@@ -157,19 +159,99 @@ router.get('/by-short-id/:shortId', async function(req, res, next) {
       include: { service_lines: { orderBy: { position: 'asc' } } },
     });
     if (!appt) return res.status(404).json({ error: 'Appointment not found' });
-    // cc11.2: check for a currently-open (held) ticket tied to this appointment.
-    // Ticket.status values: open | paid | voided | refunded | merged.
-    // Only `open` means "held, ready to resume at checkout." The others are
-    // terminal and shouldn't override the appointment's live service lines.
+    // cc11.2 + cc15.4: check for a currently-open (held) ticket tied to
+    // this appointment. Ticket.status values: open | paid | voided |
+    // refunded | merged. Only `open` means "held, ready to resume at
+    // checkout." The others are terminal and shouldn't override the
+    // appointment's live service lines.
+    //
+    // cc15.4: match on EITHER the scalar `appointment_id` (direct, for
+    // single-ticket holds + first-source-of-merge) OR the JSON array
+    // `source_appointment_ids` (populated by merge routes with every
+    // source's appointment_id). This replaces the cc15.3 chain walk for
+    // any ticket merged under cc15.4+. The chain walk remains below as
+    // a safety net for historical merges that predate this column.
     var linkedTicket = await prisma.ticket.findFirst({
-      where: { salon_id: req.salon_id, appointment_id: appt.id, status: 'open' },
+      where: {
+        salon_id: req.salon_id,
+        status: 'open',
+        OR: [
+          { appointment_id: appt.id },
+          { source_appointment_ids: { array_contains: appt.id } },
+        ],
+      },
       include: { items: true, payments: true },
       orderBy: { created_at: 'desc' },
     });
+    // cc15.3: when the direct lookup finds no open ticket, the ticket
+    // for this appointment may have been MERGED into another. Andy's
+    // rule: from slip-print to final payment, the original slip must
+    // always resolve to whatever ticket is currently "live" — single,
+    // merged into another, or merged-into-another-merged. Walk the
+    // `merged_into` chain until we find an open ticket (return it) or
+    // hit a terminal state (paid/voided/refunded → return null, same as
+    // today — slip no longer resolves because payment is done).
+    //
+    // Safety cap at 10 hops so a corrupt self-referential chain can't
+    // spin forever. Realistic chains are 1-2 hops.
+    if (!linkedTicket) {
+      var mergedSource = await prisma.ticket.findFirst({
+        where: { salon_id: req.salon_id, appointment_id: appt.id, status: 'merged' },
+        orderBy: { created_at: 'desc' },
+      });
+      if (mergedSource && mergedSource.merged_into) {
+        var cursorId = mergedSource.merged_into;
+        var hops = 0;
+        while (cursorId && hops < 10) {
+          var next = await prisma.ticket.findFirst({
+            where: { id: cursorId, salon_id: req.salon_id },
+          });
+          if (!next) break;
+          if (next.status === 'merged' && next.merged_into) {
+            cursorId = next.merged_into;
+            hops = hops + 1;
+            continue;
+          }
+          if (next.status === 'open') {
+            // Re-fetch with items + payments for formatTicket.
+            linkedTicket = await prisma.ticket.findFirst({
+              where: { id: next.id, salon_id: req.salon_id },
+              include: { items: true, payments: true },
+            });
+          }
+          // Terminal status (paid/voided/refunded) → linkedTicket stays
+          // null. Client falls back to appointment data. Matches cc11.2
+          // "only open means held, ready to resume."
+          break;
+        }
+      }
+    }
     var pkgRedemptions = [];
     if (linkedTicket && (linkedTicket.pkg_redeemed_cents || 0) > 0) {
       pkgRedemptions = await prisma.packageRedemption.findMany({ where: { ticket_id: linkedTicket.id } });
     }
+    // cc15: log the scan. Note that this fires on any slip scan, whether
+    // from empty checkout (open-fresh) or active checkout (combine). The
+    // payload includes the resolution — appointment only, direct held
+    // ticket, or (cc15.3) walked merge chain — which is exactly what's
+    // useful when debugging "the slip didn't pull up the right data."
+    // cc15.3: if the returned ticket is NOT directly linked to this
+    // appointment (i.e., we walked the merge chain to find it), tag the
+    // event as resolved='merge_chain' so the History viewer shows the
+    // slip was followed through a merge to land on the absorber.
+    var _resolvedVia = linkedTicket ? (linkedTicket.appointment_id === appt.id ? 'linkedTicket' : 'merge_chain') : 'appointment';
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.SCANNED,
+      shortId:       shortId,
+      appointmentId: appt.id,
+      ticketId:      linkedTicket ? linkedTicket.id : null,
+      payload: {
+        resolved: _resolvedVia,
+        ticket_status: linkedTicket ? linkedTicket.status : null,
+        absorber_ticket_number: _resolvedVia === 'merge_chain' ? (linkedTicket && linkedTicket.ticket_number) : undefined,
+      },
+    });
     res.json({
       appointment: appt,
       linkedTicket: linkedTicket ? formatTicket(linkedTicket, pkgRedemptions) : null,
@@ -244,6 +326,21 @@ router.post('/', async function(req, res, next) {
     }).catch(function() {});
     // Automated SMS: booking confirmation (non-blocking)
     triggerBookingConfirm(req.salon_id, appt, appt.service_lines).catch(function() {});
+    // cc15: slip_printed — the appointment exists, so the check-in slip
+    // is now printable and the barcode is live. Any future ticket write
+    // under this appointment lands in this barcode's log.
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.SLIP_PRINTED,
+      appointmentId: appt.id,
+      payload: {
+        client_name: appt.client_name || 'Walk-in',
+        walk_in: !!appt.walk_in,
+        service_lines: (appt.service_lines || []).map(function(sl) {
+          return { name: sl.service_name, price: sl.price_cents || 0, tech_id: sl.staff_id };
+        }),
+      },
+    });
     res.status(201).json({ appointment: appt });
   } catch (err) { next(err); }
 });

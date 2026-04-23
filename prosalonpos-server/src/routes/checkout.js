@@ -9,6 +9,9 @@ import { emit } from '../utils/emit.js';
 import { sendPushToStaffList } from '../utils/pushService.js';
 import { triggerReceipt } from '../utils/autoMessaging.js';
 import { toDb, fromDb, dayBounds, getEasternOffset, formatTicket } from './checkoutHelpers.js';
+// cc15: barcode audit log. Hooks here cover create/update/close/reopen/
+// quick-close. Merge paths are logged from their own files.
+import { logSlipEvent, SLIP_EVENT_TYPES, reqContext, itemsSnapshot } from '../utils/slipLog.js';
 var router = Router();
 
 // ── ROUTES ──
@@ -112,6 +115,38 @@ router.get('/next-ticket-number', async function(req, res, next) {
 router.post('/tickets', async function(req, res, next) {
   try {
     var data = req.body;
+
+    // cc15.4: defensive guard — refuse to create a NEW ticket when an
+    // open-or-merged ticket already exists for this appointment_id. If
+    // the client's calendar block accidentally routes through the
+    // "no-ticket-yet" path when a merged absorber already holds this
+    // appointment's items, creating a new ticket would double-bill at
+    // close time (Andy's cc15.4 "ticket #3 orphan" scenario). 409
+    // Conflict signals the client to refetch and route through the
+    // existing-ticket path.
+    if (data.appointment_id) {
+      var existingForAppt = await prisma.ticket.findFirst({
+        where: {
+          salon_id: req.salon_id,
+          status: { in: ['open', 'merged'] },
+          OR: [
+            { appointment_id: data.appointment_id },
+            { source_appointment_ids: { array_contains: data.appointment_id } },
+          ],
+        },
+        select: { id: true, status: true, merged_into: true, ticket_number: true },
+      });
+      if (existingForAppt) {
+        return res.status(409).json({
+          error: 'A ticket already exists for this appointment',
+          existing_ticket_id: existingForAppt.id,
+          existing_ticket_status: existingForAppt.status,
+          existing_ticket_number: existingForAppt.ticket_number,
+          merged_into: existingForAppt.merged_into || null,
+        });
+      }
+    }
+
     var bounds = dayBounds();
     // Get next ticket number for today
     var lastTicket = await prisma.ticket.findFirst({
@@ -155,6 +190,18 @@ router.post('/tickets', async function(req, res, next) {
       include: { items: true, payments: true },
     });
     emit(req, 'ticket:created');
+    // cc15: ticket_created — first persisted state for this slip.
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_CREATED,
+      appointmentId: ticket.appointment_id,
+      ticketId:      ticket.id,
+      payload: {
+        ticket_number: ticket.ticket_number,
+        items: itemsSnapshot(ticket.items),
+        deposit_cents: ticket.deposit_cents || 0,
+      },
+    });
     res.status(201).json({ ticket: formatTicket(ticket) });
   } catch (err) { next(err); }
 });
@@ -212,6 +259,20 @@ router.put('/tickets/:id', async function(req, res, next) {
       include: { items: true, payments: true },
     });
     emit(req, 'ticket:updated');
+    // cc15: ticket_updated — hold with new items / price changes. This is
+    // where adjustments land. If an adjustment is missing at checkout,
+    // checking the log for this event shows exactly what the server
+    // received and when.
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_UPDATED,
+      appointmentId: ticket.appointment_id,
+      ticketId:      ticket.id,
+      payload: {
+        items: itemsSnapshot(ticket.items),
+        deposit_cents: ticket.deposit_cents || 0,
+      },
+    });
     res.json({ ticket: formatTicket(ticket) });
   } catch (err) { next(err); }
 });
@@ -313,17 +374,33 @@ router.post('/tickets/:id/close', async function(req, res, next) {
       ticket_number: ticket.ticket_number,
     });
     
-    // Mark appointment + service lines as checked_out (same as quick-close path)
-    var apptId = existing.appointment_id || data.appointment_id;
-    if (apptId) {
-      await prisma.appointment.update({
-        where: { id: apptId },
-        data: { status: 'checked_out', version: { increment: 1 } },
-      }).catch(function() {}); // non-fatal
-      await prisma.serviceLine.updateMany({
-        where: { appointment_id: apptId },
-        data: { status: 'checked_out', payment_method: data.payment_method || null },
-      }).catch(function() {}); // non-fatal
+    // cc15.5: mark EVERY source appointment as checked_out, not just
+    // the scalar `appointment_id`. When this ticket is a merge absorber
+    // (cc15.4 `source_appointment_ids` populated), all source
+    // appointments need to transition — otherwise Alex's calendar block
+    // stays "completed" and still offers a Check Out button after the
+    // combined ticket was already paid. Mirrors merge-and-close's
+    // uniqueApptIds loop. Non-merged tickets fall back to the scalar.
+    var closeApptIds = [];
+    if (existing.appointment_id) closeApptIds.push(existing.appointment_id);
+    if (existing.source_appointment_ids && Array.isArray(existing.source_appointment_ids)) {
+      existing.source_appointment_ids.forEach(function(id) {
+        if (id && closeApptIds.indexOf(id) === -1) closeApptIds.push(id);
+      });
+    }
+    if (closeApptIds.length === 0 && data.appointment_id) closeApptIds.push(data.appointment_id);
+    if (closeApptIds.length > 0) {
+      for (var ai = 0; ai < closeApptIds.length; ai++) {
+        var _apptId = closeApptIds[ai];
+        await prisma.appointment.update({
+          where: { id: _apptId },
+          data: { status: 'checked_out', version: { increment: 1 } },
+        }).catch(function() {}); // non-fatal
+        await prisma.serviceLine.updateMany({
+          where: { appointment_id: _apptId },
+          data: { status: 'checked_out', payment_method: data.payment_method || null },
+        }).catch(function() {}); // non-fatal
+      }
       emit(req, 'appointment:updated', {
         staff_ids: closeStaffIds,
         client_name: ticket.client_name || 'Walk-in',
@@ -336,15 +413,33 @@ router.post('/tickets/:id/close', async function(req, res, next) {
       body: (ticket.client_name || 'Walk-in') + ' — checked out',
       tag: 'ticket-closed-' + ticket.id,
     }).catch(function() {});
+    // cc15: ticket_paid — end of timeline for this slip.
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_PAID,
+      appointmentId: ticket.appointment_id,
+      ticketId:      ticket.id,
+      payload: {
+        ticket_number: ticket.ticket_number,
+        total_cents:   ticket.total_cents || 0,
+        tip_cents:     ticket.tip_cents || 0,
+        payment_method: ticket.payment_method || null,
+        items: itemsSnapshot(ticket.items),
+      },
+    });
     // Automated SMS: receipt delivery (non-blocking)
     // Only fires if client chose text/email receipt and msg_receipt_enabled is on
-    if (existing.client_id && data.send_receipt_sms) {
+    // PROTECTED cc13.1: fire the receipt SMS when EITHER a client is linked
+    // OR the cashier typed a phone at checkout (data.receipt_phone). Pre-cc13.1
+    // the guard required client_id, so manually-typed phones silently went
+    // nowhere. Typed phone is passed as a 4th arg override to triggerReceipt.
+    if (data.send_receipt_sms && (existing.client_id || data.receipt_phone)) {
       var svcNames = (ticket.items || []).map(function(it) { return it.service_name || it.name || ''; }).filter(Boolean).join(', ');
       var totalDollars = '$' + ((ticket.total_cents || 0) / 100).toFixed(2);
       var techName = (ticket.items || []).map(function(it) { return it.tech_name || ''; }).filter(Boolean)[0] || '';
       triggerReceipt(req.salon_id, existing.client_id, {
         services: svcNames, total: totalDollars, technician: techName,
-      }).catch(function() {});
+      }, data.receipt_phone || null).catch(function() {});
     }
     res.json({ ticket: formatTicket(ticket) });
   } catch (err) {
@@ -372,6 +467,14 @@ router.post('/tickets/:id/reopen', async function(req, res, next) {
     });
 
     emit(req, 'ticket:updated');
+    // cc15: ticket_reopened — paid ticket went back to open for editing.
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_REOPENED,
+      appointmentId: ticket.appointment_id,
+      ticketId:      ticket.id,
+      payload: { ticket_number: ticket.ticket_number },
+    });
     res.json({ ticket: formatTicket(ticket) });
   } catch (err) { next(err); }
 });
@@ -614,19 +717,42 @@ router.post('/tickets/quick-close', async function(req, res, next) {
       client_name: ticket.client_name || 'Walk-in',
       ticket_number: ticket.ticket_number,
     });
+    // cc15: quick-close skips the create/update/close sequence — log
+    // both ends so the timeline still shows creation + payment.
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_CREATED,
+      appointmentId: ticket.appointment_id,
+      ticketId:      ticket.id,
+      payload: { ticket_number: ticket.ticket_number, items: itemsSnapshot(ticket.items), via: 'quick-close' },
+    });
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_PAID,
+      appointmentId: ticket.appointment_id,
+      ticketId:      ticket.id,
+      payload: {
+        ticket_number: ticket.ticket_number,
+        total_cents:   ticket.total_cents || 0,
+        tip_cents:     ticket.tip_cents || 0,
+        payment_method: ticket.payment_method || null,
+        items: itemsSnapshot(ticket.items),
+      },
+    });
     sendPushToStaffList(req.salon_id, qcStaffIds, {
       title: 'Checked Out',
       body: (ticket.client_name || 'Walk-in') + ' — checked out',
       tag: 'ticket-closed-' + ticket.id,
     }).catch(function() {});
     // Automated SMS: receipt delivery (non-blocking)
-    if (data.client_id && data.send_receipt_sms) {
+    // PROTECTED cc13.1: same client_id-OR-typed-phone rule as the close path.
+    if (data.send_receipt_sms && (data.client_id || data.receipt_phone)) {
       var qcSvcNames = (ticket.items || []).map(function(it) { return it.name || ''; }).filter(Boolean).join(', ');
       var qcTotal = '$' + ((ticket.total_cents || 0) / 100).toFixed(2);
       var qcTech = (ticket.items || []).map(function(it) { return it.tech_name || ''; }).filter(Boolean)[0] || '';
-      triggerReceipt(req.salon_id, data.client_id, {
+      triggerReceipt(req.salon_id, data.client_id || null, {
         services: qcSvcNames, total: qcTotal, technician: qcTech,
-      }).catch(function() {});
+      }, data.receipt_phone || null).catch(function() {});
     }
     res.status(201).json({ ticket: formatTicket(ticket) });
   } catch (err) {

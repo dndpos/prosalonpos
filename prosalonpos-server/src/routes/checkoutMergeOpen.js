@@ -13,12 +13,21 @@ import { Router } from 'express';
 import prisma from '../config/database.js';
 import { emit } from '../utils/emit.js';
 import { dayBounds, formatTicket } from './checkoutHelpers.js';
+// cc15: log COMBINED on each source + ABSORBED on the new ticket so the
+// hold-side merge is as visible as the close-side merge.
+import { logSlipEvent, SLIP_EVENT_TYPES, reqContext, itemsSnapshot } from '../utils/slipLog.js';
 
 var router = Router();
 
 router.post('/tickets/merge-open', async function(req, res, next) {
   try {
     var ticketIds = req.body.ticketIds || [];
+    // cc15: accept optional newItems (adjustments made in the cashier's
+    // session that aren't yet in any source ticket's DB row). Mirrors
+    // merge-and-close's shape. Without this, Hold after slip-scan
+    // combine loses fresh items the cashier added between loading and
+    // holding.
+    var newItems = req.body.newItems || [];
 
     if (!ticketIds || !Array.isArray(ticketIds) || ticketIds.length < 2) {
       return res.status(400).json({ error: 'Need at least 2 ticket IDs to merge' });
@@ -56,6 +65,22 @@ router.post('/tickets/merge-open', async function(req, res, next) {
         });
       });
     });
+    // cc15: append fresh items from the session (not from any source
+    // ticket). Client filters these by !_fromTicket before sending.
+    newItems.forEach(function(item) {
+      combinedItems.push({
+        type: item.type || 'service',
+        name: item.name || 'Service',
+        price_cents: item.price_cents || 0,
+        original_price_cents: item.original_price_cents || item.price_cents || 0,
+        tech_id: item.tech_id || item.techId || null,
+        tech_name: item.tech_name || item.tech || null,
+        service_id: item.service_id || null,
+        product_id: item.product_id || null,
+        color: item.color || null,
+        client_id: item.client_id || null,
+      });
+    });
 
     // Collect appointment IDs
     var uniqueApptIds = [];
@@ -89,13 +114,19 @@ router.post('/tickets/merge-open', async function(req, res, next) {
     var newTicketNumber = lastTicket ? lastTicket.ticket_number + 1 : 1;
 
     var result = await prisma.$transaction(async function(tx) {
-      // 1. Create NEW open ticket with all combined items
+      // 1. Create NEW open ticket with all combined items.
+      // cc15.4: store ALL source appointment_ids in source_appointment_ids.
+      // Scalar appointment_id still holds the first source's id for
+      // backward-compat with clients that predate cc15.4 (and for the
+      // cc15.3 chain-walk safety net on historical data). New lookups
+      // prefer the array so every source slip maps to the absorber.
       var newTicket = await tx.ticket.create({
         data: {
           salon_id: req.salon_id,
           ticket_number: newTicketNumber,
           display_number: displayNum,
           appointment_id: uniqueApptIds[0] || null,
+          source_appointment_ids: uniqueApptIds.length > 0 ? uniqueApptIds : null,
           client_id: clientId,
           client_name: clientName,
           status: 'open',
@@ -123,6 +154,31 @@ router.post('/tickets/merge-open', async function(req, res, next) {
     }, { timeout: 20000 });
 
     emit(req, 'ticket:merged');
+    // cc15: log the combine on every source barcode + absorbed on the
+    // new absorber's barcode.
+    var ctx = reqContext(req);
+    for (var li = 0; li < tickets.length; li++) {
+      var srcT = tickets[li];
+      logSlipEvent({
+        ...ctx,
+        eventType:     SLIP_EVENT_TYPES.COMBINED,
+        appointmentId: srcT.appointment_id,
+        ticketId:      srcT.id,
+        payload: { merged_into: result.id, absorber_ticket_number: result.ticket_number, via: 'hold' },
+      });
+    }
+    logSlipEvent({
+      ...ctx,
+      eventType:     SLIP_EVENT_TYPES.ABSORBED,
+      appointmentId: result.appointment_id,
+      ticketId:      result.id,
+      payload: {
+        ticket_number:  result.ticket_number,
+        display_number: result.display_number || null,
+        source_ticket_ids: tickets.map(function(t) { return t.id; }),
+        items: itemsSnapshot(result.items),
+      },
+    });
     res.json({ ticket: formatTicket(result) });
   } catch (err) {
     console.error('[merge-open] FAILED:', err.message, err.stack);

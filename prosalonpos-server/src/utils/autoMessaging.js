@@ -164,13 +164,39 @@ export async function triggerBookingConfirm(salonId, appointment, serviceLines) 
     var clientName = ((client.first_name || '') + ' ' + (client.last_name || '')).trim();
     var svcNames = (serviceLines || []).map(function(sl) { return sl.service_name || ''; }).filter(Boolean).join(', ');
 
+    // PROTECTED cc13.3 (SUPERSEDES the cc13.1 unconditional lookup): resolve
+    // tech name ONLY when the appointment was explicitly requested by the
+    // client. If the appointment is non-requested (no tech preference, or
+    // assigned by owner/first-available), the `{technician}` placeholder
+    // fills with 'our team' regardless of who's actually assigned. Reason:
+    // salons don't want the SMS committing a specific tech to the customer
+    // when the tech was just first-available — the assignment may change
+    // before the appointment, and the message reads more professionally as
+    // "our team" anyway. cc13.1's rule (staff-by-id lookup, not staff_name)
+    // still stands inside the requested branch.
+    var techDisplay = 'our team';
+    if (appointment.requested === true) {
+      if (firstLine.staff_id) {
+        try {
+          var staffRow = await prisma.staff.findUnique({
+            where: { id: firstLine.staff_id },
+            select: { display_name: true },
+          });
+          if (staffRow && staffRow.display_name) techDisplay = staffRow.display_name;
+        } catch (e) { /* keep default */ }
+      } else if (firstLine.staff_name) {
+        // Forward compat: if a future caller pre-joins staff_name onto the line.
+        techDisplay = firstLine.staff_name;
+      }
+    }
+
     var vars = {
       client_name: clientName,
       salon_name: settings.salon_name || '',
       date: startDate.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' }),
       time: startDate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }),
       service: svcNames,
-      technician: firstLine.staff_name || appointment.client_name || '',
+      technician: techDisplay,
     };
 
     var body = resolveBody(tpl.body, vars);
@@ -206,13 +232,32 @@ export async function triggerCancelConfirm(salonId, appointment) {
     var firstLine = lines[0] || {};
     var startDate = firstLine.starts_at ? new Date(firstLine.starts_at) : new Date();
 
+    // PROTECTED cc13.3: same technician resolution rule as triggerBookingConfirm.
+    // Pre-cc13.3 this line was `firstLine.staff_name || ''` — always empty
+    // because staff_name isn't a column on ServiceLine. Now: staff-by-id lookup
+    // when the appointment was requested, else 'our team'.
+    var techDisplay = 'our team';
+    if (appointment.requested === true) {
+      if (firstLine.staff_id) {
+        try {
+          var staffRow = await prisma.staff.findUnique({
+            where: { id: firstLine.staff_id },
+            select: { display_name: true },
+          });
+          if (staffRow && staffRow.display_name) techDisplay = staffRow.display_name;
+        } catch (e) { /* keep default */ }
+      } else if (firstLine.staff_name) {
+        techDisplay = firstLine.staff_name;
+      }
+    }
+
     var vars = {
       client_name: clientName,
       salon_name: settings.salon_name || '',
       date: startDate.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' }),
       time: startDate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }),
       service: (lines.map(function(sl) { return sl.service_name || ''; }).filter(Boolean).join(', ')),
-      technician: firstLine.staff_name || '',
+      technician: techDisplay,
     };
 
     var body = resolveBody(tpl.body, vars);
@@ -264,20 +309,28 @@ export async function triggerNoShow(salonId, appointment) {
 // Called from checkout close route when client chose text/email receipt.
 // ════════════════════════════════════════════
 
-export async function triggerReceipt(salonId, clientId, receiptData) {
+export async function triggerReceipt(salonId, clientId, receiptData, phoneOverride) {
   try {
     var settings = await getSalonSettings(salonId);
     if (!settings.msg_receipt_enabled) return;
 
-    if (!clientId) return;
+    // PROTECTED cc13.1: allow a typed phone override — cashiers may enter a
+    // phone at checkout without selecting a client. Pre-cc13.1 we required
+    // clientId and always sent to client.phone, so typed numbers went nowhere
+    // silently. If phoneOverride is present with >= 10 digits, it wins over
+    // client.phone for the SMS send (even if a clientId is also present).
+    var typedDigits = phoneOverride ? String(phoneOverride).replace(/\D/g, '') : '';
+    var hasTyped = typedDigits.length >= 10;
 
-    var client = await getClientContact(clientId);
-    if (!client) return;
+    if (!clientId && !hasTyped) return;
+
+    var client = clientId ? await getClientContact(clientId) : null;
+    if (clientId && !client && !hasTyped) return;
 
     var tpl = await getActiveTemplate(salonId, 'receipt');
     if (!tpl) return;
 
-    var clientName = ((client.first_name || '') + ' ' + (client.last_name || '')).trim();
+    var clientName = client ? ((client.first_name || '') + ' ' + (client.last_name || '')).trim() : '';
 
     var vars = {
       client_name: clientName,
@@ -289,8 +342,16 @@ export async function triggerReceipt(salonId, clientId, receiptData) {
     };
 
     var body = resolveBody(tpl.body, vars);
-    await dispatchToChannels(salonId, clientId, 'receipt', settings.msg_receipt_channel || 'sms', client, body);
-    console.log('[autoMessaging] Receipt sent for', clientName);
+
+    // cc13.1: effectiveClient carries the phone we should actually send to.
+    // Clone client (so we don't mutate the cached record) and overwrite phone
+    // with the typed number when present. smsService.sendSms handles +1/E.164
+    // normalization.
+    var effectiveClient = client ? Object.assign({}, client) : { first_name: '', last_name: '', phone: null, email: null };
+    if (hasTyped) effectiveClient.phone = typedDigits;
+
+    await dispatchToChannels(salonId, clientId || null, 'receipt', settings.msg_receipt_channel || 'sms', effectiveClient, body);
+    console.log('[autoMessaging] Receipt sent for', clientName || ('+' + typedDigits));
   } catch (err) {
     console.error('[autoMessaging] triggerReceipt error:', err.message);
   }

@@ -348,6 +348,14 @@ model Ticket {
   client_name       String?
   status            String   @default("open")  // open | paid | voided | refunded | merged
   merged_into       String?                    // ticket_id of absorber (set when status='merged')
+  // cc15.4: full list of source appointment_ids when this ticket is a
+  // merge absorber. Scalar `appointment_id` (above) historically held
+  // only ONE value (the first source's), which orphaned every other
+  // source slip from finding the absorber. Populated by merge-open and
+  // merge-and-close routes with the unique list of source
+  // appointment_ids. Any slip whose appointment_id is in this array
+  // resolves to this absorber. Null for non-merged tickets.
+  source_appointment_ids Json?
   display_number    String?                    // combined display like '4&6' (set on absorber)
   subtotal_cents    Int      @default(0)
   tax_cents         Int      @default(0)
@@ -1038,4 +1046,27 @@ model PushSubscription {
   created_at   DateTime @default(now())
 
   @@index([salon_id, staff_id])
+}
+
+// cc15: barcode-scoped audit log. Every write that touches a ticket's
+// lifecycle (create, update/hold, reopen, combine, scan, close, void,
+// refund) writes one row here, keyed by the stable `short_id` that
+// appears on the check-in slip's barcode. Lets the cashier (or Cindy) see
+// the full timeline for a ticket from slip-print to close, so dropped
+// adjustments or orphaned merges surface immediately instead of hiding.
+model SlipEvent {
+  id             String   @id @default(uuid())
+  salon_id       String
+  short_id       String                             // 8-hex last of appointment id (lowercase)
+  appointment_id String?
+  ticket_id      String?                            // ticket-at-event-time (may change across merges)
+  event_type     String                             // see SLIP_EVENT_TYPES in utils/slipLog.js
+  payload        Json?                              // event-specific detail (items snapshot, merge target, etc.)
+  station_id     String?
+  staff_id       String?
+  staff_name     String?
+  created_at     DateTime @default(now())
+
+  @@index([salon_id, short_id, created_at])
+  @@index([salon_id, created_at])
 }

@@ -90,7 +90,9 @@ async function processRemindersForSalon(salonId) {
         appointment: { salon_id: salonId, status: { in: ['pending', 'confirmed'] } },
       },
       include: {
-        appointment: { select: { id: true, client_id: true, client_name: true, status: true } },
+        // PROTECTED cc13.3: include `requested` so the technician-resolution
+        // rule below can gate name-vs-"our team" correctly.
+        appointment: { select: { id: true, client_id: true, client_name: true, status: true, requested: true } },
       },
       distinct: ['appointment_id'],
     });
@@ -146,13 +148,34 @@ async function processRemindersForSalon(salonId) {
       var startDate = new Date(firstLine.starts_at);
       var svcNames = lines.map(function(l) { return l.service_name || ''; }).filter(Boolean).join(', ');
 
+      // PROTECTED cc13.3: same tech-resolution rule as triggerBookingConfirm/
+      // CancelConfirm. Pre-cc13.3 this was `firstLine.staff_name || ''` which
+      // always resolved to empty because ServiceLine has no staff_name column.
+      // Andy's rule: show tech name only for requested appointments; else
+      // fill with 'our team'. The appointment.requested field was included in
+      // the serviceLines findMany above specifically for this check.
+      var techDisplay = 'our team';
+      if (appt.requested === true) {
+        if (firstLine.staff_id) {
+          try {
+            var staffRow = await prisma.staff.findUnique({
+              where: { id: firstLine.staff_id },
+              select: { display_name: true },
+            });
+            if (staffRow && staffRow.display_name) techDisplay = staffRow.display_name;
+          } catch (e) { /* keep default */ }
+        } else if (firstLine.staff_name) {
+          techDisplay = firstLine.staff_name;
+        }
+      }
+
       var vars = {
         client_name: clientName,
         salon_name: settings.salon_name || '',
         date: startDate.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' }),
         time: startDate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }),
         service: svcNames,
-        technician: firstLine.staff_name || '',
+        technician: techDisplay,
       };
 
       var body = resolveBody(tpl.body, vars);

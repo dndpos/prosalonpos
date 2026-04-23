@@ -12,6 +12,11 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import prisma from '../config/database.js';
 import { getIO } from '../utils/emit.js';
+// PROTECTED cc13.1: online bookings fire the same booking-confirmation SMS that
+// staff-created bookings do. Pre-cc13.1 this trigger was only wired in the
+// authenticated POST /appointments route — customers who booked through the
+// online portal got zero confirmation. See BUSINESS_LOGIC cc12.4 follow-up #1.
+import { triggerBookingConfirm } from '../utils/autoMessaging.js';
 
 var router = Router();
 
@@ -335,6 +340,16 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
     if (settingsRow2 && settingsRow2.settings) {
       _settings2 = typeof settingsRow2.settings === 'string' ? JSON.parse(settingsRow2.settings) : settingsRow2.settings;
     }
+    // PROTECTED cc13.2: online bookings default to `pending` (not auto-confirmed).
+    // Pre-cc13.2 every online booking hardcoded `status: 'confirmed'` on both the
+    // appointment and its service lines — calendar rendered with a ✓ immediately,
+    // regardless of whether the customer had actually showed up or confirmed via
+    // SMS. Andy's rule (cc13.2, 2026-04-22): unless the owner explicitly opts
+    // into auto-confirm, online bookings should arrive as `pending` so staff
+    // can confirm manually (or a future cc14 reply-to-confirm SMS flow can
+    // flip them to confirmed when the customer replies Y).
+    // Opt-in via settings.online_booking_auto_confirm === true.
+    var _onlineStatus = _settings2.online_booking_auto_confirm === true ? 'confirmed' : 'pending';
     var bh = _settings2.business_hours;
     if (bh) {
       var _dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -484,7 +499,8 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
             salon_id: salonId,
             client_id: clientId,
             client_name: clientName,
-            status: 'confirmed',
+            // cc13.2: opt-in auto-confirm via settings.online_booking_auto_confirm.
+            status: _onlineStatus,
             source: 'online',
             booking_group_id: bookingGroupId,
             requested: isRequested,
@@ -517,7 +533,8 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
               starts_at: startsAt,
               duration_minutes: svcDuration,
               calendar_color: svc.calendar_color || svc.color || '#3B82F6',
-              status: 'confirmed',
+              // cc13.2: service-line status mirrors the appointment's status.
+              status: _onlineStatus,
               service_name: svc.name,
               price_cents: svc.price_cents || 0,
               client_name: clientName,
@@ -588,6 +605,25 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
       }
     } catch (socketErr) {
       console.error('[Public Book] Socket emit error:', socketErr.message);
+    }
+
+    // PROTECTED cc13.1: fire booking-confirmation SMS for every online-created
+    // appointment. Mirrors the triggerBookingConfirm call in POST /appointments
+    // (appointments.js:246). Fetch with service_lines so triggerBookingConfirm
+    // can resolve date/time/service list; staff name is looked up inside the
+    // trigger itself (cc13.1 technician fix). Non-blocking — never hold up
+    // the HTTP response waiting for Twilio.
+    try {
+      var _apptIds = createdAppointments.map(function(a) { return a.id; });
+      var _apptsWithLines = await prisma.appointment.findMany({
+        where: { id: { in: _apptIds } },
+        include: { service_lines: { orderBy: { position: 'asc' } } },
+      });
+      _apptsWithLines.forEach(function(ap) {
+        triggerBookingConfirm(salonId, ap, ap.service_lines).catch(function() {});
+      });
+    } catch (bcErr) {
+      console.error('[Public Book] triggerBookingConfirm fetch failed:', bcErr.message);
     }
 
     res.status(201).json({

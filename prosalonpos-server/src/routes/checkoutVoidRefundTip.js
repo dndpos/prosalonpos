@@ -9,6 +9,10 @@ import { Router } from 'express';
 import prisma from '../config/database.js';
 import { emit } from '../utils/emit.js';
 import { toDb, fromDb, dayBounds, formatTicket } from './checkoutHelpers.js';
+// cc15: barcode audit log — void/refund hook into the same per-barcode
+// timeline as create/update/close. Tip adjustments aren't logged (too
+// noisy; tips are per-close, not per-adjust).
+import { logSlipEvent, SLIP_EVENT_TYPES, reqContext } from '../utils/slipLog.js';
 
 var router = Router();
 
@@ -48,6 +52,16 @@ router.post('/tickets/:id/void', async function(req, res, next) {
     });
 
     emit(req, 'ticket:voided');
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_VOIDED,
+      appointmentId: ticket.appointment_id,
+      ticketId:      ticket.id,
+      payload: {
+        ticket_number: ticket.ticket_number,
+        reason: ticket.void_reason || null,
+      },
+    });
     res.json({ ticket: formatTicket(ticket) });
   } catch (err) { next(err); }
 });
@@ -218,6 +232,19 @@ router.post('/tickets/:id/refund', async function(req, res, next) {
     var formatted = formatTicket(ticket);
 
     emit(req, 'ticket:refunded');
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_REFUNDED,
+      appointmentId: ticket.appointment_id,
+      ticketId:      ticket.id,
+      payload: {
+        ticket_number: ticket.ticket_number,
+        refund_cents:  refundAmount,
+        total_refunded_cents: totalRefunded,
+        reason: data.refund_reason || data.reason || null,
+        method: data.refund_method || null,
+      },
+    });
     res.json({
       ticket: formatted,
       refund: {

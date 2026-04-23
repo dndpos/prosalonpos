@@ -130,6 +130,11 @@ function formatTicket(t, pkgRedemptions) {
     ticket_number: t.ticket_number,
     ticketNumber: t.ticket_number,
     appointment_id: t.appointment_id,
+    // cc15.4: full list of source appointment_ids on merge absorbers.
+    // Client-side openTickets.find checks this in addition to
+    // appointment_id so every source slip maps back to the absorber.
+    source_appointment_ids: t.source_appointment_ids || null,
+    sourceAppointmentIds: t.source_appointment_ids || null,
     client_id: t.client_id,
     client_name: t.client_name,
     clientName: t.client_name,
