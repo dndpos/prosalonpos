@@ -319,10 +319,15 @@ router.get('/service-breakdown', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ── GET /payment-methods — Breakdown by payment method ──
+// ── GET /payment-methods — Breakdown by payment method (optional ?by=station) ──
+// cc19: when by=station, also returns byStation[] — per-station breakdown of
+// every method. Station names are resolved from SalonTerminal.station_id when
+// present; otherwise the raw station_id is used as the display label. Totals
+// still aggregate salon-wide in `methods`, so existing callers keep working.
 router.get('/payment-methods', async function(req, res, next) {
   try {
     var range = parseDateRange(req.query);
+    var byStationRequested = String(req.query.by || '').toLowerCase() === 'station';
 
     var tickets = await prisma.ticket.findMany({
       where: {
@@ -333,8 +338,9 @@ router.get('/payment-methods', async function(req, res, next) {
       include: { payments: true }
     });
 
-    // Aggregate by payment method
     var byMethod = {};
+    var byStationMap = {};
+
     tickets.forEach(function(t) {
       t.payments.forEach(function(p) {
         if (!byMethod[p.method]) {
@@ -342,6 +348,19 @@ router.get('/payment-methods', async function(req, res, next) {
         }
         byMethod[p.method].count++;
         byMethod[p.method].total_cents += p.amount_cents;
+
+        if (byStationRequested) {
+          var sid = p.station_id || '__unassigned__';
+          if (!byStationMap[sid]) {
+            byStationMap[sid] = { station_id: p.station_id || null, station_name: null, methods: {}, total_cents: 0, count: 0 };
+          }
+          var bucket = byStationMap[sid];
+          bucket.count++;
+          bucket.total_cents += p.amount_cents;
+          if (!bucket.methods[p.method]) bucket.methods[p.method] = { method: p.method, count: 0, total_cents: 0 };
+          bucket.methods[p.method].count++;
+          bucket.methods[p.method].total_cents += p.amount_cents;
+        }
       });
     });
 
@@ -349,7 +368,26 @@ router.get('/payment-methods', async function(req, res, next) {
       return b.total_cents - a.total_cents;
     });
 
-    res.json({ methods: methods });
+    var body = { methods: methods };
+
+    if (byStationRequested) {
+      var terminals = await prisma.salonTerminal.findMany({
+        where: { salon_id: req.salon_id },
+      });
+      var nameByStationId = {};
+      terminals.forEach(function(t) {
+        if (t.station_id) nameByStationId[t.station_id] = t.name;
+      });
+      var byStation = Object.keys(byStationMap).map(function(k) {
+        var row = byStationMap[k];
+        row.station_name = row.station_id ? (nameByStationId[row.station_id] || row.station_id) : 'Unassigned';
+        row.methods = Object.values(row.methods).sort(function(a, b) { return b.total_cents - a.total_cents; });
+        return row;
+      }).sort(function(a, b) { return b.total_cents - a.total_cents; });
+      body.byStation = byStation;
+    }
+
+    res.json(body);
   } catch (err) { next(err); }
 });
 

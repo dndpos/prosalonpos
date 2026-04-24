@@ -77,6 +77,7 @@ model Salon {
   provider_notes     ProviderSalonNote[]
   provider_billing   ProviderBillingRecord[]
   assigned_agent     ProviderAgent?          @relation(fields: [assigned_agent_id], references: [id])
+  salon_terminals    SalonTerminal[]
 }
 
 // ════════════════════════════════════════════
@@ -429,11 +430,48 @@ model TicketPayment {
   entry_method     String?                           // CHIP | TAP | SWIPE | MANUAL
   processor_txn_id String?                           // terminal RefNum — used for void/refund
   terminal_response Json?                            // full raw terminal response for audit
+  // cc19: which physical station took this payment. Populated from
+  // x-station-id header (parsed by reqContext). Null on old rows
+  // and on non-station-scoped writes (migrations, admin tools).
+  // Enables per-station reports without changing the Fiserv MID model.
+  station_id       String?
   created_at       DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
 
   @@index([ticket_id])
+  @@index([station_id])
+}
+
+// ════════════════════════════════════════════
+// SALON TERMINALS (cc19 — one row per PAX terminal at a salon)
+// ════════════════════════════════════════════
+// Earlier design had ONE terminal per salon via salonSettings.terminal_ip.
+// cc19 model: one salon = N stations = N PAX terminals (one per station),
+// sharing a single Fiserv MID so ACH deposits still consolidate at the
+// processor. Each station's helper (Java jar) self-configures by calling
+// /api/v1/public/salon-terminal-config/:salonCode/:stationKey at startup.
+// Installer writes stationKey (UUID) into helper-config.json so the
+// helper survives reinstalls and IP changes.
+model SalonTerminal {
+  id           String   @id @default(uuid())
+  salon_id     String
+  name         String                         // "Front Desk", "Room 2", etc.
+  station_key  String?  @unique               // UUID written by installer into helper-config.json; used to match helper→row
+  station_id   String?                        // optional station binding (future-proofing)
+  helper_host  String   @default("127.0.0.1") // helper listens locally by default
+  helper_port  Int      @default(10009)
+  pax_ip       String                         // real A35 LAN IP
+  pax_port     Int      @default(10009)
+  cc_device_id String?                        // human-readable memo only (do NOT wire into any PAX payload — P086 rule)
+  active       Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  salon Salon @relation(fields: [salon_id], references: [id])
+
+  @@index([salon_id])
+  @@index([salon_id, station_id])
 }
 
 // ════════════════════════════════════════════

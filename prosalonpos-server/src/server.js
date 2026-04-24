@@ -58,6 +58,7 @@ import pushRoutes from './routes/push.js';
 import registerTechPortalRoutes from './routes/techPortal.js';
 import techphonePayrollRoutes from './routes/techphonePayroll.js'; // cc5.12
 import slipEventsRoutes from './routes/slipEvents.js'; // cc15 — barcode audit log
+import salonTerminalRoutes from './routes/salonTerminals.js'; // cc19 — per-station PAX terminals
 
 var PORT = process.env.PORT || 3001;
 
@@ -194,6 +195,7 @@ app.use('/api/v1/time-off', authenticate, timeOffRoutes);
 app.use('/api/v1/push', pushRoutes); // vapid-key is public, subscribe/unsubscribe use authenticate middleware inside
 app.use('/api/v1/techphone', authenticate, techphonePayrollRoutes); // cc5.12 — tech phone payroll data bundle
 app.use('/api/v1/slip-events', authenticate, slipEventsRoutes); // cc15 — per-barcode audit log
+app.use('/api/v1/salon-terminals', authenticate, salonTerminalRoutes); // cc19 — per-station PAX terminals CRUD
 
 // ── Global error handler (must be last middleware) ──
 app.use(errorHandler);
