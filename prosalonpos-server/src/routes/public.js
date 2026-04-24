@@ -668,59 +668,5 @@ router.get('/salon-info/:salonCode', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
-// ══════════════════════════════════════════
-// GET /public/salon-terminal-config/:salonCode/:stationKey  (cc19)
-// ══════════════════════════════════════════
-// Helper jar calls this at startup to fetch its own PAX IP. No auth — the
-// salon_code + random per-station UUID are enough friction for a LAN-only
-// service. Returns the SalonTerminal row bound to the stationKey, or — if
-// none is bound yet — the FIRST active terminal at the salon as a fallback
-// so a fresh install still works while the owner finishes registration.
-router.get('/salon-terminal-config/:salonCode/:stationKey', async function(req, res, next) {
-  try {
-    var salon = await prisma.salon.findUnique({
-      where: { salon_code: req.params.salonCode },
-      select: { id: true, status: true },
-    });
-    if (!salon) return res.status(404).json({ error: 'Salon not found' });
-    if (salon.status === 'suspended' || salon.status === 'cancelled') {
-      return res.status(403).json({ error: 'Salon is not active' });
-    }
-
-    var key = req.params.stationKey;
-    var terminal = null;
-    if (key && key.length >= 8) {
-      terminal = await prisma.salonTerminal.findFirst({
-        where: { salon_id: salon.id, station_key: key, active: true },
-      });
-    }
-    var registered = !!terminal;
-    if (!terminal) {
-      // Fallback: first active terminal at the salon so a newly-installed
-      // station can still see a PAX while the owner goes to Settings →
-      // Terminals → "Register this station" to bind it properly.
-      terminal = await prisma.salonTerminal.findFirst({
-        where: { salon_id: salon.id, active: true },
-        orderBy: { created_at: 'asc' },
-      });
-    }
-    if (!terminal) {
-      return res.status(404).json({ error: 'No active terminal configured for this salon yet', registered: false });
-    }
-    res.json({
-      registered: registered,
-      terminal: {
-        id:          terminal.id,
-        name:        terminal.name,
-        helper_host: terminal.helper_host,
-        helper_port: terminal.helper_port,
-        pax_ip:      terminal.pax_ip,
-        pax_port:    terminal.pax_port,
-        station_id:  terminal.station_id,
-      },
-    });
-  } catch (err) { next(err); }
-});
-
 
 export default router;

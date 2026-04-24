@@ -85,9 +85,6 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
 
     var combinedItems = allExistingItems.concat(freshItems);
 
-    // cc19: stamp station_id on each merge-close payment row so Reports
-    // can break out per-station even when the pay path was merge-and-close.
-    var _stationIdMc = req.headers['x-station-id'] || (req.body && req.body.station_id) || null;
     var paymentCreates = payments.map(function(p) {
       return {
         method: p.method || 'credit',
@@ -100,7 +97,6 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
         entry_method: p.entry_method || null,
         processor_txn_id: p.processor_txn_id || null,
         terminal_response: p.terminal_response || null,
-        station_id: p.station_id || _stationIdMc,
       };
     });
 

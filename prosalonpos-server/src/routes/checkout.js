@@ -289,8 +289,6 @@ router.post('/tickets/:id/pay', async function(req, res, next) {
       return res.status(400).json({ error: 'Cannot pay a ' + existing.status + ' ticket' });
     }
     var data = req.body;
-    // cc19: stamp station_id so Reports can break out payments per station.
-    var stationIdHdr = req.headers['x-station-id'] || (data && data.station_id) || null;
     var payment = await prisma.ticketPayment.create({
       data: {
         ticket_id: req.params.id,
@@ -305,7 +303,6 @@ router.post('/tickets/:id/pay', async function(req, res, next) {
         entry_method: data.entry_method || null,
         processor_txn_id: data.processor_txn_id || null,
         terminal_response: data.terminal_response || null,
-        station_id: stationIdHdr,
       },
     });
     emit(req, 'ticket:payment');
@@ -617,9 +614,6 @@ router.post('/tickets/quick-close', async function(req, res, next) {
     });
 
     // Build payments
-    // cc19: stamp station_id on each nested payment so Reports can
-    // break out credit/cash/etc. per station even on quick-close.
-    var _stationIdQc = req.headers['x-station-id'] || (data && data.station_id) || null;
     var paymentsCreate = (data.payments || []).map(function(p) {
       return {
         method: p.method || 'credit',
@@ -633,7 +627,6 @@ router.post('/tickets/quick-close', async function(req, res, next) {
         entry_method: p.entry_method || null,
         processor_txn_id: p.processor_txn_id || null,
         terminal_response: p.terminal_response || null,
-        station_id: p.station_id || _stationIdQc,
       };
     });
 

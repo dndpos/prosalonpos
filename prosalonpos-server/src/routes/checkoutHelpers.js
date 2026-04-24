@@ -234,9 +234,6 @@ function formatTicket(t, pkgRedemptions) {
         amount_cents: p.amount_cents,
         gc_id: p.gc_id,
         gc_code: p.gc_code,
-        // cc19: expose station_id so Reports can break down payments
-        // per station without a second round-trip.
-        station_id: p.station_id || null,
         created_at: p.created_at,
       };
     }),
