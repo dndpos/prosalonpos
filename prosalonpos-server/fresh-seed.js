@@ -51,7 +51,7 @@ async function main() {
   await prisma.providerOwner.create({
     data: {
       id: 'provider-owner-1',
-      name: 'Andy Tran',
+      name: 'Alex Tran',
       email: 'andy@prosalonpos.com',
       pin_hash: providerPinHash,
     }

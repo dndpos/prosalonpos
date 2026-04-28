@@ -8,13 +8,19 @@ import bcrypt from 'bcryptjs';
 import { createHash } from 'crypto';
 
 var JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
-var JWT_EXPIRY = '24h';
+var JWT_EXPIRY = '24h';            // Per-user (PIN-login) tokens — short-lived
+var JWT_EXPIRY_SALON = '365d';     // v2.0.10: salon-scoped (pairing) tokens — long-lived
 var PIN_SALT_ROUNDS = 6;
 
 // ── JWT ──
 
+// v2.0.10: salon-scoped tokens (no staff_id) get the long expiry so paired
+// stations don't kick the user out periodically. Per-user tokens keep the
+// short expiry — those are issued via /auth/login when a PIN is entered.
 export function createToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  var isSalonScoped = payload && !payload.staff_id;
+  var expiresIn = isSalonScoped ? JWT_EXPIRY_SALON : JWT_EXPIRY;
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: expiresIn });
 }
 
 export function verifyToken(token) {

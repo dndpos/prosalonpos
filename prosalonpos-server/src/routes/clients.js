@@ -48,6 +48,13 @@ router.get('/:id', async function(req, res, next) {
 });
 
 // ── POST / — Create client ──
+// v2.3.2 (Phase 3c): accepts an optional pre-supplied `id` so offline-queued
+// creates replayed by main station carry the same UUID the local SQLite
+// mirror already wrote. Prisma's @default(uuid()) only fires when `id` is
+// absent. Combined with the X-Client-Op-Id idempotency middleware, a replay
+// of the same client_op_id returns the cached response instead of attempting
+// a duplicate create. UUID4 shape is enforced server-side.
+var UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 router.post('/', async function(req, res, next) {
   try {
     var data = req.body;
@@ -66,19 +73,24 @@ router.post('/', async function(req, res, next) {
       }
     }
 
-    var c = await prisma.client.create({
-      data: {
-        salon_id: req.salon_id,
-        first_name: data.first_name,
-        last_name: data.last_name,
-        phone: data.phone || null,
-        phone_digits: phone_digits,
-        email: data.email || null,
-        outstanding_balance_cents: data.outstanding_balance_cents || 0,
-        promo_opt_out: data.promo_opt_out || false,
-        notes: data.notes || null,
-      }
-    });
+    // v2.3.2: optional pre-supplied id. Validate shape; ignore silently if
+    // malformed (legacy clients omit the field entirely, which is fine).
+    var createData = {
+      salon_id: req.salon_id,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      phone: data.phone || null,
+      phone_digits: phone_digits,
+      email: data.email || null,
+      outstanding_balance_cents: data.outstanding_balance_cents || 0,
+      promo_opt_out: data.promo_opt_out || false,
+      notes: data.notes || null,
+    };
+    if (data.id && typeof data.id === 'string' && UUID_V4_RE.test(data.id)) {
+      createData.id = data.id;
+    }
+
+    var c = await prisma.client.create({ data: createData });
 
     emit(req, 'client:created');
     res.status(201).json({ client: c });

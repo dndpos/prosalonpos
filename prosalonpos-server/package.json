@@ -1,6 +1,6 @@
 {
   "name": "prosalonpos-server",
-  "version": "1.0.0",
+  "version": "2.4.2",
   "description": "ProSalonPOS Backend API Server",
   "type": "module",
   "scripts": {

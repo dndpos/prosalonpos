@@ -15,6 +15,7 @@
 
 import prisma from '../config/database.js';
 import { sendSms } from './smsService.js';
+import { getSalonTzSafe } from './salonTz.js'; // v2.0.6: per-salon SMS time formatting
 
 // ════════════════════════════════════════════
 // HELPER: Get salon settings JSON
@@ -34,6 +35,16 @@ async function getSalonSettings(salonId) {
 // ════════════════════════════════════════════
 // HELPER: Get active template for a message type
 // ════════════════════════════════════════════
+// v2.1.8: If a salon has no template row for this type, fall back to the
+// hard-coded default. Keeps under 160 chars so each text = 1 Twilio segment.
+// Same defaults are seeded into MessageTemplate at salon creation
+// (providerSalons.js), but this fallback covers existing salons too.
+
+export var DEFAULT_TEMPLATES = {
+  reminder:         'Hi {client_name}, reminder of your appointment with {technician} at {salon_name} on {date} at {time}. Reply STOP to opt out.',
+  booking_confirm:  'Hi {client_name}! Your appointment is booked with {technician} at {salon_name} for {date} at {time}. See you soon! Reply STOP to opt out.',
+  receipt:          'Thanks {client_name}! We received your payment of {total} at {salon_name}. See you again soon. Reply STOP to opt out.',
+};
 
 async function getActiveTemplate(salonId, type) {
   try {
@@ -41,10 +52,17 @@ async function getActiveTemplate(salonId, type) {
       where: { salon_id: salonId, type: type, active: true },
       orderBy: { created_at: 'asc' },
     });
-    return tpl;
+    if (tpl) return tpl;
+    // Fallback to hard-coded default if salon hasn't customized yet.
+    var defBody = DEFAULT_TEMPLATES[type];
+    if (defBody) {
+      return { id: '__default__', salon_id: salonId, type: type, channel: 'sms', subject: null, body: defBody, active: true };
+    }
+    return null;
   } catch (err) {
     console.warn('[autoMessaging] Failed to load template for', type, err.message);
-    return null;
+    var fb = DEFAULT_TEMPLATES[type];
+    return fb ? { id: '__default__', body: fb, channel: 'sms' } : null;
   }
 }
 
@@ -190,11 +208,12 @@ export async function triggerBookingConfirm(salonId, appointment, serviceLines) 
       }
     }
 
+    var salonTz = getSalonTzSafe(salonId); // v2.0.6
     var vars = {
       client_name: clientName,
       salon_name: settings.salon_name || '',
-      date: startDate.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' }),
-      time: startDate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }),
+      date: startDate.toLocaleDateString('en-US', { timeZone: salonTz, month: 'short', day: 'numeric', year: 'numeric' }),
+      time: startDate.toLocaleTimeString('en-US', { timeZone: salonTz, hour: 'numeric', minute: '2-digit' }),
       service: svcNames,
       technician: techDisplay,
     };
@@ -251,11 +270,12 @@ export async function triggerCancelConfirm(salonId, appointment) {
       }
     }
 
+    var salonTz = getSalonTzSafe(salonId); // v2.0.6
     var vars = {
       client_name: clientName,
       salon_name: settings.salon_name || '',
-      date: startDate.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' }),
-      time: startDate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }),
+      date: startDate.toLocaleDateString('en-US', { timeZone: salonTz, month: 'short', day: 'numeric', year: 'numeric' }),
+      time: startDate.toLocaleTimeString('en-US', { timeZone: salonTz, hour: 'numeric', minute: '2-digit' }),
       service: (lines.map(function(sl) { return sl.service_name || ''; }).filter(Boolean).join(', ')),
       technician: techDisplay,
     };
@@ -338,7 +358,7 @@ export async function triggerReceipt(salonId, clientId, receiptData, phoneOverri
       service: receiptData.services || '',
       total: receiptData.total || '$0.00',
       technician: receiptData.technician || '',
-      date: receiptData.date || new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' }),
+      date: receiptData.date || new Date().toLocaleDateString('en-US', { timeZone: getSalonTzSafe(salonId) }), // v2.0.6
     };
 
     var body = resolveBody(tpl.body, vars);
@@ -381,11 +401,12 @@ export async function triggerWaitlist(salonId, appointment) {
     var firstLine = lines[0] || {};
     var startDate = firstLine.starts_at ? new Date(firstLine.starts_at) : new Date();
 
+    var salonTz = getSalonTzSafe(salonId); // v2.0.6
     var vars = {
       client_name: clientName,
       salon_name: settings.salon_name || '',
-      date: startDate.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' }),
-      time: startDate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }),
+      date: startDate.toLocaleDateString('en-US', { timeZone: salonTz, month: 'short', day: 'numeric', year: 'numeric' }),
+      time: startDate.toLocaleTimeString('en-US', { timeZone: salonTz, hour: 'numeric', minute: '2-digit' }),
     };
 
     var body = resolveBody(tpl.body, vars);

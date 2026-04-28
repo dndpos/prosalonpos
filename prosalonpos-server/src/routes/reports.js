@@ -16,6 +16,7 @@
  */
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
+import { dayBoundsTz, todayInSalonTz } from '../utils/salonTz.js'; // v2.0.6
 
 // SQLite stores JSON as strings — parse on read
 function fromDb(val) {
@@ -27,45 +28,22 @@ function fromDb(val) {
 var router = Router();
 
 /**
- * Get Eastern Time offset for a given date (handles DST).
- * Returns minutes behind UTC: 300 for EST, 240 for EDT.
+ * v2.0.6: Parse date range from query params using the SALON's tz.
+ * Throws if salon_id is missing — every caller (route handler) has it as req.salon_id.
  */
-function getEasternOffset(date) {
-  var str = date.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-  if (str.indexOf('EDT') >= 0) return 240;
-  return 300;
-}
-
-/**
- * Parse date range from query params.
- * Returns { startDate, endDate } as Date objects in Eastern time boundaries.
- * Must match checkout.js dayBounds logic so tickets land on the same day in reports.
- */
-function parseDateRange(query) {
-  var startStr = query.start || new Date().toISOString().split('T')[0];
+function parseDateRange(query, salon_id) {
+  if (!salon_id) throw new Error('parseDateRange: salon_id required (v2.0.6 tz-aware)');
+  var startStr = query.start || todayInSalonTz(salon_id);
   var endStr = query.end || startStr;
-
-  var startParts = startStr.split('-');
-  var sy = parseInt(startParts[0]), sm = parseInt(startParts[1]) - 1, sd = parseInt(startParts[2]);
-  var startProbe = new Date(Date.UTC(sy, sm, sd, 12, 0, 0));
-  var startOffset = getEasternOffset(startProbe);
-  var startDate = new Date(Date.UTC(sy, sm, sd, 0, 0, 0, 0));
-  startDate.setUTCMinutes(startDate.getUTCMinutes() + startOffset);
-
-  var endParts = endStr.split('-');
-  var ey = parseInt(endParts[0]), em = parseInt(endParts[1]) - 1, ed = parseInt(endParts[2]);
-  var endProbe = new Date(Date.UTC(ey, em, ed, 12, 0, 0));
-  var endOffset = getEasternOffset(endProbe);
-  var endDate = new Date(Date.UTC(ey, em, ed, 23, 59, 59, 999));
-  endDate.setUTCMinutes(endDate.getUTCMinutes() + endOffset);
-
-  return { startDate: startDate, endDate: endDate };
+  var startBounds = dayBoundsTz(startStr, salon_id);
+  var endBounds = dayBoundsTz(endStr, salon_id);
+  return { startDate: startBounds.start, endDate: endBounds.end };
 }
 
 // ── GET /daily-summary — Overview numbers for a date range ──
 router.get('/daily-summary', async function(req, res, next) {
   try {
-    var range = parseDateRange(req.query);
+    var range = parseDateRange(req.query, req.salon_id);
 
     // Tickets SOLD in range (paid + refunded, not voided)
     var tickets = await prisma.ticket.findMany({
@@ -151,7 +129,7 @@ router.get('/daily-summary', async function(req, res, next) {
 // ── GET /sales — Daily sales breakdown ──
 router.get('/sales', async function(req, res, next) {
   try {
-    var range = parseDateRange(req.query);
+    var range = parseDateRange(req.query, req.salon_id);
 
     var tickets = await prisma.ticket.findMany({
       where: {
@@ -206,7 +184,7 @@ router.get('/sales', async function(req, res, next) {
 // ── GET /staff-performance — Revenue and ticket count per tech ──
 router.get('/staff-performance', async function(req, res, next) {
   try {
-    var range = parseDateRange(req.query);
+    var range = parseDateRange(req.query, req.salon_id);
 
     var tickets = await prisma.ticket.findMany({
       where: {
@@ -278,7 +256,7 @@ router.get('/staff-performance', async function(req, res, next) {
 // ── GET /service-breakdown — Revenue by service ──
 router.get('/service-breakdown', async function(req, res, next) {
   try {
-    var range = parseDateRange(req.query);
+    var range = parseDateRange(req.query, req.salon_id);
 
     var tickets = await prisma.ticket.findMany({
       where: {
@@ -322,7 +300,7 @@ router.get('/service-breakdown', async function(req, res, next) {
 // ── GET /payment-methods — Breakdown by payment method ──
 router.get('/payment-methods', async function(req, res, next) {
   try {
-    var range = parseDateRange(req.query);
+    var range = parseDateRange(req.query, req.salon_id);
 
     var tickets = await prisma.ticket.findMany({
       where: {
@@ -356,7 +334,7 @@ router.get('/payment-methods', async function(req, res, next) {
 // ── GET /tips — Tips breakdown by tech ──
 router.get('/tips', async function(req, res, next) {
   try {
-    var range = parseDateRange(req.query);
+    var range = parseDateRange(req.query, req.salon_id);
 
     var tickets = await prisma.ticket.findMany({
       where: {
@@ -420,6 +398,49 @@ router.get('/tips', async function(req, res, next) {
       tips: tips,
       total_tips_cents: tickets.reduce(function(s, t) { return s + t.tip_cents; }, 0),
       undistributed_cents: undistributed,
+    });
+  } catch (err) { next(err); }
+});
+
+// ── GET /batch-closes?date=YYYY-MM-DD — v2.2.3 — Per-station batch close events ──
+// Returns BatchClose rows whose closed_at falls inside the salon's local day
+// for `date` (defaults to today). Used by Reports → Batch Close panel.
+//
+// One row per close event (a station that closes twice in a day shows twice).
+// `station_label` is the snapshot at close time, so the report still reads
+// correctly even if the Station was renamed/deleted afterward.
+router.get('/batch-closes', async function(req, res, next) {
+  try {
+    var dateStr = req.query.date || todayInSalonTz(req.salon_id);
+    var bounds = dayBoundsTz(dateStr, req.salon_id);
+    var rows = await prisma.batchClose.findMany({
+      where: {
+        salon_id: req.salon_id,
+        closed_at: { gte: bounds.start, lte: bounds.end },
+      },
+      orderBy: { closed_at: 'asc' },
+    });
+    res.json({
+      date: dateStr,
+      batch_closes: rows.map(function(r) {
+        return {
+          id: r.id,
+          station_id: r.station_id,
+          station_label: r.station_label,
+          closed_at: r.closed_at,
+          closed_by_staff_id: r.closed_by_staff_id,
+          closed_by_name: r.closed_by_name,
+          status: r.status,
+          total_count: r.total_count,
+          total_credit_cents: r.total_credit_cents,
+          total_tip_cents: r.total_tip_cents,
+          host_code: r.host_code,
+          host_message: r.host_message,
+          tid: r.tid,
+          mid: r.mid,
+          error_message: r.error_message,
+        };
+      }),
     });
   } catch (err) { next(err); }
 });

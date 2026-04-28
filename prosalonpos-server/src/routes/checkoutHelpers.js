@@ -2,8 +2,12 @@
  * ProSalonPOS — Checkout Helpers
  * Extracted from checkout.js (Session V2) to stay under 800-line cap.
  * Shared by checkout routes: formatTicket, dayBounds, timezone helpers.
+ *
+ * v2.0.6: dayBounds is now tz-aware. ALL callers must pass salon_id.
+ * Throws if salon_id missing — keeps cc26-style silent ET fallbacks out.
  */
 import { isSQLite } from '../config/database.js';
+import { dayBoundsTz, getSalonTz } from '../utils/salonTz.js';
 
 function toDb(val) {
   if (val === null || val === undefined) return null;
@@ -17,46 +21,38 @@ function fromDb(val) {
 }
 
 /**
- * Get US Eastern timezone offset in minutes (300 = EST, 240 = EDT).
- * Uses Intl to determine if DST is active for a given date.
+ * v2.0.6: getEasternOffset replaced by salonTz.getTzOffsetMs (tz-aware).
+ * Kept here as a thin shim ONLY for legacy code that hasn't been ported.
+ * Returns offset in minutes for the salon's tz (300 EST, 240 EDT, 420 PDT, etc.).
+ * THROWS if salon_id missing — caller must pass it.
  */
-function getEasternOffset(date) {
-  var str = date.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-  if (str.indexOf('EDT') >= 0) return 240;
-  return 300;
+function getEasternOffset(date, salon_id) {
+  if (!salon_id) throw new Error('getEasternOffset: salon_id required (v2.0.6 tz-aware)');
+  var tz = getSalonTz(salon_id);
+  var fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  });
+  var parts = {};
+  fmt.formatToParts(date).forEach(function(p) { parts[p.type] = p.value; });
+  var hour = parts.hour === '24' ? '00' : parts.hour;
+  var asUtc = Date.UTC(
+    parseInt(parts.year), parseInt(parts.month) - 1, parseInt(parts.day),
+    parseInt(hour), parseInt(parts.minute), parseInt(parts.second)
+  );
+  // Offset in minutes from UTC, positive for west (US tz)
+  return -((asUtc - date.getTime()) / 60000);
 }
 
 /**
- * Get start-of-day and end-of-day boundaries for a date string (YYYY-MM-DD).
- * If no date provided, uses today in US Eastern time.
- * Railway runs in UTC — must convert to Eastern for Florida salons.
+ * v2.0.6: dayBounds(dateStr, salon_id) — tz-aware, REQUIRES salon_id.
+ * Throws if salon_id is missing (intentionally loud — prevents cc26-style
+ * silent fallback bugs). dateStr optional; defaults to today in salon's tz.
  */
-function dayBounds(dateStr) {
-  if (dateStr) {
-    var parts = dateStr.split('-');
-    var y = parseInt(parts[0]);
-    var m = parseInt(parts[1]) - 1;
-    var day = parseInt(parts[2]);
-    var probe = new Date(Date.UTC(y, m, day, 12, 0, 0));
-    var etOffset = getEasternOffset(probe);
-    var start = new Date(Date.UTC(y, m, day, 0, 0, 0, 0));
-    start.setUTCMinutes(start.getUTCMinutes() + etOffset);
-    var end = new Date(Date.UTC(y, m, day, 23, 59, 59, 999));
-    end.setUTCMinutes(end.getUTCMinutes() + etOffset);
-    return { start: start, end: end };
-  } else {
-    var now = new Date();
-    var etOffset = getEasternOffset(now);
-    var etNow = new Date(now.getTime() - etOffset * 60000);
-    var yy = etNow.getUTCFullYear();
-    var mm = etNow.getUTCMonth();
-    var dd = etNow.getUTCDate();
-    var start = new Date(Date.UTC(yy, mm, dd, 0, 0, 0, 0));
-    start.setUTCMinutes(start.getUTCMinutes() + etOffset);
-    var end = new Date(Date.UTC(yy, mm, dd, 23, 59, 59, 999));
-    end.setUTCMinutes(end.getUTCMinutes() + etOffset);
-    return { start: start, end: end };
-  }
+function dayBounds(dateStr, salon_id) {
+  if (!salon_id) throw new Error('dayBounds: salon_id required (v2.0.6 tz-aware)');
+  return dayBoundsTz(dateStr, salon_id);
 }
 
 /**

@@ -182,13 +182,24 @@ router.post('/verify-setup', async function(req, res, next) {
       return res.status(403).json({ error: 'This salon account is suspended. Contact your provider.' });
     }
 
+    // v2.0.10: issue a salon-scoped JWT here so the device can skip the
+    // PIN-at-login step. The token has salon_id but NO staff_id — actions
+    // that need staff identity must collect it at action time (existing
+    // clearance modal pattern, time-clock popup, etc.).
+    var salonToken = createToken({
+      salon_id: salon.id,
+      staff_id: null,
+      role: null,
+    });
+
     res.json({
       salon: {
         id: salon.id,
         name: salon.name,
         salon_code: salon.salon_code,
         status: salon.status,
-      }
+      },
+      token: salonToken,
     });
   } catch (err) { next(err); }
 });
@@ -254,11 +265,14 @@ router.get('/pin-table/:salon_id', async function(req, res, next) {
 
 // ── Login: salon_id + PIN → JWT ──
 // Check order: 1) Staff PINs  2) Owner PIN (salon record)  3) Provider master code
+// v2.1.1: device_mode in body — when 'owner_portal', skip station_count limit
+//         (owner-portal sessions don't count against station slots).
 router.post('/login', async function(req, res, next) {
   try {
     var ip = req.ip || req.connection.remoteAddress || 'unknown';
-    var { salon_id, pin } = req.body;
-    console.log('[Auth] Login attempt — salon_id:', salon_id);
+    var { salon_id, pin, device_mode } = req.body;
+    var isOwnerPortalLogin = device_mode === 'owner_portal';
+    console.log('[Auth] Login attempt — salon_id:', salon_id, '| device_mode:', device_mode || 'station');
 
     if (!salon_id || !pin) {
       return res.status(400).json({ error: 'salon_id and pin are required' });
@@ -343,8 +357,9 @@ router.post('/login', async function(req, res, next) {
       await prisma.salon.update({ where: { id: salon_id }, data: { login_failed_attempts: 0 } }).catch(function() {});
       // ── Station enforcement: check active session count before allowing login ──
       // Provider master code bypasses — you always need a way in
+      // v2.1.1: owner_portal logins ALSO bypass — portal isn't a station, doesn't burn a slot
       var salonRecord = await prisma.salon.findUnique({ where: { id: salon_id }, select: { station_count: true, status: true, trial_end_date: true } });
-      if (salonRecord) {
+      if (salonRecord && !isOwnerPortalLogin) {
         var activeCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
         if (activeCount >= salonRecord.station_count) {
           return res.status(403).json({
@@ -381,14 +396,17 @@ router.post('/login', async function(req, res, next) {
         // C66: Clear DB-level failed login counter on successful login
         await prisma.salon.update({ where: { id: salon_id }, data: { login_failed_attempts: 0 } }).catch(function() {});
         // ── Station enforcement for owner login ──
-        var ownerActiveCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
-        if (ownerActiveCount >= salon.station_count) {
-          return res.status(403).json({
-            error: 'This salon is already in use on ' + ownerActiveCount + ' device' + (ownerActiveCount > 1 ? 's' : '') + '. Your plan allows ' + salon.station_count + '. Log out on another device or contact your provider to add more stations.',
-            code: 'STATION_LIMIT',
-            active: ownerActiveCount,
-            limit: salon.station_count,
-          });
+        // v2.1.1: skip when this is an owner_portal login (not a station)
+        if (!isOwnerPortalLogin) {
+          var ownerActiveCount = await prisma.activeSession.count({ where: { salon_id: salon_id } });
+          if (ownerActiveCount >= salon.station_count) {
+            return res.status(403).json({
+              error: 'This salon is already in use on ' + ownerActiveCount + ' device' + (ownerActiveCount > 1 ? 's' : '') + '. Your plan allows ' + salon.station_count + '. Log out on another device or contact your provider to add more stations.',
+              code: 'STATION_LIMIT',
+              active: ownerActiveCount,
+              limit: salon.station_count,
+            });
+          }
         }
 
         // Rehash if using old slow rounds (fire and forget)
@@ -720,6 +738,245 @@ router.post('/tech-logout', async function(req, res, next) {
 
     console.log('[Auth] Tech session cleared for staff_id:', staff_id);
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ════════════════════════════════════════════
+// MULTI-OWNER PORTAL LOGIN (v2.1.3)
+// ════════════════════════════════════════════
+// Person-level login for the Owner Portal device mode. Distinct from the
+// per-salon owner PIN (which still works as a fallback when no
+// SalonOwnerAccount is linked to a salon — see Owner Portal frontend).
+//
+// Lockout: 5 wrong PINs locks the account; provider unlocks via Provider Portal.
+
+var OWNER_LOCK_THRESHOLD = 5;
+
+// ── GET /owner-portal-check?salon_id=X — does this salon have multi-owner setup? ──
+// Public — frontend uses this to decide between NEW email+PIN screen and OLD PIN-only fallback.
+// Returns false → client falls back to v2.1.2 behavior (local PIN check vs Salon.owner_pin_hash).
+router.get('/owner-portal-check', async function(req, res, next) {
+  try {
+    var salon_id = (req.query.salon_id || '').trim();
+    if (!salon_id) return res.json({ has_owner_accounts: false });
+
+    var count = await prisma.salonOwnerAccess.count({ where: { salon_id: salon_id } });
+    res.json({ has_owner_accounts: count > 0 });
+  } catch (err) {
+    // Don't fail the login screen — fall back to old behavior on any error
+    res.json({ has_owner_accounts: false });
+  }
+});
+
+// ── POST /owner-portal-login — email + person PIN ──
+router.post('/owner-portal-login', async function(req, res, next) {
+  try {
+    var ip = req.ip || req.connection.remoteAddress || 'unknown';
+    if (checkIpBlocked(ip)) {
+      return res.status(429).json({
+        error: 'Too many failed attempts from this IP. Try again in 30 minutes.',
+        lockedUntil: 'IP block — 30 min'
+      });
+    }
+
+    var email = (req.body.email || '').trim().toLowerCase();
+    var pin = String(req.body.pin || '').trim();
+
+    if (!email || !pin) {
+      recordIpFail(ip);
+      return res.status(400).json({ error: 'Email and PIN are required' });
+    }
+
+    var owner = await prisma.salonOwnerAccount.findUnique({
+      where: { email: email },
+      include: { salon_access: { include: { salon: { select: { id: true, name: true, timezone: true } } } } },
+    });
+
+    if (!owner) {
+      recordIpFail(ip);
+      return res.status(401).json({ error: 'Invalid email or PIN' });
+    }
+
+    if (!owner.active) {
+      return res.status(403).json({ error: 'Account is disabled. Contact your provider.' });
+    }
+
+    if (owner.locked) {
+      return res.status(403).json({
+        error: 'Account locked from too many failed attempts. Contact your provider to unlock.',
+        locked: true,
+      });
+    }
+
+    var ok = comparePin(pin, owner.pin_hash);
+    if (!ok) {
+      var newAttempts = (owner.failed_attempts || 0) + 1;
+      var locked = newAttempts >= OWNER_LOCK_THRESHOLD;
+      await prisma.salonOwnerAccount.update({
+        where: { id: owner.id },
+        data: {
+          failed_attempts: newAttempts,
+          locked: locked,
+          locked_at: locked ? new Date() : null,
+        },
+      });
+      recordIpFail(ip);
+      return res.status(401).json({
+        error: locked
+          ? 'Account locked from too many failed attempts. Contact your provider to unlock.'
+          : 'Invalid email or PIN',
+        attempts_remaining: locked ? 0 : (OWNER_LOCK_THRESHOLD - newAttempts),
+        locked: locked,
+      });
+    }
+
+    // Success — clear failed attempts, update last_login
+    clearIpFails(ip);
+    await prisma.salonOwnerAccount.update({
+      where: { id: owner.id },
+      data: { failed_attempts: 0, last_login_at: new Date() },
+    });
+
+    var salons = (owner.salon_access || [])
+      .filter(function(sa) { return sa.salon; })
+      .map(function(sa) {
+        return { id: sa.salon.id, name: sa.salon.name, timezone: sa.salon.timezone };
+      });
+
+    var tokenPayload = {
+      owner_id: owner.id,
+      kind: 'owner_portal',
+      // No salon_id baked in — the portal supplies it per request via header/body
+    };
+    var token = createToken(tokenPayload);
+
+    res.json({
+      token: token,
+      owner: {
+        id: owner.id,
+        name: owner.name,
+        email: owner.email,
+        must_change_pin: owner.must_change_pin,
+        last_salon_id: owner.last_salon_id,
+      },
+      salons: salons,
+    });
+  } catch (err) { next(err); }
+});
+
+// ── PUT /owner-portal-change-pin — owner changes their own PIN ──
+// Body: { current_pin, new_pin }  Header: Authorization: Bearer <owner-portal token>
+router.put('/owner-portal-change-pin', async function(req, res, next) {
+  try {
+    var authHeader = req.headers.authorization || '';
+    var token = authHeader.replace(/^Bearer\s+/i, '');
+    var payload = verifyToken(token);
+    if (!payload || payload.kind !== 'owner_portal' || !payload.owner_id) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    var current = String(req.body.current_pin || '').trim();
+    var next_pin = String(req.body.new_pin || '').trim();
+    if (!current || !next_pin) return res.status(400).json({ error: 'Current and new PIN required' });
+    if (next_pin.length < 4 || next_pin.length > 8 || !/^\d+$/.test(next_pin)) {
+      return res.status(400).json({ error: 'New PIN must be 4-8 digits' });
+    }
+    if (next_pin === current) return res.status(400).json({ error: 'New PIN must differ from current PIN' });
+
+    var owner = await prisma.salonOwnerAccount.findUnique({ where: { id: payload.owner_id } });
+    if (!owner) return res.status(404).json({ error: 'Owner not found' });
+    if (!comparePin(current, owner.pin_hash)) {
+      return res.status(401).json({ error: 'Current PIN is incorrect' });
+    }
+
+    await prisma.salonOwnerAccount.update({
+      where: { id: owner.id },
+      data: {
+        pin_hash: hashPin(next_pin),
+        pin_plain: next_pin,
+        must_change_pin: false,
+      },
+    });
+
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ── POST /owner-portal-select-salon — swap owner-portal token for salon-scoped JWT ──
+// Body: { salon_id }  Header: Authorization: Bearer <owner-portal token>
+// Returns: salon-scoped JWT (same shape as a station login token) so all existing
+// /api/v1/* endpoints work unchanged.
+router.post('/owner-portal-select-salon', async function(req, res, next) {
+  try {
+    var authHeader = req.headers.authorization || '';
+    var token = authHeader.replace(/^Bearer\s+/i, '');
+    var payload = verifyToken(token);
+    if (!payload || payload.kind !== 'owner_portal' || !payload.owner_id) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    var salon_id = (req.body.salon_id || '').trim();
+    if (!salon_id) return res.status(400).json({ error: 'salon_id required' });
+
+    // Verify the owner has access to this salon
+    var access = await prisma.salonOwnerAccess.findFirst({
+      where: { owner_id: payload.owner_id, salon_id: salon_id },
+      include: { salon: { select: { id: true, name: true, timezone: true } } },
+    });
+    if (!access || !access.salon) return res.status(403).json({ error: 'No access to that salon' });
+
+    var owner = await prisma.salonOwnerAccount.findUnique({ where: { id: payload.owner_id } });
+    if (!owner) return res.status(404).json({ error: 'Owner not found' });
+
+    // Issue a salon-scoped token. Mirrors the "owner" role used by station-side flow
+    // so existing salon-scoped endpoints (reports, payroll, etc.) accept it.
+    var salonToken = createToken({
+      staff_id: 'owner_portal:' + owner.id,
+      salon_id: access.salon.id,
+      role: 'owner',
+      display_name: owner.name,
+      kind: 'owner_portal_salon',
+    });
+
+    // Update last_salon_id for next-login convenience
+    await prisma.salonOwnerAccount.update({
+      where: { id: owner.id },
+      data: { last_salon_id: salon_id },
+    });
+
+    res.json({
+      token: salonToken,
+      salon: access.salon,
+      owner: { id: owner.id, name: owner.name, email: owner.email },
+    });
+  } catch (err) { next(err); }
+});
+
+// ── PUT /owner-portal-last-salon — remember which salon was open ──
+// Body: { salon_id }
+router.put('/owner-portal-last-salon', async function(req, res, next) {
+  try {
+    var authHeader = req.headers.authorization || '';
+    var token = authHeader.replace(/^Bearer\s+/i, '');
+    var payload = verifyToken(token);
+    if (!payload || payload.kind !== 'owner_portal' || !payload.owner_id) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    var salon_id = (req.body.salon_id || '').trim();
+    if (!salon_id) return res.status(400).json({ error: 'salon_id required' });
+
+    // Verify the owner actually has access to this salon
+    var access = await prisma.salonOwnerAccess.findFirst({
+      where: { owner_id: payload.owner_id, salon_id: salon_id },
+    });
+    if (!access) return res.status(403).json({ error: 'No access to that salon' });
+
+    await prisma.salonOwnerAccount.update({
+      where: { id: payload.owner_id },
+      data: { last_salon_id: salon_id },
+    });
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 

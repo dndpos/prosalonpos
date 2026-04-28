@@ -22,49 +22,32 @@ import { triggerBookingConfirm, triggerCancelConfirm, triggerNoShow, triggerWait
 // We need it because the by-short-id appointment route now also returns
 // the linked open ticket — and the client's handleScanReopen expects the
 // shaped form, not the raw Prisma record.
-import { formatTicket } from './checkoutHelpers.js';
+import { formatTicket, dayBounds } from './checkoutHelpers.js';
 // cc15: barcode audit log — slip_printed on create, scanned on by-short-id.
 import { logSlipEvent, SLIP_EVENT_TYPES, reqContext, shortIdFromUuid } from '../utils/slipLog.js';
+// v2.0.6: tz-aware helpers (replaces local Eastern-only dayBounds/toSalonLocal/todayStr)
+import { getSalonTz, todayInSalonTz } from '../utils/salonTz.js';
 
 var router = Router();
 
-// ── Helper: get start/end of day for date filtering (Eastern time) ──
-function getEasternOffset(date) {
-  var str = date.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-  if (str.indexOf('EDT') >= 0) return 240;
-  return 300;
-}
-
-function dayBounds(dateStr) {
-  var parts = dateStr.split('-');
-  var y = parseInt(parts[0]);
-  var m = parseInt(parts[1]) - 1;
-  var day = parseInt(parts[2]);
-  var probe = new Date(Date.UTC(y, m, day, 12, 0, 0));
-  var etOffset = getEasternOffset(probe);
-  var start = new Date(Date.UTC(y, m, day, 0, 0, 0, 0));
-  start.setUTCMinutes(start.getUTCMinutes() + etOffset);
-  var end = new Date(Date.UTC(y, m, day, 23, 59, 59, 999));
-  end.setUTCMinutes(end.getUTCMinutes() + etOffset);
-  return { start: start, end: end };
-}
-
-// PROTECTED C62: Convert UTC Date to timezone-naive salon-local string (no Z).
-// "2026-04-15T13:00:00.000Z" (UTC) → "2026-04-15T09:00:00" (Eastern, no Z).
-// Frontend new Date("...no Z...") parses as browser-local → always shows 9 AM.
-function toSalonLocal(d) {
+// PROTECTED C62 (v2.0.6 tz-aware): Convert UTC Date to timezone-naive salon-local
+// string (no Z). "2026-04-15T13:00:00.000Z" (UTC) → "2026-04-15T09:00:00" (in
+// salon's tz, no Z). Frontend new Date("...no Z...") parses as browser-local
+// → always shows the salon's wall-clock time. THROWS if salon_id missing.
+function toSalonLocal(d, salon_id) {
   if (!d) return d;
-  var fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  if (!salon_id) throw new Error('toSalonLocal: salon_id required (v2.0.6 tz-aware)');
+  var tz = getSalonTz(salon_id);
+  var fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   var p = {}; fmt.formatToParts(d).forEach(function(x) { p[x.type] = x.value; });
   var hh = p.hour === '24' ? '00' : p.hour;
   return p.year + '-' + p.month + '-' + p.day + 'T' + hh + ':' + p.minute + ':' + p.second;
 }
 
-function todayStr() {
-  var now = new Date();
-  var etOffset = getEasternOffset(now);
-  var etNow = new Date(now.getTime() - etOffset * 60000);
-  return etNow.getUTCFullYear() + '-' + String(etNow.getUTCMonth() + 1).padStart(2, '0') + '-' + String(etNow.getUTCDate()).padStart(2, '0');
+// v2.0.6: today in salon's tz (replaces Eastern-only todayStr)
+function todayStr(salon_id) {
+  if (!salon_id) throw new Error('todayStr: salon_id required (v2.0.6 tz-aware)');
+  return todayInSalonTz(salon_id);
 }
 
 // ── GET /service-lines?start=YYYY-MM-DD — Flat list for calendar rendering ──
@@ -73,10 +56,10 @@ router.get('/service-lines', async function(req, res, next) {
   try {
     var dateStr = req.query.start;
     if (!dateStr) {
-      dateStr = todayStr();
+      dateStr = todayStr(req.salon_id);
     }
 
-    var bounds = dayBounds(dateStr);
+    var bounds = dayBounds(dateStr, req.salon_id);
 
     var lines = await prisma.serviceLine.findMany({
       where: {
@@ -95,7 +78,7 @@ router.get('/service-lines', async function(req, res, next) {
     // Flatten parent appointment fields onto each service line for calendar compatibility
     var flat = lines.map(function(sl) {
       var obj = Object.assign({}, sl);
-      obj.starts_at = toSalonLocal(sl.starts_at); // C62: timezone-naive for frontend
+      obj.starts_at = toSalonLocal(sl.starts_at, req.salon_id); // C62: timezone-naive for frontend
       if (sl.appointment) {
         obj.bookingId = sl.appointment.booking_group_id || null;
         obj.client_id = sl.appointment.client_id || null;
@@ -116,7 +99,7 @@ router.get('/', async function(req, res, next) {
     var where = { salon_id: req.salon_id };
 
     if (req.query.start) {
-      var bounds = dayBounds(req.query.start);
+      var bounds = dayBounds(req.query.start, req.salon_id);
       where.service_lines = { some: { starts_at: { gte: bounds.start, lte: bounds.end } } };
     }
 
@@ -274,40 +257,56 @@ router.get('/client/:clientId', async function(req, res, next) {
 });
 
 // ── POST / — Create appointment + service lines in one transaction ──
+// v2.3.2 (Phase 3c): accepts an optional pre-supplied `id` (and per-line
+// `id` on each service_line) so offline-queued creates carry the same UUIDs
+// the local SQLite mirror already wrote. Combined with X-Client-Op-Id
+// idempotency middleware, replays return the cached response instead of
+// creating duplicates. UUID4 shape is enforced server-side; malformed ids
+// are silently ignored (legacy renderers omit the field entirely).
+var APPT_UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 router.post('/', async function(req, res, next) {
   try {
     var data = req.body;
 
+    var apptCreate = {
+      salon_id: req.salon_id,
+      client_id: data.client_id || null,
+      client_name: data.client_name || null,
+      status: data.status || 'pending',
+      source: data.source || 'staff',
+      booking_group_id: data.booking_group_id || null,
+      requested: data.requested || false,
+      deposit_cents: data.deposit_cents || 0,
+      deposit_status: data.deposit_status || 'none',
+      walk_in: data.walk_in || false,
+      notes: data.notes || null,
+      service_lines: {
+        create: (data.service_lines || []).map(function(sl, i) {
+          var lineCreate = {
+            service_catalog_id: sl.service_catalog_id || null,
+            staff_id: sl.staff_id,
+            starts_at: new Date(sl.starts_at),
+            duration_minutes: sl.duration_minutes,
+            calendar_color: sl.calendar_color || '#3B82F6',
+            status: sl.status || data.status || 'pending',
+            client_name: sl.client_name || data.client_name || null,
+            service_name: sl.service_name,
+            price_cents: sl.price_cents || 0,
+            position: i,
+          };
+          // Optional pre-supplied service_line id (for offline replay).
+          if (sl.id && typeof sl.id === 'string' && APPT_UUID_V4_RE.test(sl.id)) {
+            lineCreate.id = sl.id;
+          }
+          return lineCreate;
+        })
+      }
+    };
+    if (data.id && typeof data.id === 'string' && APPT_UUID_V4_RE.test(data.id)) {
+      apptCreate.id = data.id;
+    }
     var appt = await prisma.appointment.create({
-      data: {
-        salon_id: req.salon_id,
-        client_id: data.client_id || null,
-        client_name: data.client_name || null,
-        status: data.status || 'pending',
-        source: data.source || 'staff',
-        booking_group_id: data.booking_group_id || null,
-        requested: data.requested || false,
-        deposit_cents: data.deposit_cents || 0,
-        deposit_status: data.deposit_status || 'none',
-        walk_in: data.walk_in || false,
-        notes: data.notes || null,
-        service_lines: {
-          create: (data.service_lines || []).map(function(sl, i) {
-            return {
-              service_catalog_id: sl.service_catalog_id || null,
-              staff_id: sl.staff_id,
-              starts_at: new Date(sl.starts_at),
-              duration_minutes: sl.duration_minutes,
-              calendar_color: sl.calendar_color || '#3B82F6',
-              status: sl.status || data.status || 'pending',
-              client_name: sl.client_name || data.client_name || null,
-              service_name: sl.service_name,
-              price_cents: sl.price_cents || 0,
-              position: i,
-            };
-          })
-        }
-      },
+      data: apptCreate,
       include: { service_lines: true }
     });
 
@@ -447,7 +446,7 @@ router.put('/:id', async function(req, res, next) {
           var _client = await prisma.client.findUnique({ where: { id: _clientId }, select: { notes: true } });
           // Build note with date and services
           var svcNames = (appt.service_lines || []).map(function(sl) { return sl.service_name || 'Service'; }).join(', ');
-          var dateStr = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: 'numeric' });
+          var dateStr = new Date().toLocaleDateString('en-US', { timeZone: getSalonTz(req.salon_id), month: 'numeric', day: 'numeric', year: 'numeric' });
           var noShowNote = 'No-show on ' + dateStr + (svcNames ? ' - ' + svcNames : '');
           var existingNotes = (_client && _client.notes) ? _client.notes.trim() : '';
           var updatedNotes = existingNotes ? existingNotes + '\n' + noShowNote : noShowNote;

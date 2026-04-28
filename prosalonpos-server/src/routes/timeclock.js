@@ -507,13 +507,24 @@ router.post('/presence', async function(req, res, next) {
 // Also sets all StaffPresence records to 'out'.
 // ═══════════════════════════════════════════════
 
-async function midnightAutoClockout(io) {
+// v2.0.6: Now scoped to a single salon (server.js cron walks salons + their tz).
+// Computes 11:59:59 PM in the SALON'S local tz, not global Eastern.
+async function midnightAutoClockout(io, targetSalonId) {
   try {
-    // Get all salons
-    var salons = await prisma.salon.findMany({ select: { id: true } });
+    // v2.0.6: targetSalonId is required — server.js cron passes per-salon.
+    var salons;
+    if (targetSalonId) {
+      var s = await prisma.salon.findUnique({ where: { id: targetSalonId }, select: { id: true, timezone: true } });
+      if (!s) return;
+      salons = [s];
+    } else {
+      // Backwards-compat: if called without target (e.g. manual/test), do all salons.
+      salons = await prisma.salon.findMany({ select: { id: true, timezone: true } });
+    }
 
     for (var si = 0; si < salons.length; si++) {
       var salonId = salons[si].id;
+      var salonTz = salons[si].timezone || 'America/New_York';
 
       // Get all staff for this salon
       var staff = await prisma.staff.findMany({
@@ -523,10 +534,8 @@ async function midnightAutoClockout(io) {
       if (staff.length === 0) continue;
 
       var staffIds = staff.map(function(s) { return s.id; });
-      var staffMap = {};
-      staff.forEach(function(s) { staffMap[s.id] = s.display_name; });
 
-      // Find last punch for each staff member today or earlier (any date — we want their current status)
+      // Find last punch for each staff member
       var clockedOutCount = 0;
       for (var i = 0; i < staffIds.length; i++) {
         var staffId = staffIds[i];
@@ -536,30 +545,34 @@ async function midnightAutoClockout(io) {
         });
 
         if (lastPunch && lastPunch.type === 'in') {
-          // This person is still clocked in — auto clock them out at 11:59:59 PM Eastern
-          // Railway runs UTC, so we need to compute 23:59:59 Eastern as a UTC Date
+          // Auto clock out at 11:59:59 PM SALON-LOCAL of yesterday
+          // (cron fires at 00:00 of new day, so yesterday = 1 min ago in salon-local)
           var now = new Date();
-          var etParts = {};
-          new Intl.DateTimeFormat('en-US', {
-            timeZone: 'America/New_York',
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour12: false,
-          }).formatToParts(now).forEach(function(p) { etParts[p.type] = p.value; });
-          // We're firing at 00:00 Eastern of the NEW day, so 11:59:59 PM is yesterday
-          var yest = new Date(now.getTime() - 60000); // 1 minute ago = still yesterday in ET
+          var yest = new Date(now.getTime() - 60000);
           var yParts = {};
           new Intl.DateTimeFormat('en-US', {
-            timeZone: 'America/New_York',
+            timeZone: salonTz,
             year: 'numeric', month: '2-digit', day: '2-digit',
             hour12: false,
           }).formatToParts(yest).forEach(function(p) { yParts[p.type] = p.value; });
-          // Build 23:59:59 on yesterday's Eastern date, then convert to UTC
+          // Build 23:59:59 on yesterday's salon-local date, then convert to UTC
           var localStr = yParts.year + '-' + yParts.month + '-' + yParts.day + 'T23:59:59';
-          // Determine EDT vs EST offset for that date
           var probe = new Date(localStr + 'Z');
-          var tzStr = probe.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-          var offsetMin = tzStr.indexOf('EDT') >= 0 ? 240 : 300;
-          var midnight = new Date(probe.getTime() + offsetMin * 60000);
+          // Use Intl to compute the actual offset for this tz on that date (handles DST)
+          var probeFmt = new Intl.DateTimeFormat('en-US', {
+            timeZone: salonTz,
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+          });
+          var pParts = {};
+          probeFmt.formatToParts(probe).forEach(function(p) { pParts[p.type] = p.value; });
+          var pHour = pParts.hour === '24' ? '00' : pParts.hour;
+          var asUtc = Date.UTC(
+            parseInt(pParts.year), parseInt(pParts.month) - 1, parseInt(pParts.day),
+            parseInt(pHour), parseInt(pParts.minute), parseInt(pParts.second)
+          );
+          var offsetMs = asUtc - probe.getTime();
+          var midnight = new Date(probe.getTime() - offsetMs);
 
           var punch = await prisma.clockPunch.create({
             data: {
@@ -590,8 +603,7 @@ async function midnightAutoClockout(io) {
       });
 
       if (clockedOutCount > 0) {
-        console.log('[Midnight] Auto-clocked out ' + clockedOutCount + ' staff for salon ' + salonId);
-        // Notify connected stations
+        console.log('[Midnight] Auto-clocked out ' + clockedOutCount + ' staff for salon ' + salonId + ' (' + salonTz + ')');
         if (io) {
           io.to('salon:' + salonId).emit('timeclock:punch');
           io.to('salon:' + salonId).emit('timeclock:presence');

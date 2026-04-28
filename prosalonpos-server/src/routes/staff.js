@@ -178,6 +178,7 @@ router.post('/', async function(req, res, next) {
           payout_check_pct: data.payout_check_pct != null ? data.payout_check_pct : 100,
           payout_bonus_pct: data.payout_bonus_pct || 0,
           category_commission_rates: toDb(data.category_commission_rates || {}),
+          retail_commission_pct: data.retail_commission_pct || 0,
           permission_overrides: toDb(data.permission_overrides || {}),
           permissions: toDb(data.permissions || {}),
           schedule: toDb(data.schedule || null),
@@ -242,6 +243,7 @@ router.post('/', async function(req, res, next) {
         payout_check_pct: data.payout_check_pct || 100,
         payout_bonus_pct: data.payout_bonus_pct || 0,
         category_commission_rates: toDb(data.category_commission_rates),
+        retail_commission_pct: data.retail_commission_pct || 0,
         permission_overrides: toDb(data.permission_overrides),
         permissions: toDb(data.permissions),
         schedule: toDb(data.schedule),
@@ -283,6 +285,7 @@ router.put('/:id', async function(req, res, next) {
       'commission_pct', 'daily_guarantee_cents', 'hourly_rate_cents',
       'commission_bonus_enabled', 'salary_amount_cents', 'salary_period',
       'payout_check_pct', 'payout_bonus_pct', 'category_commission_rates',
+      'retail_commission_pct',  // 2026-04-26: per-staff product commission %
       'permission_overrides', 'permissions', 'schedule', 'position'];
 
     fields.forEach(function(f) {

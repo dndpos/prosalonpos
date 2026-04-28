@@ -30,8 +30,8 @@ router.post('/tickets/:id/void', async function(req, res, next) {
       return res.status(400).json({ error: 'Cannot void a ticket that has been refunded' });
     }
 
-    // Same-day check: ticket must have been created today (Eastern time)
-    var todayBounds = dayBounds(); // uses Eastern time
+    // Same-day check: ticket must have been created today (salon-local tz, v2.0.6)
+    var todayBounds = dayBounds(undefined, req.salon_id);
     var ticketCreated = new Date(existing.created_at);
     if (ticketCreated < todayBounds.start || ticketCreated > todayBounds.end) {
       return res.status(400).json({ error: 'Void is same-day only. Use refund for older tickets.' });
@@ -255,6 +255,126 @@ router.post('/tickets/:id/refund', async function(req, res, next) {
         refunded_at: ticket.refund_at,
         restoredPkgCredits: restoredPkgCredits,
         restoredGiftCards: restoredGiftCards,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// ── cc24 — POST /tickets/standalone-refund ───────────────────────────────
+// Generic refund — no source ticket required. Used by the QuickRefundModal
+// from the checkout screen when a customer brings back something without
+// a receipt. We create a ticket on the fly with no items, mark it
+// status='refunded', record the refund in `refund_history`, and add a
+// negative TicketPayment carrying the PAX-approved auth/last4/etc. Reports
+// then pick this up alongside ticket-linked refunds (per Alex cc24:
+// "don't unlink anything").
+router.post('/tickets/standalone-refund', async function(req, res, next) {
+  try {
+    var data = req.body || {};
+    var amountCents = parseInt(data.amount_cents, 10) || 0;
+    if (amountCents <= 0) {
+      return res.status(400).json({ error: 'amount_cents must be > 0' });
+    }
+    var method = data.method || 'cash';
+    var reason = (data.reason || '').toString().trim();
+    if (!reason) {
+      return res.status(400).json({ error: 'reason is required' });
+    }
+
+    // Today's ticket number — keep the daily sequential numbering shared
+    // with normal tickets so nothing in reports looks out of order.
+    var bounds = dayBounds(undefined, req.salon_id);
+    var lastToday = await prisma.ticket.findFirst({
+      where: { salon_id: req.salon_id, created_at: { gte: bounds.start, lte: bounds.end } },
+      orderBy: { ticket_number: 'desc' },
+      select: { ticket_number: true },
+    });
+    var ticketNumber = (lastToday ? lastToday.ticket_number : 0) + 1;
+
+    var refundRecord = {
+      id: 'refund-' + Date.now(),
+      items: [],
+      reason: reason,
+      method: method,
+      by: data.staff_id || null,
+      by_name: data.staff_name || null,
+      at: new Date().toISOString(),
+      amount_cents: amountCents,
+      tax_cents: 0,
+      tip_cents: 0,
+      // CC details — only present for credit-card refunds
+      auth_code: data.auth_code || null,
+      last4: data.last4 || null,
+      card_brand: data.card_brand || null,
+      entry_method: data.entry_method || null,
+      processor_txn_id: data.processor_txn_id || null,
+      ecr_ref_num: data.ecr_ref_num || null,
+      standalone: true,    // flag for downstream consumers (reports/audit) that
+                           // want to know this didn't have a source ticket. NOT
+                           // used to bucket reports differently — per Alex,
+                           // standalone refunds count as normal refunds.
+    };
+
+    var ticket = await prisma.ticket.create({
+      data: {
+        salon_id: req.salon_id,
+        ticket_number: ticketNumber,
+        status: 'refunded',
+        subtotal_cents: 0,
+        total_cents: 0,
+        cashier_id: data.staff_id || null,
+        cashier_name: data.staff_name || null,
+        created_by_id: data.staff_id || null,
+        created_by_name: data.staff_name || null,
+        refund_cents: amountCents,
+        refund_reason: reason,
+        refund_by: data.staff_id || null,
+        refund_at: new Date(),
+        refund_history: toDb([refundRecord]),
+        payments: {
+          create: [{
+            method: method,
+            sub_method: (method === 'zelle' || method === 'venmo') ? method : null,
+            amount_cents: -amountCents,    // negative — cash going OUT
+            card_brand: data.card_brand || null,
+            last4: data.last4 || null,
+            auth_code: data.auth_code || null,
+            entry_method: data.entry_method || null,
+            processor_txn_id: data.processor_txn_id || null,
+          }],
+        },
+      },
+      include: { items: true, payments: true },
+    });
+    // Inject refund_history so formatTicket works regardless of Prisma client regen state.
+    ticket.refund_history = [refundRecord];
+
+    emit(req, 'ticket:refunded');
+    logSlipEvent({
+      ...reqContext(req),
+      eventType:     SLIP_EVENT_TYPES.TICKET_REFUNDED,
+      appointmentId: null,
+      ticketId:      ticket.id,
+      payload: {
+        ticket_number: ticket.ticket_number,
+        refund_cents:  amountCents,
+        total_refunded_cents: amountCents,
+        reason: reason,
+        method: method,
+        standalone: true,
+      },
+    });
+
+    res.json({
+      ticket: formatTicket(ticket),
+      refund: {
+        id: refundRecord.id,
+        ticket_id: ticket.id,
+        amount_cents: amountCents,
+        method: method,
+        refunded_at: ticket.refund_at,
+        auth_code: data.auth_code || null,
+        last4: data.last4 || null,
       },
     });
   } catch (err) { next(err); }

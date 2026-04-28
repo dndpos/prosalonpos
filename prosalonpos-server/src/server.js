@@ -21,11 +21,13 @@ import { fileURLToPath } from 'url';
 // Config & middleware
 import authenticate from './middleware/authenticate.js';
 import errorHandler from './middleware/errorHandler.js';
+import idempotency, { pruneIdempotencyKeys } from './middleware/idempotency.js'; // v2.3.2 — Phase 3c
 import { setIO } from './utils/emit.js';
 import startupLicenseCheck from './utils/license.js';
 import prisma from './config/database.js';
 import { bootstrapSalon } from './utils/salonBootstrap.js';
 import { startReminderScheduler } from './utils/reminderScheduler.js';
+import { loadAllSalonTzs, getSalonTz } from './utils/salonTz.js';
 
 // Routes
 import authRoutes from './routes/auth.js';
@@ -53,11 +55,14 @@ import packageRoutes from './routes/packages.js';
 import bootstrapRoutes from './routes/bootstrap.js';
 import publicRoutes from './routes/public.js';
 import printRoutes from './routes/print.js';
+import stationsRoutes from './routes/stations.js'; // v2.2.0
 import timeOffRoutes from './routes/timeOff.js';
 import pushRoutes from './routes/push.js';
 import registerTechPortalRoutes from './routes/techPortal.js';
 import techphonePayrollRoutes from './routes/techphonePayroll.js'; // cc5.12
 import slipEventsRoutes from './routes/slipEvents.js'; // cc15 — barcode audit log
+import activityLogRoutes, { pruneActivityLog } from './routes/activityLog.js'; // cc25 — appointment activity log
+import syncRoutes from './routes/sync.js'; // v2.3.0 — V2.3 Phase 3a: SQLite mirror snapshot endpoint
 
 var PORT = process.env.PORT || 3001;
 
@@ -171,8 +176,13 @@ app.get('/photos/staff/:id', async function(req, res) {
 app.use('/api/v1/staff', authenticate, staffRoutes);
 app.use('/api/v1/services', authenticate, servicesRoutes);
 app.use('/api/v1/settings', authenticate, settingsRoutes);
-app.use('/api/v1/clients', authenticate, clientRoutes);
-app.use('/api/v1/appointments', authenticate, appointmentRoutes);
+// v2.3.2 (Phase 3c): idempotency middleware sits BETWEEN authenticate and the
+// route handler. It needs req.salon_id (set by authenticate) to scope the
+// cache, and it short-circuits the route handler on a cache hit so the
+// route's side effects fire exactly once per X-Client-Op-Id. Mounted ONLY
+// on the routes that participate in offline-write replay.
+app.use('/api/v1/clients', authenticate, idempotency, clientRoutes);
+app.use('/api/v1/appointments', authenticate, idempotency, appointmentRoutes);
 app.use('/api/v1/checkout', authenticate, checkoutRoutes);
 app.use('/api/v1/checkout', authenticate, checkoutMergeCloseRoutes);
 app.use('/api/v1/checkout', authenticate, checkoutMergeOpenRoutes);
@@ -188,12 +198,15 @@ app.use('/api/v1/payroll', authenticate, payrollRoutes);
 app.use('/api/v1/reports', authenticate, reportsRoutes);
 app.use('/api/v1/packages', authenticate, packageRoutes);
 app.use('/api/v1/bootstrap', authenticate, bootstrapRoutes);
+app.use('/api/v1/stations', authenticate, stationsRoutes); // v2.2.0 main-station designation
 app.use('/api/v1/provider', providerRoutes); // Provider auth handled internally (login is public)
 app.use('/api/v1/print', authenticate, printRoutes);
 app.use('/api/v1/time-off', authenticate, timeOffRoutes);
 app.use('/api/v1/push', pushRoutes); // vapid-key is public, subscribe/unsubscribe use authenticate middleware inside
 app.use('/api/v1/techphone', authenticate, techphonePayrollRoutes); // cc5.12 — tech phone payroll data bundle
 app.use('/api/v1/slip-events', authenticate, slipEventsRoutes); // cc15 — per-barcode audit log
+app.use('/api/v1/activity-log', authenticate, activityLogRoutes); // cc25 — appointment activity log
+app.use('/api/v1/sync', authenticate, syncRoutes); // v2.3.0 — V2.3 Phase 3a: full salon snapshot for SQLite mirror
 
 // ── Global error handler (must be last middleware) ──
 app.use(errorHandler);
@@ -288,21 +301,82 @@ io.on('connection', function(socket) {
     // Register active session for this socket connection.
     // No staff_id-based cleanup — same person CAN be logged into multiple stations.
     // Stale sessions are cleaned by the 2-min heartbeat sweep and disconnect handler.
+    var stationId    = (typeof data === 'object' && data) ? (data.station_id || null) : null;
+    var stationLabel = (typeof data === 'object' && data) ? (data.station_label || data.station_id || null) : null;
+    // v2.2.6: capture the station's LAN IPv4 from the Electron shell. Browser-
+    // mode clients don't pass it (no Node access), so it stays null. Validated
+    // as a basic dotted-quad string before storing — defends against renderer
+    // tampering since we'll later route real traffic to this address.
+    var rawLanIp = (typeof data === 'object' && data) ? data.lan_ip : null;
+    var lanIp = (typeof rawLanIp === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(rawLanIp)) ? rawLanIp : null;
     prisma.activeSession.create({
-      data: { salon_id: salonId, socket_id: socket.id, staff_id: staffId, station_label: (typeof data === 'object' && data ? (data.station_label || data.station_id || null) : null) }
+      data: { salon_id: salonId, socket_id: socket.id, staff_id: staffId, station_label: stationLabel }
     }).then(function() {
-      console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id + (staffId ? ' staff:' + staffId : '') + (data.station_label ? ' label:' + data.station_label : ''));
+      console.log('[Station] Session registered for salon:' + salonId + ' socket:' + socket.id + (staffId ? ' staff:' + staffId : '') + (stationLabel ? ' label:' + stationLabel : ''));
     }).catch(function(err) {
       if (err.code === 'P2002') {
         // Same socket reconnected — just update heartbeat + label
         prisma.activeSession.update({
           where: { socket_id: socket.id },
-          data: { last_heartbeat: new Date(), staff_id: staffId, station_label: (typeof data === 'object' && data ? (data.station_label || data.station_id || null) : null) }
+          data: { last_heartbeat: new Date(), staff_id: staffId, station_label: stationLabel }
         }).catch(function() {});
       } else {
         console.error('[Station] Failed to register session:', err.message);
       }
     });
+
+    // v2.2.0: Persistent Station record. Upsert by (id = client station_id),
+    // auto-mark first-ever station for this salon as is_main.
+    if (stationId) {
+      (async function() {
+        try {
+          var existing = await prisma.station.findUnique({ where: { id: stationId } });
+          if (existing) {
+            // Update last_seen + label (in case the owner renamed it client-side)
+            // v2.2.6: also refresh lan_ip on every join — DHCP leases change.
+            await prisma.station.update({
+              where: { id: stationId },
+              data: {
+                last_seen: new Date(),
+                label: stationLabel || existing.label,
+                lan_ip: lanIp || existing.lan_ip, // keep prior IP if this connection didn't supply one
+              },
+            });
+          } else {
+            // First time we've seen this station. v2.2.1: NO auto-main.
+            // Connection order ≠ importance — the owner must explicitly promote
+            // a station via the All Stations panel. A salon may have zero main
+            // stations, that's fine; downstream features just lack a default.
+            // Pick a non-colliding label (multiple stations could ship with the same default)
+            var safeLabel = stationLabel || 'Station';
+            var n = 1;
+            var labelCandidate = safeLabel;
+            while (true) {
+              var dup = await prisma.station.findFirst({
+                where: { salon_id: salonId, label: labelCandidate },
+                select: { id: true },
+              });
+              if (!dup) break;
+              n++;
+              labelCandidate = safeLabel + ' (' + n + ')';
+              if (n > 50) break; // safety
+            }
+            await prisma.station.create({
+              data: {
+                id: stationId,
+                salon_id: salonId,
+                label: labelCandidate,
+                is_main: false,
+                lan_ip: lanIp, // v2.2.6: null in browser mode, set in Electron
+              },
+            });
+            console.log('[Station] Persistent record created: ' + labelCandidate + (lanIp ? ' lan_ip=' + lanIp : ''));
+          }
+        } catch (sErr) {
+          console.error('[Station] Persistent upsert failed:', sErr.message);
+        }
+      })();
+    }
   });
 
   // Heartbeat — client sends every 60s to prove it's still alive
@@ -399,27 +473,59 @@ setInterval(function() {
   });
 }, 2 * 60 * 1000); // every 2 minutes
 
-// ── Midnight auto-clockout — checks every minute, fires once at midnight Eastern ──
-// Railway runs in UTC. We use Intl to check Eastern time so it fires at real midnight.
-// Clocks out all staff still clocked in, sets presence to 'out'.
-var _midnightRanToday = null;
+// ── cc25: ActivityLog prune — daily, keeps last 60 days ──
+// Tiny table so the cost of running this often is nil; we run every 24 h
+// to amortize and let server restarts re-trigger it on first boot.
 setInterval(function() {
-  // Get current hour/minute in Eastern time
-  var now = new Date();
-  var etParts = {};
-  new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  }).formatToParts(now).forEach(function(p) { etParts[p.type] = p.value; });
-  var h = parseInt(etParts.hour === '24' ? '0' : etParts.hour);
-  var m = parseInt(etParts.minute);
-  var dateKey = etParts.year + '-' + etParts.month + '-' + etParts.day;
-  // Fire at 00:00 Eastern, but only once per calendar day
-  if (h === 0 && m === 0 && _midnightRanToday !== dateKey) {
-    _midnightRanToday = dateKey;
-    console.log('[Midnight] Running auto-clockout (Eastern midnight)...');
-    midnightAutoClockout(io);
+  pruneActivityLog(60).then(function(removed) {
+    if (removed > 0) {
+      console.log('[ActivityLog] Pruned ' + removed + ' row(s) older than 60 days');
+    }
+  }).catch(function(err) {
+    console.error('[ActivityLog] Prune failed:', err.message);
+  });
+}, 24 * 60 * 60 * 1000); // every 24 hours
+
+// Run once at startup so a long-stopped server catches up immediately.
+pruneActivityLog(60).then(function(removed) {
+  if (removed > 0) console.log('[ActivityLog] Startup prune removed ' + removed + ' row(s)');
+}).catch(function() { /* table may not exist yet on first deploy — ignore */ });
+
+// v2.3.2 (Phase 3c): IdempotencyKey prune — hourly, drops rows older than 24h.
+// Renderer retry windows are seconds; offline-queue replay windows are minutes.
+// 24h is conservative. Hourly cadence keeps the table tiny.
+setInterval(function() { pruneIdempotencyKeys(); }, 60 * 60 * 1000);
+pruneIdempotencyKeys();  // once at startup
+
+// ── Midnight auto-clockout — per-salon, fires at each salon's local midnight ──
+// v2.0.6: Replaces single-Eastern cron with one check that walks all salons
+// using their tz from Salon.timezone. Each salon fires at most once per local day.
+// Railway runs in UTC. We use Intl per-salon-tz to compute local hour/minute.
+var _midnightRanPerSalon = new Map(); // salon_id -> 'YYYY-MM-DD' (local)
+setInterval(async function() {
+  try {
+    var salons = await prisma.salon.findMany({ select: { id: true, timezone: true } });
+    var now = new Date();
+    for (var i = 0; i < salons.length; i++) {
+      var salon = salons[i];
+      var tz = salon.timezone || 'America/New_York';
+      var parts = {};
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      }).formatToParts(now).forEach(function(p) { parts[p.type] = p.value; });
+      var h = parseInt(parts.hour === '24' ? '0' : parts.hour);
+      var m = parseInt(parts.minute);
+      var dateKey = parts.year + '-' + parts.month + '-' + parts.day;
+      if (h === 0 && m === 0 && _midnightRanPerSalon.get(salon.id) !== dateKey) {
+        _midnightRanPerSalon.set(salon.id, dateKey);
+        console.log('[Midnight] Running auto-clockout for salon ' + salon.id + ' (' + tz + ')...');
+        midnightAutoClockout(io, salon.id);
+      }
+    }
+  } catch (err) {
+    console.error('[Midnight] Per-salon clockout check failed:', err.message);
   }
 }, 60 * 1000); // check every minute
 
@@ -477,6 +583,16 @@ httpServer.listen(PORT, async function() {
     console.log('[DB] Connection pool warmed up in ' + (Date.now() - warmStart) + 'ms');
   } catch (e) {
     console.warn('[DB] Warmup failed:', e.message);
+  }
+
+  // ── v2.0.6: Load per-salon timezone cache ──
+  // dayBoundsTz, getSalonTz, formatInSalonTz all read from this cache.
+  // Filled here once; refreshed when Salon.timezone is created/updated.
+  try {
+    var tzCount = await loadAllSalonTzs();
+    console.log('[SalonTz] Cached timezones for ' + tzCount + ' salon(s)');
+  } catch (e) {
+    console.warn('[SalonTz] Initial load failed (will retry on first request):', e.message);
   }
 
   // ── Clear all active sessions from previous server runs ──
@@ -623,7 +739,7 @@ httpServer.listen(PORT, async function() {
       await prisma.providerOwner.create({
         data: {
           id: 'provider-owner-1',
-          name: 'Andy Tran',
+          name: 'Alex Tran',
           email: 'phatalextran@gmail.com',
           pin_hash: _hashPin(_masterCode),
         }
@@ -638,6 +754,15 @@ httpServer.listen(PORT, async function() {
           data: { email: 'phatalextran@gmail.com' }
         });
         console.log('[Bootstrap] ✅ Migrated ProviderOwner email to phatalextran@gmail.com');
+      }
+      // v2.0.7: One-time migration — rename Andy Tran → Alex Tran on existing DBs
+      var _renameRow = await prisma.providerOwner.findFirst({ where: { name: 'Andy Tran' } });
+      if (_renameRow) {
+        await prisma.providerOwner.update({
+          where: { id: _renameRow.id },
+          data: { name: 'Alex Tran' }
+        });
+        console.log('[Bootstrap] ✅ Migrated ProviderOwner name: Andy Tran → Alex Tran');
       }
     }
 

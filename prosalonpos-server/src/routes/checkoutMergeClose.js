@@ -106,7 +106,7 @@ router.post('/tickets/merge-and-close', async function(req, res, next) {
     allApptIds.forEach(function(id) { if (uniqueApptIds.indexOf(id) === -1) uniqueApptIds.push(id); });
 
     // Get next ticket number
-    var bounds = dayBounds();
+    var bounds = dayBounds(undefined, req.salon_id);
     var lastTicket = await prisma.ticket.findFirst({
       where: { salon_id: req.salon_id, created_at: { gte: bounds.start, lte: bounds.end } },
       orderBy: { ticket_number: 'desc' },

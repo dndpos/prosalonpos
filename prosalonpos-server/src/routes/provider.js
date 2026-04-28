@@ -15,6 +15,8 @@ import prisma, { isSQLite } from '../config/database.js';
 import { createToken, hashPin, comparePin } from '../config/auth.js';
 import providerAuth from '../middleware/providerAuth.js';
 import providerSalonRoutes from './providerSalons.js';
+import providerSalonOwnerRoutes from './providerSalonOwners.js';
+import providerSmsUsageRoutes from './providerSmsUsage.js';
 
 // ── Provider master code — env var or default ──
 // PROTECTED C64: master code from env var, never hardcoded in production
@@ -229,6 +231,12 @@ router.use(providerAuth);
 
 // Mount salon sub-routes (salons, notes, audit, lockout, tech sessions)
 router.use(providerSalonRoutes);
+
+// v2.1.3: Mount multi-owner portal admin routes
+router.use(providerSalonOwnerRoutes);
+
+// v2.1.5: Mount SMS usage report route
+router.use(providerSmsUsageRoutes);
 
 export { PROVIDER_MASTER_CODE };
 export default router;

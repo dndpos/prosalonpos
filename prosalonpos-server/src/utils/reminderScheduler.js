@@ -14,6 +14,7 @@
 
 import prisma from '../config/database.js';
 import { sendSms } from './smsService.js';
+import { getSalonTzSafe } from './salonTz.js'; // v2.0.6: per-salon reminder formatting
 
 var INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 var schedulerTimer = null;
@@ -60,12 +61,19 @@ async function processRemindersForSalon(salonId) {
 
   var channel = settings.msg_reminder_channel || 'sms';
 
-  // Get active reminder template
+  // Get active reminder template — v2.1.8: fall back to hard-coded default
+  // if the salon hasn't customized one yet.
   var tpl = await prisma.messageTemplate.findFirst({
     where: { salon_id: salonId, type: 'reminder', active: true },
     orderBy: { created_at: 'asc' },
   });
-  if (!tpl) return;
+  if (!tpl) {
+    tpl = {
+      id: '__default__',
+      body: 'Hi {client_name}, reminder of your appointment with {technician} at {salon_name} on {date} at {time}. Reply STOP to opt out.',
+      channel: channel,
+    };
+  }
 
   var now = Date.now();
 
@@ -169,11 +177,12 @@ async function processRemindersForSalon(salonId) {
         }
       }
 
+      var salonTz = getSalonTzSafe(salonId); // v2.0.6
       var vars = {
         client_name: clientName,
         salon_name: settings.salon_name || '',
-        date: startDate.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' }),
-        time: startDate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }),
+        date: startDate.toLocaleDateString('en-US', { timeZone: salonTz, month: 'short', day: 'numeric', year: 'numeric' }),
+        time: startDate.toLocaleTimeString('en-US', { timeZone: salonTz, hour: 'numeric', minute: '2-digit' }),
         service: svcNames,
         technician: techDisplay,
       };

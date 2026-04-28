@@ -17,33 +17,41 @@ import { getIO } from '../utils/emit.js';
 // authenticated POST /appointments route — customers who booked through the
 // online portal got zero confirmation. See BUSINESS_LOGIC cc12.4 follow-up #1.
 import { triggerBookingConfirm } from '../utils/autoMessaging.js';
+import { dayBoundsTz, getSalonTzSafe } from '../utils/salonTz.js'; // v2.0.6
 
 var router = Router();
 
-// ── Helper: get today's date bounds in Eastern time ──
-function todayBoundsET() {
-  var now = new Date();
-  var str = now.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-  var isEDT = str.indexOf('EDT') >= 0;
-  var etOffset = isEDT ? 240 : 300;
-  var etNow = new Date(now.getTime() - etOffset * 60000);
-  var y = etNow.getUTCFullYear();
-  var m = etNow.getUTCMonth();
-  var d = etNow.getUTCDate();
-  var start = new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
-  start.setUTCMinutes(start.getUTCMinutes() + etOffset);
-  var end = new Date(Date.UTC(y, m, d, 23, 59, 59, 999));
-  end.setUTCMinutes(end.getUTCMinutes() + etOffset);
-  return { start: start, end: end };
+// v2.0.6: today-bounds in salon's tz (was Eastern-only).
+function todayBoundsForSalon(salonId) {
+  return dayBoundsTz(undefined, salonId);
 }
 
-// ── Helper: look up salon by code ──
+// v2.0.6: per-date offset in minutes for the salon's tz (replaces inline ET probe).
+function tzOffsetMinutes(date, salonId) {
+  var tz = getSalonTzSafe(salonId);
+  var fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  });
+  var parts = {};
+  fmt.formatToParts(date).forEach(function(p) { parts[p.type] = p.value; });
+  var hour = parts.hour === '24' ? '00' : parts.hour;
+  var asUtc = Date.UTC(
+    parseInt(parts.year), parseInt(parts.month) - 1, parseInt(parts.day),
+    parseInt(hour), parseInt(parts.minute), parseInt(parts.second)
+  );
+  // Positive offset for tz west of UTC (US timezones)
+  return -((asUtc - date.getTime()) / 60000);
+}
+
+// ── Helper: look up salon by code (v2.0.6: includes timezone) ──
 async function findSalonByCode(salonCode) {
   return prisma.salon.findUnique({
     where: { salon_code: salonCode },
     select: {
       id: true, name: true, phone: true, logo_url: true,
-      status: true, salon_code: true,
+      status: true, salon_code: true, timezone: true,
     }
   });
 }
@@ -109,7 +117,7 @@ router.get('/salon/:salonCode/booking-data', async function(req, res, next) {
 
       // Today's existing service lines (for availability calculation)
       (function() {
-        var bounds = todayBoundsET();
+        var bounds = todayBoundsForSalon(salonId); // v2.0.6
         return prisma.serviceLine.findMany({
           where: {
             appointment: { salon_id: salonId, status: { notIn: ['cancelled', 'no_show'] } },
@@ -255,21 +263,11 @@ router.get('/salon/:salonCode/availability/:date', async function(req, res, next
 
     var salonId = salon.id;
     var dateStr = req.params.date; // "2026-04-15"
-    var dateParts = dateStr.split('-');
-    var year = parseInt(dateParts[0]);
-    var month = parseInt(dateParts[1]) - 1;
-    var day = parseInt(dateParts[2]);
 
-    // Determine ET offset for the requested date
-    var probe = new Date(Date.UTC(year, month, day, 12, 0, 0));
-    var probeStr = probe.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-    var etOffset = probeStr.indexOf('EDT') >= 0 ? 240 : 300;
-
-    // Build day bounds in UTC
-    var dayStart = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
-    dayStart.setUTCMinutes(dayStart.getUTCMinutes() + etOffset);
-    var dayEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
-    dayEnd.setUTCMinutes(dayEnd.getUTCMinutes() + etOffset);
+    // v2.0.6: Build day bounds in the salon's tz (was Eastern-only)
+    var bounds = dayBoundsTz(dateStr, salonId);
+    var dayStart = bounds.start;
+    var dayEnd = bounds.end;
 
     var serviceLines = await prisma.serviceLine.findMany({
       where: {
@@ -395,10 +393,9 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
     var year = parseInt(dateParts[0]);
     var month = parseInt(dateParts[1]) - 1;
     var day = parseInt(dateParts[2]);
-    // Determine ET offset for the booking date
+    // v2.0.6: Determine offset for the booking date in the salon's tz
     var probe = new Date(Date.UTC(year, month, day, 12, 0, 0));
-    var probeStr = probe.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-    var etOffset = probeStr.indexOf('EDT') >= 0 ? 240 : 300;
+    var etOffset = tzOffsetMinutes(probe, salonId);
 
     // booking_group_id for group bookings
     var bookingGroupId = null;
@@ -586,7 +583,7 @@ router.post('/salon/:salonCode/book', async function(req, res, next) {
 
         // Format booked_at timestamp
         var now = new Date();
-        var bookedStr = now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
+        var bookedStr = now.toLocaleString('en-US', { timeZone: getSalonTzSafe(salonId), hour: 'numeric', minute: '2-digit', hour12: true }); // v2.0.6
 
         // Emit one notification per booking (supports group bookings)
         createdAppointments.forEach(function(a) {

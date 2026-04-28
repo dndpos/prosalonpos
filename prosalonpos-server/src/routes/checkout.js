@@ -23,12 +23,12 @@ router.get('/tickets', async function(req, res, next) {
     var where = { salon_id: req.salon_id };
     if (req.query.start && req.query.end) {
       // Date range query — for reports, payroll, etc.
-      var rangeBoundsStart = dayBounds(req.query.start);
-      var rangeBoundsEnd = dayBounds(req.query.end);
+      var rangeBoundsStart = dayBounds(req.query.start, req.salon_id);
+      var rangeBoundsEnd = dayBounds(req.query.end, req.salon_id);
       where.created_at = { gte: rangeBoundsStart.start, lte: rangeBoundsEnd.end };
     } else {
       // Single day (default: today)
-      var bounds = dayBounds(req.query.date);
+      var bounds = dayBounds(req.query.date, req.salon_id);
       where.created_at = { gte: bounds.start, lte: bounds.end };
     }
     var tickets = await prisma.ticket.findMany({
@@ -94,10 +94,58 @@ router.get('/tickets/by-short-id/:shortId', async function(req, res, next) {
   } catch (err) { next(err); }
 });
 
+// ── cc23.4 — GET /tickets/by-card-last4/:digits — Find tickets by card last 4 ──
+// Card-receipt lookup: when a customer brings back a printed CC slip but no
+// POS receipt, the cashier types the last 4 digits of the card and we list
+// every ticket whose payment.last4 matches. Returns up to 50 most-recent hits.
+// We match by the persisted `last4` column on TicketPayment (populated by the
+// cc22 PAX bridge from the SDK response) — never raw PAN; we never store full
+// card numbers anywhere. Result is shaped to match formatTicket() so the
+// frontend's existing `onFound(ticket)` handler opens it the same way.
+router.get('/tickets/by-card-last4/:digits', async function(req, res, next) {
+  try {
+    var digits = (req.params.digits || '').trim();
+    if (!/^[0-9]{4}$/.test(digits)) {
+      return res.status(400).json({ error: 'last4 must be exactly 4 digits' });
+    }
+    // Find every payment with this last4 in the salon, then dedupe by ticket.
+    // We sort newest-first so the picker shows recent tickets at the top.
+    var payments = await prisma.ticketPayment.findMany({
+      where: {
+        last4: digits,
+        ticket: { salon_id: req.salon_id },
+      },
+      include: {
+        ticket: { include: { items: true, payments: true } },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+    });
+    var seen = {};
+    var tickets = [];
+    for (var i = 0; i < payments.length; i++) {
+      var p = payments[i];
+      if (!p.ticket || seen[p.ticket.id]) continue;
+      seen[p.ticket.id] = true;
+      var formatted = formatTicket(p.ticket);
+      // Surface the matching brand/last4 at the top level so the picker can
+      // show "VISA · ****1234" without the frontend scanning the payments
+      // array itself.
+      formatted.card_brand = p.card_brand || formatted.card_brand || null;
+      formatted.last4 = p.last4 || null;
+      tickets.push(formatted);
+    }
+    if (tickets.length === 0) {
+      return res.status(404).json({ error: 'No tickets found with that card', tickets: [] });
+    }
+    res.json({ tickets: tickets, count: tickets.length });
+  } catch (err) { next(err); }
+});
+
 // ── GET /next-ticket-number — Get the next sequential ticket number for today ──
 router.get('/next-ticket-number', async function(req, res, next) {
   try {
-    var bounds = dayBounds();
+    var bounds = dayBounds(undefined, req.salon_id);
     var lastTicket = await prisma.ticket.findFirst({
       where: {
         salon_id: req.salon_id,
@@ -147,7 +195,7 @@ router.post('/tickets', async function(req, res, next) {
       }
     }
 
-    var bounds = dayBounds();
+    var bounds = dayBounds(undefined, req.salon_id);
     // Get next ticket number for today
     var lastTicket = await prisma.ticket.findFirst({
       where: {
@@ -303,6 +351,9 @@ router.post('/tickets/:id/pay', async function(req, res, next) {
         entry_method: data.entry_method || null,
         processor_txn_id: data.processor_txn_id || null,
         terminal_response: data.terminal_response || null,
+        // v2.2.3: tag payment with the station that wrote it. Nullable for
+        // backward compat with pre-v2.2.3 clients that don't send the field.
+        station_id: data.station_id || null,
       },
     });
     emit(req, 'ticket:payment');
@@ -585,7 +636,7 @@ router.post('/tickets/merge', async function(req, res, next) {
 router.post('/tickets/quick-close', async function(req, res, next) {
   try {
     var data = req.body;
-    var bounds = dayBounds();
+    var bounds = dayBounds(undefined, req.salon_id);
 
     // Get next ticket number for today
     var lastTicket = await prisma.ticket.findFirst({
@@ -805,6 +856,51 @@ router.delete('/tickets/:id', async function(req, res, next) {
     console.log('[Checkout] Ticket permanently deleted:', req.params.id, 'by owner');
     emit(req, 'ticket:deleted');
     res.json({ success: true, deleted_id: req.params.id });
+  } catch (err) { next(err); }
+});
+
+// ── POST /tickets/batch-close-log — v2.2.3 — Log a batch close event ──
+// Called by CloseBatchModal AFTER routerBatchClose returns. Each PAX terminal
+// still settles its own batch (Fiserv per-terminal/MID); this just records
+// the event so Daily Report can show all stations' closes side-by-side.
+//
+// Body shape (all optional except station_id, station_label):
+//   {
+//     station_id, station_label,
+//     closed_by_staff_id, closed_by_name,
+//     status: 'success' | 'failed',
+//     total_count, total_credit_cents, total_tip_cents,
+//     host_code, host_message, tid, mid,
+//     error_message,
+//     terminal_response,                  // raw PAX response Json
+//   }
+router.post('/tickets/batch-close-log', async function(req, res, next) {
+  try {
+    var data = req.body || {};
+    if (!data.station_label) {
+      return res.status(400).json({ error: 'station_label is required' });
+    }
+    var row = await prisma.batchClose.create({
+      data: {
+        salon_id:           req.salon_id,
+        station_id:         data.station_id || null,
+        station_label:      String(data.station_label),
+        closed_by_staff_id: data.closed_by_staff_id || null,
+        closed_by_name:     data.closed_by_name || null,
+        status:             data.status === 'failed' ? 'failed' : 'success',
+        total_count:        Number(data.total_count) || 0,
+        total_credit_cents: Number(data.total_credit_cents) || 0,
+        total_tip_cents:    Number(data.total_tip_cents) || 0,
+        host_code:          data.host_code || null,
+        host_message:       data.host_message || null,
+        tid:                data.tid || null,
+        mid:                data.mid || null,
+        error_message:      data.error_message || null,
+        terminal_response:  data.terminal_response || null,
+      },
+    });
+    emit(req, 'batch-close:logged');
+    res.status(201).json({ batch_close: row });
   } catch (err) { next(err); }
 });
 

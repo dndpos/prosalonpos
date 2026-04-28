@@ -35,8 +35,8 @@ router.get('/my-payroll-data', async function(req, res, next) {
 
     // Salon-local midnight bounds — use the same dayBounds helper the rest
     // of the checkout routes use so period boundaries line up with tickets.
-    var startBounds = dayBounds(start);
-    var endBounds = dayBounds(end);
+    var startBounds = dayBounds(start, salonId);
+    var endBounds = dayBounds(end, salonId);
 
     // Staff record (with full pay config)
     var staff = await prisma.staff.findFirst({

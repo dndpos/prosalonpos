@@ -54,6 +54,15 @@ model Salon {
   login_failed_attempts      Int      @default(0)             // consecutive failed PIN attempts
   login_locked_at            DateTime?                        // when the login lock happened
 
+  // v2.0.6: Per-salon timezone (set at salon creation in provider admin)
+  // Used by: auto-clockout cron, SMS formatters, timesheet display
+  // NOTE: dayBounds (reports/checkout/appointments) still hardcoded ET as of v2.0.6
+  timezone                  String   @default("America/New_York")
+
+  // v2.1.5: per-salon SMS billing rate (cents per message). Default 2¢/msg.
+  // Provider sets this; usage report multiplies count × rate.
+  sms_rate_cents            Int      @default(2)
+
   // Relations
   staff              Staff[]
   service_categories ServiceCategory[]
@@ -77,6 +86,12 @@ model Salon {
   provider_notes     ProviderSalonNote[]
   provider_billing   ProviderBillingRecord[]
   assigned_agent     ProviderAgent?          @relation(fields: [assigned_agent_id], references: [id])
+  // v2.1.3: multi-owner portal access
+  owner_accesses     SalonOwnerAccess[]
+  // v2.2.0: persistent station records (one per paired device)
+  stations           Station[]
+  // v2.2.3: per-station batch close audit log
+  batch_closes       BatchClose[]
 }
 
 // ════════════════════════════════════════════
@@ -113,6 +128,7 @@ model Staff {
   payout_check_pct          Int      @default(100)
   payout_bonus_pct          Int      @default(0)
   category_commission_rates Json?                           // { "cat-01": 45, "cat-03": 35 }
+  retail_commission_pct     Int      @default(0)            // 2026-04-26: per-staff product commission %. 0 = no product commission. Replaces salon-wide setting (which is now ignored).
   permission_overrides      Json?                           // per-action overrides
   permissions               Json?                           // { void: true, refund: true, ... }
   schedule                  Json?                           // { mon: { enabled, start, end }, tue: ... }
@@ -429,11 +445,53 @@ model TicketPayment {
   entry_method     String?                           // CHIP | TAP | SWIPE | MANUAL
   processor_txn_id String?                           // terminal RefNum — used for void/refund
   terminal_response Json?                            // full raw terminal response for audit
+  // v2.2.3: station that wrote this payment (nullable for backward compat with
+  // pre-v2.2.3 rows). NOT a hard FK — stations can be deleted without losing
+  // payment history. Used by per-station Batch Close reconciliation.
+  station_id       String?
   created_at       DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
 
   @@index([ticket_id])
+  @@index([station_id])
+}
+
+// ════════════════════════════════════════════
+// BATCH CLOSE (v2.2.3) — per-station audit log
+// ════════════════════════════════════════════
+// Each PAX terminal still closes its OWN batch (Fiserv is per-terminal/MID),
+// but we log every successful/failed close here so the salon can reconcile
+// across all stations from one Daily Report panel.
+//
+// station_id + station_label are denormalized snapshots — the label is
+// captured at close time so the report still reads correctly even if the
+// station is renamed or deleted afterward. NO hard FK to Station.
+
+model BatchClose {
+  id                  String   @id @default(uuid())
+  salon_id            String
+  station_id          String?                        // nullable: should always be set in v2.2.3+, but defensive
+  station_label       String                         // snapshot at close time
+  closed_at           DateTime @default(now())
+  closed_by_staff_id  String?
+  closed_by_name      String?                        // 'Owner' | 'Provider' | staff display_name
+  total_count         Int      @default(0)           // # transactions in batch (from PAX response)
+  total_credit_cents  Int      @default(0)           // total settled amount
+  total_tip_cents     Int      @default(0)
+  status              String   @default("success")   // 'success' | 'failed'
+  host_code           String?                        // PAX hostCode
+  host_message        String?                        // PAX hostMessage
+  tid                 String?
+  mid                 String?
+  error_message       String?                        // populated when status='failed'
+  terminal_response   Json?                          // full PAX response for audit
+  created_at          DateTime @default(now())
+
+  salon Salon @relation(fields: [salon_id], references: [id], onDelete: Cascade)
+
+  @@index([salon_id, closed_at])
+  @@index([salon_id, station_id])
 }
 
 // ════════════════════════════════════════════
@@ -907,6 +965,77 @@ model ProviderAuditLog {
 }
 
 // ════════════════════════════════════════════
+// MULTI-OWNER PORTAL (v2.1.3)
+// Person-level owner accounts that can access one or more salons.
+// SEPARATE from Salon.owner_pin_* (which stays for station/manager use).
+// SEPARATE from ProviderOwner (the ISO/master provider).
+// ════════════════════════════════════════════
+
+model SalonOwnerAccount {
+  id                String   @id @default(uuid())
+  name              String
+  email             String   @unique
+  pin_hash          String                                   // bcrypt hashed personal PIN
+  pin_plain         String?                                  // plain PIN visible to provider only (for handoff/reset)
+  must_change_pin   Boolean  @default(true)                  // forced change on first portal login
+  active            Boolean  @default(true)
+  last_login_at     DateTime?
+  last_salon_id     String?                                  // remember last-used salon for next login
+  failed_attempts   Int      @default(0)                     // brute-force tracking
+  locked            Boolean  @default(false)
+  locked_at         DateTime?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  salon_access      SalonOwnerAccess[]
+}
+
+// ════════════════════════════════════════════
+// STATIONS (v2.2.0)
+// Persistent record per paired device. Created on first socket connect via
+// upsert keyed on station_id (UUID generated client-side at pairing time).
+// One station per salon may be flagged is_main — used as the default for
+// shared-terminal routing and "all stations" report scope. Does NOT affect
+// per-terminal batch close (each terminal closes its own batch via Fiserv).
+// ════════════════════════════════════════════
+
+model Station {
+  id          String   @id                                  // matches client-generated station_id (NOT @default(uuid()))
+  salon_id    String
+  label       String                                        // "Station 1", "Front Desk", "Tablet 2"
+  is_main     Boolean  @default(false)
+  last_seen   DateTime @default(now())                      // updated on each socket join
+  // v2.2.6: Station's primary LAN IPv4 address, captured by the Electron
+  // shell at socket join. Used by V2.3 Phase 2 offline mode so peer stations
+  // can route to the main station over the local network when internet is
+  // down. Nullable: pre-2.2.6 stations + browser-mode (no Electron) leave it
+  // null. Updated on every socket join — IPs change with DHCP leases.
+  lan_ip      String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  salon Salon @relation(fields: [salon_id], references: [id], onDelete: Cascade)
+
+  @@unique([salon_id, label])
+  @@index([salon_id])
+  @@index([salon_id, is_main])
+}
+
+model SalonOwnerAccess {
+  id          String   @id @default(uuid())
+  owner_id    String
+  salon_id    String
+  created_at  DateTime @default(now())
+
+  owner SalonOwnerAccount @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  salon Salon             @relation(fields: [salon_id], references: [id], onDelete: Cascade)
+
+  @@unique([owner_id, salon_id])
+  @@index([owner_id])
+  @@index([salon_id])
+}
+
+// ════════════════════════════════════════════
 // SERVICE PACKAGES
 // ════════════════════════════════════════════
 
@@ -1068,5 +1197,63 @@ model SlipEvent {
   created_at     DateTime @default(now())
 
   @@index([salon_id, short_id, created_at])
+  @@index([salon_id, created_at])
+}
+
+// cc25 — Appointment Activity Log.
+// Persistent server-side log of every appointment-level action: book, move,
+// transfer, status change, add time, add service, check-in, walk-in start,
+// waitlist remove, break/end-break. Replaces the cc14-era client-only
+// useState log that vanished on page refresh.
+//
+// Retention: 60 days, pruned nightly (server.js setInterval). Storage cost
+// is negligible at salon volumes (~1 MB/salon for 30 days at 50 events/day).
+//
+// Search: client_name + client_phone are denormalized snapshots so the log
+// works after a client is renamed/deleted. case-insensitive partial match
+// on either column drives the popup's customer search box.
+model ActivityLog {
+  id             String   @id @default(uuid())
+  salon_id       String
+  created_at     DateTime @default(now())
+  action         String                             // booked | moved | tech_change | status_change | add_time | add_service | check_in | start_working | waitlist_remove | break | end_break | etc.
+  description    String                             // human-readable line shown in the popup
+  client_name    String?                            // snapshot at event time
+  client_phone   String?                            // snapshot at event time
+  tech_name      String?
+  tech_id        String?
+  service_name   String?
+  appointment_id String?                            // optional — break/walk-in events have none
+  requested      Boolean  @default(false)
+  changed_tech   Boolean  @default(false)
+  payload        Json?                              // booking details (multi-client/multi-service array), other extras
+
+  @@index([salon_id, created_at])
+  @@index([salon_id, client_phone])
+  @@index([salon_id, client_name])
+}
+
+// v2.3.2 — V2.3 Phase 3c: Offline-write idempotency.
+// Every write the renderer issues carries a UUID4 in the X-Client-Op-Id header.
+// When that write replays from a peer station's offline queue (or a peer just
+// retries a fetch that timed out), the server caches the first response under
+// (salon_id, key). A second call with the same key returns the cached body
+// + status code instead of re-running the route handler. Prevents duplicate
+// appointments / clients on retry.
+//
+// Retention: 24 hours. A nightly prune deletes rows older than that — the
+// renderer never retries a write more than ~10 minutes after the original,
+// so 24h is conservative.
+model IdempotencyKey {
+  id             String   @id @default(uuid())
+  salon_id       String
+  key            String                             // X-Client-Op-Id value (UUID4)
+  method         String                             // POST | PUT | DELETE
+  path           String                             // /appointments, /clients/:id, etc.
+  status_code    Int                                // cached HTTP status
+  response_body  Json                               // cached JSON response body
+  created_at     DateTime @default(now())
+
+  @@unique([salon_id, key])
   @@index([salon_id, created_at])
 }

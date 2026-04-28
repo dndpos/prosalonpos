@@ -1,75 +1,19 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pro Salon POS</title>
-    <meta name="theme-color" content="#0F172A" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="SalonPOS" />
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <script>
-      window.onerror = function(msg, src, line, col, err) {
-        var root = document.getElementById('root');
-        if (root) root.style.display='none';
-        var d = document.getElementById('crash');
-        if (d) {
-          d.style.display='block';
-          document.getElementById('crash-msg').textContent = msg + '\n\nFile: ' + src + '\nLine: ' + line + ', Col: ' + col;
-          document.getElementById('crash-stack').textContent = err ? err.stack : 'No stack';
-        } else {
-          document.body.innerHTML = '<div style="background:#0F172A;color:#EF4444;padding:40px;font-family:monospace;height:100vh;overflow:auto"><h2>Startup Error</h2><pre style="color:#FCA5A5;white-space:pre-wrap;font-size:16px">' + msg + '\n\nFile: ' + src + '\nLine: ' + line + ', Col: ' + col + '</pre><pre style="color:#64748B;white-space:pre-wrap;font-size:12px;margin-top:16px">' + (err ? err.stack : 'No stack') + '</pre><button onclick="location.reload()" style="margin-top:20px;padding:10px 24px;background:#2563EB;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Reload</button></div>';
-        }
-      };
-      window.addEventListener('unhandledrejection', function(e) {
-        var root = document.getElementById('root');
-        if (root) root.style.display='none';
-        var d = document.getElementById('crash');
-        if (d) {
-          d.style.display='block';
-          document.getElementById('crash-msg').textContent = 'Unhandled: ' + (e.reason ? (e.reason.message || e.reason) : 'Unknown');
-          document.getElementById('crash-stack').textContent = e.reason ? (e.reason.stack || '') : '';
-        } else {
-          document.body.innerHTML = '<div style="background:#0F172A;color:#EF4444;padding:40px;font-family:monospace;height:100vh;overflow:auto"><h2>Startup Error</h2><pre style="color:#FCA5A5;white-space:pre-wrap;font-size:16px">Unhandled: ' + (e.reason ? (e.reason.message || e.reason) : 'Unknown') + '</pre><pre style="color:#64748B;white-space:pre-wrap;font-size:12px;margin-top:16px">' + (e.reason ? (e.reason.stack || '') : '') + '</pre><button onclick="location.reload()" style="margin-top:20px;padding:10px 24px;background:#2563EB;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Reload</button></div>';
-        }
-      });
-    </script>
-    <script type="module" crossorigin src="/assets/index-A8kxcrai.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BMVGLby0.css">
+    <style>
+      html, body, #root { height: 100%; margin: 0; background: #0F172A; color: #fff; font-family: -apple-system, "Segoe UI", sans-serif; }
+    </style>
+    <script type="module" crossorigin src="/assets/index-DtDoPUP6.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-react-ts2dnvsi.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-zustand-KMVsqMc9.js">
+    <link rel="modulepreload" crossorigin href="/assets/owner-back-office-B8RAQjF2.js">
+    <link rel="modulepreload" crossorigin href="/assets/provider-admin-BjiUaR5y.js">
   </head>
   <body>
     <div id="root"></div>
-    <div id="crash" style="display:none;background:#0F172A;color:#F1F5F9;padding:40px;font-family:monospace;height:100vh;overflow:auto">
-      <h2 style="color:#EF4444;margin-bottom:16px">Startup Error</h2>
-      <pre id="crash-msg" style="color:#FCA5A5;white-space:pre-wrap;font-size:16px"></pre>
-      <pre id="crash-stack" style="color:#64748B;white-space:pre-wrap;font-size:12px;margin-top:16px"></pre>
-      <button onclick="location.reload()" style="margin-top:20px;padding:10px 24px;background:#2563EB;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Reload</button>
-    </div>
-    <script>
-      // Suppress native right-click menu only in kiosk mode (chrome --kiosk flag removes window.outerWidth gap)
-      if (window.navigator.standalone || window.outerWidth === window.screen.width) {
-        document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
-      }
-    </script>
-    <!-- Build: C43-debug | Error handler moved to head for Safari crash visibility -->
-    <script>
-      // Clean up stale service workers BUT keep tech-sw.js (needed for push notifications on tech phones)
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(function(regs) {
-          regs.forEach(function(reg) {
-            // Keep the tech phone push notification service worker (check all SW states)
-            var sw = reg.active || reg.waiting || reg.installing;
-            if (sw && sw.scriptURL && sw.scriptURL.indexOf('tech-sw.js') !== -1) return;
-            reg.unregister();
-          });
-        });
-      }
-    </script>
   </body>
 </html>

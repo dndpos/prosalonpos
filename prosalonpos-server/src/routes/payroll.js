@@ -25,6 +25,7 @@
 import { Router } from 'express';
 import prisma, { isSQLite } from '../config/database.js';
 import { emit } from '../utils/emit.js';
+import { dayBoundsTz } from '../utils/salonTz.js'; // v2.0.6
 
 // SQLite stores JSON as strings
 function fromDb(val) {
@@ -39,47 +40,17 @@ var router = Router();
 // PAYROLL RUNS (computed from tickets + punches)
 // ════════════════════════════════════════════
 
-/**
- * Get Eastern Time offset for a given date (handles DST).
- */
-function getEasternOffset(date) {
-  var str = date.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-  if (str.indexOf('EDT') >= 0) return 240;
-  return 300;
-}
-
-/**
- * Parse a YYYY-MM-DD string into Eastern-time midnight boundary.
- */
-function easternDayStart(dateStr) {
-  var parts = dateStr.split('-');
-  var y = parseInt(parts[0]), m = parseInt(parts[1]) - 1, d = parseInt(parts[2]);
-  var probe = new Date(Date.UTC(y, m, d, 12, 0, 0));
-  var offset = getEasternOffset(probe);
-  var dt = new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
-  dt.setUTCMinutes(dt.getUTCMinutes() + offset);
-  return dt;
-}
-function easternDayEnd(dateStr) {
-  var parts = dateStr.split('-');
-  var y = parseInt(parts[0]), m = parseInt(parts[1]) - 1, d = parseInt(parts[2]);
-  var probe = new Date(Date.UTC(y, m, d, 12, 0, 0));
-  var offset = getEasternOffset(probe);
-  var dt = new Date(Date.UTC(y, m, d, 23, 59, 59, 999));
-  dt.setUTCMinutes(dt.getUTCMinutes() + offset);
-  return dt;
-}
+// v2.0.6: easternDayStart/End replaced by salon-tz-aware dayBoundsTz.
 
 /**
  * Compute payroll data for a date range.
- * This aggregates:
- *   - Ticket items per tech → service revenue → commission
- *   - Clock punches per hourly tech → hours worked → hourly pay
- *   - Daily guarantee comparison
+ * v2.0.6: bounds computed in salon's tz (was Eastern-only).
  */
 async function computePayroll(salonId, periodStart, periodEnd) {
-  var startDate = easternDayStart(periodStart);
-  var endDate = easternDayEnd(periodEnd);
+  var startBounds = dayBoundsTz(periodStart, salonId);
+  var endBounds = dayBoundsTz(periodEnd, salonId);
+  var startDate = startBounds.start;
+  var endDate = endBounds.end;
 
   // Get salon settings (for advanced_commission_enabled)
   var salonSettingsRow = await prisma.salonSettings.findUnique({ where: { salon_id: salonId } });

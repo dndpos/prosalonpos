@@ -18,38 +18,29 @@ import prisma from '../config/database.js';
 import { pinSha256 } from '../config/auth.js';
 // PROTECTED C64: master code from env var via provider.js
 import { PROVIDER_MASTER_CODE } from './provider.js';
+// v2.0.6: tz-aware helpers (replaces local Eastern-only dayBounds/toSalonLocal/todayStr)
+import { dayBoundsTz, getSalonTz, todayInSalonTz } from '../utils/salonTz.js';
 
 var router = Router();
 
-// ── Helper: get today's date string in Eastern time ──
-function todayStr() {
-  var now = new Date();
-  var str = now.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-  var isEDT = str.indexOf('EDT') >= 0;
-  var etOffset = isEDT ? 240 : 300;
-  var etNow = new Date(now.getTime() - etOffset * 60000);
-  return etNow.getUTCFullYear() + '-' + String(etNow.getUTCMonth() + 1).padStart(2, '0') + '-' + String(etNow.getUTCDate()).padStart(2, '0');
+// v2.0.6: today in salon's tz (replaces Eastern-only todayStr)
+function todayStr(salon_id) {
+  if (!salon_id) throw new Error('todayStr: salon_id required (v2.0.6 tz-aware)');
+  return todayInSalonTz(salon_id);
 }
 
-function dayBounds(dateStr) {
-  var parts = dateStr.split('-');
-  var y = parseInt(parts[0]);
-  var m = parseInt(parts[1]) - 1;
-  var day = parseInt(parts[2]);
-  var probe = new Date(Date.UTC(y, m, day, 12, 0, 0));
-  var str = probe.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
-  var etOffset = str.indexOf('EDT') >= 0 ? 240 : 300;
-  var start = new Date(Date.UTC(y, m, day, 0, 0, 0, 0));
-  start.setUTCMinutes(start.getUTCMinutes() + etOffset);
-  var end = new Date(Date.UTC(y, m, day, 23, 59, 59, 999));
-  end.setUTCMinutes(end.getUTCMinutes() + etOffset);
-  return { start: start, end: end };
+// v2.0.6: tz-aware dayBounds shim (delegates to salonTz.dayBoundsTz)
+function dayBounds(dateStr, salon_id) {
+  if (!salon_id) throw new Error('dayBounds: salon_id required (v2.0.6 tz-aware)');
+  return dayBoundsTz(dateStr, salon_id);
 }
 
-// PROTECTED C62: same helper as appointments.js — UTC → salon-local no-Z string
-function toSalonLocal(d) {
+// PROTECTED C62 (v2.0.6 tz-aware): UTC → salon-local no-Z string for frontend.
+function toSalonLocal(d, salon_id) {
   if (!d) return d;
-  var fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  if (!salon_id) throw new Error('toSalonLocal: salon_id required (v2.0.6 tz-aware)');
+  var tz = getSalonTz(salon_id);
+  var fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   var p = {}; fmt.formatToParts(d).forEach(function(x) { p[x.type] = x.value; });
   var hh = p.hour === '24' ? '00' : p.hour;
   return p.year + '-' + p.month + '-' + p.day + 'T' + hh + ':' + p.minute + ':' + p.second;
@@ -59,8 +50,8 @@ function toSalonLocal(d) {
 router.get('/', async function(req, res, next) {
   try {
     var salonId = req.salon_id;
-    var today = todayStr();
-    var bounds = dayBounds(today);
+    var today = todayStr(salonId);
+    var bounds = dayBounds(today, salonId);
 
     // Fire ALL queries in parallel — this is the key performance win.
     // Instead of 14 sequential round trips from frontend → server → DB,
@@ -272,7 +263,7 @@ router.get('/', async function(req, res, next) {
       settings: settings,
       serviceLines: serviceLines.map(function(sl) {
         var obj = Object.assign({}, sl);
-        obj.starts_at = toSalonLocal(sl.starts_at); // C62: timezone-naive for frontend
+        obj.starts_at = toSalonLocal(sl.starts_at, salonId); // C62 (v2.0.6): tz-naive in salon tz
         if (sl.appointment) {
           obj.bookingId = sl.appointment.booking_group_id || null;
           obj.client_id = sl.appointment.client_id || null;

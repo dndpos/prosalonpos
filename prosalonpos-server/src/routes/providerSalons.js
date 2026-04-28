@@ -8,6 +8,11 @@ import prisma, { isSQLite } from '../config/database.js';
 import { hashPin, pinSha256 } from '../config/auth.js';
 import { requireOwner } from '../middleware/providerAuth.js';
 import { getIO } from '../utils/emit.js';
+import { setSalonTz } from '../utils/salonTz.js';
+
+// v2.0.6: Allowed timezones for salon creation. Provider admin picker offers
+// these three; any other value rejected (whitelist prevents typos like 'EST').
+var ALLOWED_TIMEZONES = ['America/New_York', 'America/Chicago', 'America/Los_Angeles'];
 
 // SQLite stores JSON as strings
 function toDb(val) {
@@ -40,6 +45,7 @@ function formatProviderSalon(s) {
     license_key: s.license_key,
     processing_rate: s.processing_rate,
     monthly_software_fee_cents: s.monthly_software_fee_cents,
+    sms_rate_cents: s.sms_rate_cents != null ? s.sms_rate_cents : 2, // v2.1.5
     signup_date: s.signup_date,
     trial_end_date: s.trial_end_date,
     features_enabled: fromDb(s.features_enabled),
@@ -199,6 +205,13 @@ router.post('/salons', async function(req, res, next) {
     var ownerPinHash = hashPin(ownerPin);
     var ownerPinSha = pinSha256(ownerPin);
 
+    // v2.0.6: Salon timezone — picker on provider admin offers ET/CT/PT.
+    // Reject anything else so we don't poison the cache with typos.
+    var tzInput = d.timezone || 'America/New_York';
+    if (ALLOWED_TIMEZONES.indexOf(tzInput) === -1) {
+      return res.status(400).json({ error: 'Invalid timezone. Must be one of: ' + ALLOWED_TIMEZONES.join(', ') });
+    }
+
     // Use a transaction to create Salon + SalonSettings + owner Staff atomically
     var result = await prisma.$transaction(async function(tx) {
       var salon = await tx.salon.create({
@@ -223,6 +236,7 @@ router.post('/salons', async function(req, res, next) {
           owner_pin_hash: ownerPinHash,
           owner_pin_sha256: ownerPinSha,
           owner_pin_plain: ownerPin,
+          timezone: tzInput,
         }
       });
 
@@ -269,8 +283,43 @@ router.post('/salons', async function(req, res, next) {
         }
       });
 
+      // v2.1.8: seed the 3 default SMS templates so every new salon has them
+      // editable in Owner → Messaging from day one. Same bodies as the
+      // DEFAULT_TEMPLATES fallback in autoMessaging.js — keeps each at 1 segment.
+      await tx.messageTemplate.createMany({
+        data: [
+          {
+            salon_id: salon.id,
+            name: 'Appointment Reminder',
+            type: 'reminder',
+            channel: 'sms',
+            body: 'Hi {client_name}, reminder of your appointment with {technician} at {salon_name} on {date} at {time}. Reply STOP to opt out.',
+            active: true,
+          },
+          {
+            salon_id: salon.id,
+            name: 'Booking Confirmation',
+            type: 'booking_confirm',
+            channel: 'sms',
+            body: 'Hi {client_name}! Your appointment is booked with {technician} at {salon_name} for {date} at {time}. See you soon! Reply STOP to opt out.',
+            active: true,
+          },
+          {
+            salon_id: salon.id,
+            name: 'Payment Receipt',
+            type: 'receipt',
+            channel: 'sms',
+            body: 'Thanks {client_name}! We received your payment of {total} at {salon_name}. See you again soon. Reply STOP to opt out.',
+            active: true,
+          },
+        ],
+      });
+
       return salon;
     });
+
+    // v2.0.6: Refresh tz cache so subsequent requests for this salon get the right tz
+    setSalonTz(result.id, result.timezone || 'America/New_York');
 
     await addAudit(req, 'salon_created', 'Created salon account: ' + result.name + ' (code: ' + salonCode + ')', result.id);
 
@@ -292,7 +341,14 @@ router.put('/salons/:id', async function(req, res, next) {
       'owner_name', 'owner_phone', 'owner_email',
       'status', 'plan_tier', 'station_count', 'salon_code',
       'processing_rate', 'monthly_software_fee_cents',
-      'trial_end_date', 'features_enabled'];
+      'trial_end_date', 'features_enabled',
+      'timezone', // v2.0.6
+      'sms_rate_cents']; // v2.1.5
+
+    // v2.0.6: validate timezone if provided
+    if (d.timezone !== undefined && ALLOWED_TIMEZONES.indexOf(d.timezone) === -1) {
+      return res.status(400).json({ error: 'Invalid timezone. Must be one of: ' + ALLOWED_TIMEZONES.join(', ') });
+    }
 
     fields.forEach(function(f) {
       if (d[f] !== undefined) updateData[f] = f === 'features_enabled' ? toDb(d[f]) : d[f];
@@ -304,6 +360,11 @@ router.put('/salons/:id', async function(req, res, next) {
       where: { id: req.params.id },
       data: updateData
     });
+
+    // v2.0.6: Refresh tz cache if timezone changed
+    if (d.timezone !== undefined) {
+      setSalonTz(salon.id, salon.timezone || 'America/New_York');
+    }
 
     await addAudit(req, 'salon_updated', 'Updated salon details: ' + salon.name, salon.id);
 

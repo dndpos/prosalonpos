@@ -688,7 +688,7 @@ async function main() {
   var providerOwner = await prisma.providerOwner.create({
     data: {
       id: 'provider-owner-1',
-      name: 'Andy Tran',
+      name: 'Alex Tran',
       email: 'andy@prosalonpos.com',
       pin_hash: hashPin('0000'),
     }
@@ -834,10 +834,10 @@ async function main() {
   // ════════════════════════════════════════════
   var noteData = [
     { salon_id: salon.id,   agent_id: 'agent-1',          agent_name: 'Jessica Rivera', content: 'Owner called about commission setup. Walked her through flat rate vs tiered. She wants flat 40% for now.', created_at: new Date('2026-03-27T11:15:00Z') },
-    { salon_id: salon.id,   agent_id: 'provider-owner-1', agent_name: 'Andy Tran',      content: 'Enabled payroll module. Owner confirmed she wants check printing too — enabled provider toggle.', created_at: new Date('2026-03-28T14:30:00Z') },
+    { salon_id: salon.id,   agent_id: 'provider-owner-1', agent_name: 'Alex Tran',      content: 'Enabled payroll module. Owner confirmed she wants check printing too — enabled provider toggle.', created_at: new Date('2026-03-28T14:30:00Z') },
     { salon_id: 'salon-02', agent_id: 'agent-2',          agent_name: 'Marcus Chen',    content: 'Helped owner set up gift cards. She wants to sell $25, $50, $100 denominations. All configured.', created_at: new Date('2026-03-20T13:00:00Z') },
     { salon_id: 'salon-03', agent_id: 'agent-1',          agent_name: 'Jessica Rivera', content: 'New premium trial started. Owner wants full demo of all features. Scheduled training call for next week.', created_at: new Date('2026-03-01T09:30:00Z') },
-    { salon_id: 'salon-04', agent_id: 'provider-owner-1', agent_name: 'Andy Tran',      content: 'Owner not responding to calls. 2 months overdue. Suspended account pending payment.', created_at: new Date('2026-03-15T08:00:00Z') },
+    { salon_id: 'salon-04', agent_id: 'provider-owner-1', agent_name: 'Alex Tran',      content: 'Owner not responding to calls. 2 months overdue. Suspended account pending payment.', created_at: new Date('2026-03-15T08:00:00Z') },
   ];
   for (var ni = 0; ni < noteData.length; ni++) {
     await prisma.providerSalonNote.create({ data: noteData[ni] });
@@ -848,15 +848,15 @@ async function main() {
   // PROVIDER AUDIT LOG
   // ════════════════════════════════════════════
   var auditData = [
-    { actor_id: 'provider-owner-1', actor_name: 'Andy Tran',       action: 'feature_toggled', detail: 'Enabled "Payroll" for Luxe Hair Studio',                salon_id: salon.id,   created_at: new Date('2026-03-28T14:30:00Z') },
+    { actor_id: 'provider-owner-1', actor_name: 'Alex Tran',       action: 'feature_toggled', detail: 'Enabled "Payroll" for Luxe Hair Studio',                salon_id: salon.id,   created_at: new Date('2026-03-28T14:30:00Z') },
     { actor_id: 'agent-1',          actor_name: 'Jessica Rivera',  action: 'note_added',      detail: 'Added support note for Luxe Hair Studio',               salon_id: salon.id,   created_at: new Date('2026-03-27T11:15:00Z') },
     { actor_id: 'agent-2',          actor_name: 'Marcus Chen',     action: 'feature_toggled', detail: 'Enabled "Online Booking" for Bella Hair Studio',         salon_id: 'salon-02', created_at: new Date('2026-03-26T16:45:00Z') },
-    { actor_id: 'provider-owner-1', actor_name: 'Andy Tran',       action: 'salon_created',   detail: 'Created salon account: Zen Day Spa (Premium trial)',     salon_id: 'salon-03', created_at: new Date('2026-03-01T09:00:00Z') },
+    { actor_id: 'provider-owner-1', actor_name: 'Alex Tran',       action: 'salon_created',   detail: 'Created salon account: Zen Day Spa (Premium trial)',     salon_id: 'salon-03', created_at: new Date('2026-03-01T09:00:00Z') },
     { actor_id: 'agent-1',          actor_name: 'Jessica Rivera',  action: 'salon_created',   detail: 'Created salon account: Luxe Hair Studio',               salon_id: salon.id,   created_at: new Date('2025-06-15T10:30:00Z') },
-    { actor_id: 'provider-owner-1', actor_name: 'Andy Tran',       action: 'agent_created',   detail: 'Created agent: Jessica Rivera (Sales)',                  salon_id: null,       created_at: new Date('2025-11-15T10:00:00Z') },
-    { actor_id: 'provider-owner-1', actor_name: 'Andy Tran',       action: 'salon_suspended', detail: 'Suspended Classic Cuts Barbershop — 2 months overdue',   salon_id: 'salon-04', created_at: new Date('2026-03-15T08:00:00Z') },
+    { actor_id: 'provider-owner-1', actor_name: 'Alex Tran',       action: 'agent_created',   detail: 'Created agent: Jessica Rivera (Sales)',                  salon_id: null,       created_at: new Date('2025-11-15T10:00:00Z') },
+    { actor_id: 'provider-owner-1', actor_name: 'Alex Tran',       action: 'salon_suspended', detail: 'Suspended Classic Cuts Barbershop — 2 months overdue',   salon_id: 'salon-04', created_at: new Date('2026-03-15T08:00:00Z') },
     { actor_id: 'agent-2',          actor_name: 'Marcus Chen',     action: 'note_added',      detail: 'Added support note for Bella Hair Studio',              salon_id: 'salon-02', created_at: new Date('2026-03-20T13:00:00Z') },
-    { actor_id: 'provider-owner-1', actor_name: 'Andy Tran',       action: 'agent_created',   detail: 'Created agent: Marcus Chen (Support)',                   salon_id: null,       created_at: new Date('2026-01-08T14:30:00Z') },
+    { actor_id: 'provider-owner-1', actor_name: 'Alex Tran',       action: 'agent_created',   detail: 'Created agent: Marcus Chen (Support)',                   salon_id: null,       created_at: new Date('2026-01-08T14:30:00Z') },
     { actor_id: 'agent-1',          actor_name: 'Jessica Rivera',  action: 'feature_toggled', detail: 'Enabled "Commission Tiers" for Zen Day Spa',            salon_id: 'salon-03', created_at: new Date('2026-03-05T10:00:00Z') },
   ];
   for (var ai = 0; ai < auditData.length; ai++) {
